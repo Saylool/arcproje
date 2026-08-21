@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import { ArcPayment } from "@/components/ArcPayment";
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
 import { DebtSummaryView } from "@/components/DebtSummary";
 import { ParticipantAssignment } from "@/components/ParticipantAssignment";
@@ -24,7 +25,7 @@ import {
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
 
 /** Fiş düzenleme, kişi atama, atama özeti ve pay/borç ekranı. */
-type FlowScreen = "receipt" | "participants" | "summary" | "debts";
+type FlowScreen = "receipt" | "participants" | "summary" | "debts" | "payment";
 
 const SCREEN_HEADINGS: Record<FlowScreen, { title: string; description: string }> = {
   receipt: {
@@ -46,6 +47,11 @@ const SCREEN_HEADINGS: Record<FlowScreen, { title: string; description: string }
     title: "Payları kontrol et",
     description:
       "Herkesin payı ve fişi ödeyene olan borcu aşağıda. Tutarlar kuruşuna kadar dağıtıldı.",
+  },
+  payment: {
+    title: "Arc Testnet ile öde",
+    description:
+      "Borcu test USDC ile kendi tarayıcı cüzdanından gönder. Tutarlar test ağına aittir.",
   },
 };
 
@@ -247,7 +253,7 @@ export function ReceiptFlow() {
   const currentStepId: FlowStepId =
     screen === "receipt"
       ? "receipt"
-      : screen === "debts"
+      : screen === "debts" || screen === "payment"
         ? "payment"
         : "participants";
 
@@ -366,6 +372,16 @@ export function ReceiptFlow() {
           result={debtResult}
           onEditAssignments={() => setScreen("participants")}
           onEditReceipt={() => setScreen("receipt")}
+          onPay={() => setScreen("payment")}
+        />
+      )}
+
+      {screen === "payment" && receipt !== null && debtResult !== null && (
+        <ArcPayment
+          receipt={receipt}
+          participants={assignment.participants}
+          result={debtResult}
+          onBack={() => setScreen("debts")}
         />
       )}
 
@@ -374,8 +390,10 @@ export function ReceiptFlow() {
           ? "Fiş analiz ediliyor."
           : status === "error" && errorMessage !== null
             ? errorMessage
-            : screen === "debts"
-              ? "Paylar hesaplandı."
+            : screen === "payment"
+              ? "Arc Testnet ödeme adımındasın."
+              : screen === "debts"
+                ? "Paylar hesaplandı."
               : screen === "summary"
                 ? "Atamalar hazır. Özet gösteriliyor."
                 : screen === "participants"

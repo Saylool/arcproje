@@ -1,0 +1,344 @@
+import {
+  normalizeWalletAddress,
+  walletAddressesEqual,
+} from "./address";
+import { MICRO_USDC_PER_USDC } from "./conversion";
+import {
+  ARC_TESTNET_APP_KIT_CHAIN,
+  ARC_TESTNET_CHAIN_ID,
+  buildArcExplorerTxUrl,
+  isArcTestnet,
+  isValidTransactionHash,
+  parseChainId,
+} from "./network";
+import { withProvider, type Eip1193Provider } from "./wallet";
+
+/**
+ * App Kit Send akışının güvenlik sınırı.
+ *
+ * Bu modül React state'ine güvenmez. Kullanıcının incelediği ödeme değişmez bir
+ * snapshot olarak gelir; her alan burada yeniden doğrulanır ve App Kit
+ * çağrılmadan hemen önce provider'a `eth_accounts` ve `eth_chainId` sorulur.
+ * Hesap veya ağ değişmişse App Kit hiç çağrılmaz.
+ *
+ * App Kit ve adaptör dinamik import edilir: yalnızca tarayıcıda, yalnızca
+ * doğrulama geçtikten sonra yüklenir. Ham SDK/provider hataları dışarı verilmez.
+ */
+
+const BIG_ZERO = BigInt(0);
+
+/** Kullanıcının onayladığı ödemenin değişmez kaydı. */
+export type ArcPaymentSnapshot = Readonly<{
+  /** Borcun kimliği: "<borçlu>-><alacaklı>". */
+  debtKey: string;
+  debtorParticipantId: string;
+  recipientParticipantId: string;
+  /** Checksum'lı gönderen adresi. */
+  debtorAddress: string;
+  /** Checksum'lı alıcı adresi. */
+  recipientAddress: string;
+  /** TRY minor unit cinsinden borç. */
+  tryMinor: number;
+  /** Kurun tam rasyonel gösterimi (BigInt metin olarak). */
+  rateNumerator: string;
+  rateDenominator: string;
+  /** Gönderilecek mikro USDC (BigInt metin olarak). */
+  microUsdc: string;
+  /** App Kit `amount` alanı: en fazla 6 ondalıklı ondalık metin. */
+  amount: string;
+  /** Kullanıcıya gösterilen tutar. */
+  displayAmount: string;
+  chainId: number;
+}>;
+
+export type ArcSendErrorCode =
+  | "noProvider"
+  | "rejected"
+  | "noAccount"
+  | "accountChanged"
+  | "networkChanged"
+  | "invalidRecipient"
+  | "invalidSender"
+  | "selfTransfer"
+  | "invalidAmount"
+  | "insufficientFunds"
+  | "estimateFailed"
+  | "sendFailed";
+
+const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
+  noProvider: "Cüzdan bağlantısı bulunamadı. Cüzdanı yeniden bağla.",
+  rejected: "İşlem cüzdanda reddedildi.",
+  noAccount: "Cüzdanda açık bir hesap yok. Cüzdanı açıp yeniden bağla.",
+  accountChanged:
+    "Cüzdandaki aktif hesap, onayladığın ödemenin göndericisi değil. Doğru hesaba geçip tekrar dene.",
+  networkChanged:
+    "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
+  invalidRecipient: "Alıcı cüzdan adresi geçerli değil.",
+  invalidSender: "Gönderen cüzdan adresi geçerli değil.",
+  selfTransfer:
+    "Gönderen ve alıcı aynı cüzdan adresi. Kendine ödeme yapılamaz.",
+  invalidAmount: "Gönderilecek tutar geçerli değil.",
+  insufficientFunds:
+    "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
+  estimateFailed:
+    "İşlem tahmini alınamadı. Ağ veya tutarı kontrol edip tekrar dene.",
+  sendFailed: "İşlem gönderilemedi. Lütfen tekrar dene.",
+};
+
+export function describeArcSendError(code: ArcSendErrorCode): string {
+  return ARC_SEND_MESSAGES[code];
+}
+
+export type ArcSendResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; code: ArcSendErrorCode };
+
+export type ArcEstimate = { summary: string | null };
+
+export type ArcSendSuccess = {
+  txHash: string;
+  /** Yerelde kurulan, doğrulanmış ArcScan bağlantısı. */
+  explorerUrl: string | null;
+  state: string | null;
+  /** Sonucu, kullanıcının onayladığı ödemeye bağlar. */
+  snapshot: ArcPaymentSnapshot;
+  completedAt: string;
+};
+
+/** App Kit `amount` biçimi: üstel gösterim, işaret ve boşluk kabul edilmez. */
+const AMOUNT_PATTERN = /^(0|[1-9][0-9]*)(?:\.([0-9]{1,6}))?$/;
+
+/** Ondalık metni mikro USDC'ye çevirir; float kullanılmaz. */
+export function amountToMicroUsdc(amount: string): bigint | null {
+  const match = AMOUNT_PATTERN.exec(amount);
+  if (match === null) {
+    return null;
+  }
+  const whole = BigInt(match[1]);
+  const fraction = (match[2] ?? "").padEnd(6, "0");
+  return whole * MICRO_USDC_PER_USDC + BigInt(fraction);
+}
+
+/**
+ * Snapshot'ın her alanını yeniden doğrular. React state'inde ne olduğuna
+ * bakılmaksızın bu kontroller geçilmeden App Kit çağrılmaz.
+ */
+export function validatePaymentSnapshot(
+  snapshot: ArcPaymentSnapshot,
+): ArcSendErrorCode | null {
+  const recipient = normalizeWalletAddress(snapshot.recipientAddress);
+  if (recipient === null) {
+    return "invalidRecipient";
+  }
+  const debtor = normalizeWalletAddress(snapshot.debtorAddress);
+  if (debtor === null) {
+    return "invalidSender";
+  }
+  // Farklı kişi ID'lerine ait olsalar bile aynı adrese ödeme yapılamaz.
+  if (walletAddressesEqual(debtor, recipient)) {
+    return "selfTransfer";
+  }
+  if (!isArcTestnet(snapshot.chainId)) {
+    return "networkChanged";
+  }
+
+  const micro = amountToMicroUsdc(snapshot.amount);
+  if (micro === null || micro <= BIG_ZERO) {
+    return "invalidAmount";
+  }
+  // Gösterilen tutar ile hesaplanan mikro birim birebir tutmalı.
+  let declared: bigint;
+  try {
+    declared = BigInt(snapshot.microUsdc);
+  } catch {
+    return "invalidAmount";
+  }
+  if (declared !== micro || declared <= BIG_ZERO) {
+    return "invalidAmount";
+  }
+  if (!Number.isSafeInteger(snapshot.tryMinor) || snapshot.tryMinor <= 0) {
+    return "invalidAmount";
+  }
+  return null;
+}
+
+/** Provider'a doğrudan sorarak hesabı ve ağı App Kit'ten hemen önce doğrular. */
+async function preflight(
+  provider: Eip1193Provider,
+  snapshot: ArcPaymentSnapshot,
+): Promise<ArcSendErrorCode | null> {
+  const accountsResponse = await provider.request({ method: "eth_accounts" });
+  if (!Array.isArray(accountsResponse)) {
+    return "noAccount";
+  }
+  const activeAccount = accountsResponse.find(
+    (entry): entry is string =>
+      typeof entry === "string" && normalizeWalletAddress(entry) !== null,
+  );
+  if (activeAccount === undefined) {
+    return "noAccount";
+  }
+  if (!walletAddressesEqual(activeAccount, snapshot.debtorAddress)) {
+    return "accountChanged";
+  }
+
+  const chainId = parseChainId(await provider.request({ method: "eth_chainId" }));
+  if (chainId === null || !isArcTestnet(chainId)) {
+    return "networkChanged";
+  }
+  return null;
+}
+
+/** App Kit yalnızca burada, doğrulama ve preflight geçtikten sonra yüklenir. */
+async function buildSendParams(
+  provider: Eip1193Provider,
+  snapshot: ArcPaymentSnapshot,
+) {
+  const [{ AppKit }, { createViemAdapterFromProvider }] = await Promise.all([
+    import("@circle-fin/app-kit"),
+    import("@circle-fin/adapter-viem-v2"),
+  ]);
+
+  const adapter = await createViemAdapterFromProvider({
+    provider: provider as Parameters<
+      typeof createViemAdapterFromProvider
+    >[0]["provider"],
+  });
+  const kit = new AppKit();
+
+  const params = {
+    from: { adapter, chain: ARC_TESTNET_APP_KIT_CHAIN },
+    to: snapshot.recipientAddress,
+    amount: snapshot.amount,
+    token: "USDC",
+  } as Parameters<typeof kit.send>[0];
+
+  return { kit, params };
+}
+
+function readString(source: unknown, key: string): string | null {
+  if (typeof source === "object" && source !== null && key in source) {
+    const value = (source as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim() !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function classifyError(
+  error: unknown,
+  fallback: ArcSendErrorCode,
+): ArcSendErrorCode {
+  if (typeof error === "object" && error !== null && "code" in error) {
+    if ((error as { code: unknown }).code === 4001) {
+      return "rejected";
+    }
+  }
+  const message =
+    error instanceof Error
+      ? error.message.toLowerCase()
+      : String(error).toLowerCase();
+
+  if (message.includes("user rejected") || message.includes("user denied")) {
+    return "rejected";
+  }
+  if (message.includes("insufficient")) {
+    return "insufficientFunds";
+  }
+  // Sınıflandırılamayan hata, çağıran adımın kendi koduyla raporlanır
+  // (tahmin -> estimateFailed, gönderim -> sendFailed).
+  return fallback;
+}
+
+type BoundaryOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; code: ArcSendErrorCode };
+
+/**
+ * Doğrulama + preflight + işlem. Preflight her çağrıda tekrarlanır; tahmin
+ * daha önce başarılı olsa bile gönderimden hemen önce yeniden çalışır.
+ */
+async function runGuarded<T>(
+  walletUuid: string,
+  snapshot: ArcPaymentSnapshot,
+  fallbackCode: ArcSendErrorCode,
+  action: (
+    context: { kit: Awaited<ReturnType<typeof buildSendParams>>["kit"]; params: Awaited<ReturnType<typeof buildSendParams>>["params"] },
+  ) => Promise<T>,
+): Promise<BoundaryOutcome<T>> {
+  const invalid = validatePaymentSnapshot(snapshot);
+  if (invalid !== null) {
+    // App Kit hiç import edilmez.
+    return { ok: false, code: invalid };
+  }
+
+  let guardCode: ArcSendErrorCode | null = null;
+  let actionCode: ArcSendErrorCode | null = null;
+
+  const outcome = await withProvider(walletUuid, async (provider) => {
+    guardCode = await preflight(provider, snapshot);
+    if (guardCode !== null) {
+      throw new Error("preflight");
+    }
+    const { kit, params } = await buildSendParams(provider, snapshot);
+    try {
+      return await action({ kit, params });
+    } catch (error) {
+      actionCode = classifyError(error, fallbackCode);
+      throw error;
+    }
+  });
+
+  if (outcome.ok) {
+    return { ok: true, value: outcome.value };
+  }
+  if (guardCode !== null) {
+    return { ok: false, code: guardCode };
+  }
+  if (outcome.code === "noProvider") {
+    return { ok: false, code: "noProvider" };
+  }
+  if (actionCode !== null) {
+    return { ok: false, code: actionCode };
+  }
+  return { ok: false, code: fallbackCode };
+}
+
+export async function estimateArcSend(
+  walletUuid: string,
+  snapshot: ArcPaymentSnapshot,
+): Promise<ArcSendResult<ArcEstimate>> {
+  return runGuarded(walletUuid, snapshot, "estimateFailed", async ({ kit, params }) => {
+    const estimate = await kit.estimateSend(params);
+    return {
+      summary:
+        readString(estimate, "totalFee") ??
+        readString(estimate, "gasFee") ??
+        readString(estimate, "estimatedFee"),
+    };
+  });
+}
+
+export async function sendArcUsdc(
+  walletUuid: string,
+  snapshot: ArcPaymentSnapshot,
+): Promise<ArcSendResult<ArcSendSuccess>> {
+  return runGuarded(walletUuid, snapshot, "sendFailed", async ({ kit, params }) => {
+    const result = await kit.send(params);
+    const txHash = readString(result, "txHash");
+    if (txHash === null || !isValidTransactionHash(txHash)) {
+      throw new Error("gecersiz islem hash");
+    }
+    return {
+      txHash,
+      // Bağlantı SDK'nın döndürdüğü URL'den değil, doğrulanmış hash'ten kurulur.
+      explorerUrl: buildArcExplorerTxUrl(txHash),
+      state: readString(result, "state"),
+      snapshot,
+      completedAt: new Date().toISOString(),
+    };
+  });
+}
+
+export { ARC_TESTNET_CHAIN_ID };

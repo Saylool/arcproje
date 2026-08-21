@@ -10,6 +10,7 @@ type DebtSummaryProps = {
   result: DebtCalculationSuccess;
   onEditAssignments: () => void;
   onEditReceipt: () => void;
+  onPay: () => void;
 };
 
 const INCLUDED_LABEL = "— fiyata dahil";
@@ -20,6 +21,7 @@ export function DebtSummaryView({
   result,
   onEditAssignments,
   onEditReceipt,
+  onPay,
 }: DebtSummaryProps) {
   const nameOf = (participantId: string) =>
     participants.find((participant) => participant.id === participantId)?.name ??
@@ -183,6 +185,16 @@ export function DebtSummaryView({
 
       {/* --- Gezinme --- */}
       <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+        {result.debts.length > 0 && (
+          <button
+            type="button"
+            onClick={onPay}
+            className="self-start rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+          >
+            Arc Testnet ile öde
+          </button>
+        )}
+
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -201,8 +213,8 @@ export function DebtSummaryView({
         </div>
 
         <p className="text-xs leading-relaxed text-slate-400">
-          Arc Testnet üzerinden USDC ile ödeme sonraki aşamada eklenecek. Şu an
-          yalnızca paylar hesaplanıyor.
+          Ödeme Arc Testnet üzerinde test USDC ile yapılır; gerçek bir para
+          transferi değildir.
         </p>
       </div>
     </section>
