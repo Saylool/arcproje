@@ -16,9 +16,15 @@ const ACCEPT_ATTRIBUTE = ACCEPTED_MIME_TYPES.join(",");
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 type SelectedReceipt = {
-  name: string;
-  size: number;
+  file: File;
   previewUrl: string;
+};
+
+type ReceiptUploaderProps = {
+  /** Seçilen gerçek File nesnesini üst akışa iletir. */
+  onFileChange: (file: File | null) => void;
+  /** Analiz sürerken seçimin değiştirilmesini engeller. */
+  disabled?: boolean;
 };
 
 function formatFileSize(bytes: number): string {
@@ -68,7 +74,10 @@ function getValidationError(file: File): string | null {
   return null;
 }
 
-export function ReceiptUploader() {
+export function ReceiptUploader({
+  onFileChange,
+  disabled = false,
+}: ReceiptUploaderProps) {
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
@@ -108,9 +117,10 @@ export function ReceiptUploader() {
       previewUrlRef.current = previewUrl;
 
       setError(null);
-      setReceipt({ name: file.name, size: file.size, previewUrl });
+      setReceipt({ file, previewUrl });
+      onFileChange(file);
     },
-    [revokePreviewUrl],
+    [onFileChange, revokePreviewUrl],
   );
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -120,6 +130,9 @@ export function ReceiptUploader() {
   };
 
   const openFilePicker = () => {
+    if (disabled) {
+      return;
+    }
     inputRef.current?.click();
   };
 
@@ -127,11 +140,15 @@ export function ReceiptUploader() {
     revokePreviewUrl();
     setReceipt(null);
     setError(null);
+    onFileChange(null);
     // Klavye kullanıcısı yükleme alanına geri dönsün.
     inputRef.current?.focus();
   };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled) {
+      return;
+    }
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setIsDragging(true);
@@ -146,6 +163,9 @@ export function ReceiptUploader() {
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
+    if (disabled) {
+      return;
+    }
     event.preventDefault();
     setIsDragging(false);
     selectFile(event.dataTransfer.files?.[0]);
@@ -176,6 +196,7 @@ export function ReceiptUploader() {
           aria-label="Fiş görseli seç"
           aria-describedby={describedByIds.join(" ")}
           tabIndex={receipt ? -1 : 0}
+          disabled={disabled}
           onChange={handleInputChange}
         />
 
@@ -186,7 +207,7 @@ export function ReceiptUploader() {
                 {/* eslint-disable-next-line @next/next/no-img-element -- yerel object URL önizlemesi; next/image bir blob için değer katmıyor */}
                 <img
                   src={receipt.previewUrl}
-                  alt={`Seçilen fiş görseli: ${receipt.name}`}
+                  alt={`Seçilen fiş görseli: ${receipt.file.name}`}
                   className="h-full w-full object-cover"
                 />
               </div>
@@ -195,12 +216,12 @@ export function ReceiptUploader() {
                 <div className="min-w-0">
                   <p
                     className="truncate text-sm font-semibold text-slate-900"
-                    title={receipt.name}
+                    title={receipt.file.name}
                   >
-                    {receipt.name}
+                    {receipt.file.name}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {formatFileSize(receipt.size)}
+                    {formatFileSize(receipt.file.size)}
                   </p>
                 </div>
 
@@ -208,28 +229,22 @@ export function ReceiptUploader() {
                   <button
                     type="button"
                     onClick={openFilePicker}
-                    className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    disabled={disabled}
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                   >
                     Değiştir
                   </button>
                   <button
                     type="button"
                     onClick={removeReceipt}
-                    className="rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    disabled={disabled}
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                   >
                     Kaldır
                   </button>
                 </div>
               </div>
             </div>
-
-            <p className="flex items-start gap-2 rounded-2xl bg-violet-50 px-3 py-2.5 text-xs leading-relaxed text-violet-800 sm:text-sm">
-              <CheckIcon />
-              <span>
-                Fişin seçildi. Fişteki ürünlerin okunması bir sonraki aşamada
-                başlayacak.
-              </span>
-            </p>
           </div>
         ) : (
           <label
@@ -282,7 +297,7 @@ export function ReceiptUploader() {
         {error
           ? error
           : receipt
-            ? `${receipt.name} seçildi. Fiş yüklemeye hazır.`
+            ? `${receipt.file.name} seçildi. Fiş yüklemeye hazır.`
             : ""}
       </p>
     </section>
@@ -305,25 +320,6 @@ function UploadIcon() {
       <path d="M12 16V4" />
       <path d="m7 9 5-5 5 5" />
       <path d="M20 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="mt-0.5 shrink-0"
-    >
-      <path d="M20 6 9 17l-5-5" />
     </svg>
   );
 }

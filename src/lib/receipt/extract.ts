@@ -1,0 +1,155 @@
+import OpenAI from "openai";
+import { zodTextFormat } from "openai/helpers/zod";
+
+import {
+  ReceiptExtractionSchema,
+  ReceiptSchema,
+  createItemId,
+  normalizeCurrency,
+  type Receipt,
+} from "./schema";
+
+const DEFAULT_RECEIPT_MODEL = "gpt-5.6-luna";
+
+const SYSTEM_PROMPT = `You extract structured data from a photograph of a retail or restaurant receipt.
+
+Hard rules:
+- Only extract what is clearly visible in the image. Never invent a merchant, product, or amount.
+- Receipts may be in Turkish or any other language. Handle both.
+- Decimal separators differ by locale: "1.234,56" and "1,234.56" both mean one thousand two hundred thirty four point five six. Read each receipt's own convention correctly.
+- Convert every monetary amount to an INTEGER in the currency's minor unit (1 TRY = 100 kurus, 1 USD = 100 cents). "12,50 TL" becomes 1250. Never emit a decimal number for money.
+- All monetary fields must be non-negative integers. A discount printed as "-50,00" is 5000 in discountMinor.
+
+items:
+- Include only purchased product or service lines.
+- Exclude subtotal ("ARA TOPLAM", "SUBTOTAL"), tax ("KDV", "VAT", "TAX"), service charge ("SERVIS", "SERVICE"), discount ("INDIRIM", "DISCOUNT"), grand total ("TOPLAM", "GENEL TOPLAM", "TOTAL"), payment and change lines ("NAKIT", "KREDI KARTI", "PARA USTU", "CASH", "CHANGE"), and loyalty or point lines.
+- Use the printed LINE TOTAL as the item price, not the unit price. If a line shows "2 x 45,00 = 90,00", the item total is 9000.
+
+Other fields:
+- totalMinor: the grand total PRINTED on the receipt. Do not recompute it from the items, even if the items do not add up.
+- taxMinor, serviceChargeMinor, discountMinor: use 0 when the receipt does not show that line.
+- currency: the ISO 4217 code (TRY, USD, EUR, ...). "TL" and the lira sign both mean TRY. Use "UNKNOWN" when it cannot be determined.
+- merchantName: the business name, or null when it is not legible.
+- warnings: short notes written in TURKISH about anything unreadable, ambiguous, or uncertain. Add a warning instead of guessing. Use an empty array when everything is clear.
+
+If the image is not a receipt or is too unreadable to extract line items, return an empty items array, zeros for the amounts, and explain why in warnings.`;
+
+const USER_PROMPT =
+  "Bu fiş görselindeki verileri çıkar. Yalnızca görselde açıkça görünen bilgileri kullan.";
+
+export function getReceiptModel(): string {
+  const configured = process.env.OPENAI_RECEIPT_MODEL?.trim();
+  return configured ? configured : DEFAULT_RECEIPT_MODEL;
+}
+
+/** API key yalnızca sunucuda okunur; istemciye hiçbir biçimde sızdırılmaz. */
+export function isReceiptAnalysisConfigured(): boolean {
+  return Boolean(process.env.OPENAI_API_KEY?.trim());
+}
+
+export type ExtractionFailureCode =
+  | "MODEL_REFUSED"
+  | "RECEIPT_NOT_READABLE"
+  | "INVALID_RECEIPT_DATA"
+  | "ANALYSIS_FAILED";
+
+export type ExtractionResult =
+  | { ok: true; receipt: Receipt }
+  | { ok: false; code: ExtractionFailureCode };
+
+function toLogMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "bilinmeyen hata";
+}
+
+export async function extractReceipt(
+  imageDataUrl: string,
+): Promise<ExtractionResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim();
+  if (!apiKey) {
+    // Çağıranın önceden kontrol etmesi beklenir; yine de istek yapmadan dön.
+    return { ok: false, code: "ANALYSIS_FAILED" };
+  }
+
+  const client = new OpenAI({ apiKey });
+
+  let response;
+  try {
+    response = await client.responses.parse({
+      model: getReceiptModel(),
+      store: false,
+      input: [
+        {
+          role: "system",
+          content: [{ type: "input_text", text: SYSTEM_PROMPT }],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: USER_PROMPT },
+            { type: "input_image", detail: "high", image_url: imageDataUrl },
+          ],
+        },
+      ],
+      text: { format: zodTextFormat(ReceiptExtractionSchema, "receipt") },
+    });
+  } catch (error) {
+    // Sağlayıcı hatasının ayrıntısı yalnızca sunucu logunda kalır.
+    console.error("[receipt-analyze] OpenAI isteği başarısız:", toLogMessage(error));
+    return { ok: false, code: "ANALYSIS_FAILED" };
+  }
+
+  for (const item of response.output) {
+    if (item.type !== "message") {
+      continue;
+    }
+    for (const part of item.content) {
+      if (part.type === "refusal") {
+        console.error("[receipt-analyze] Model isteği reddetti.");
+        return { ok: false, code: "MODEL_REFUSED" };
+      }
+    }
+  }
+
+  const parsed = response.output_parsed;
+  if (!parsed) {
+    console.error(
+      "[receipt-analyze] output_parsed boş döndü. status:",
+      response.status ?? "bilinmiyor",
+    );
+    return { ok: false, code: "ANALYSIS_FAILED" };
+  }
+
+  if (parsed.items.length === 0) {
+    console.error("[receipt-analyze] Model hiç ürün satırı çıkaramadı.");
+    return { ok: false, code: "RECEIPT_NOT_READABLE" };
+  }
+
+  const warnings = [...parsed.warnings];
+  if (parsed.totalMinor === 0) {
+    warnings.push("Fişteki genel toplam okunamadı; lütfen kontrol edip düzelt.");
+  }
+
+  // ID'ler modelden istenmez, burada güvenli biçimde eklenir.
+  const candidate = {
+    merchantName: parsed.merchantName,
+    currency: normalizeCurrency(parsed.currency),
+    items: parsed.items.map((item) => ({
+      id: createItemId(),
+      name: item.name,
+      totalMinor: item.totalMinor,
+    })),
+    taxMinor: parsed.taxMinor,
+    serviceChargeMinor: parsed.serviceChargeMinor,
+    discountMinor: parsed.discountMinor,
+    totalMinor: parsed.totalMinor,
+    warnings,
+  };
+
+  const validated = ReceiptSchema.safeParse(candidate);
+  if (!validated.success) {
+    console.error("[receipt-analyze] Model çıktısı veri sözleşmesine uymadı.");
+    return { ok: false, code: "INVALID_RECEIPT_DATA" };
+  }
+
+  return { ok: true, receipt: validated.data };
+}

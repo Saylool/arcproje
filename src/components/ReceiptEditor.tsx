@@ -1,0 +1,293 @@
+"use client";
+
+import { useId, useState } from "react";
+
+import {
+  checkTotals,
+  describeMoneyParseFailure,
+  formatMinorForDisplay,
+  formatMinorForInput,
+  parseMoneyToMinor,
+} from "@/lib/receipt/money";
+import {
+  UNKNOWN_CURRENCY,
+  createItemId,
+  type Receipt,
+  type ReceiptItem,
+} from "@/lib/receipt/schema";
+
+type ReceiptEditorProps = {
+  receipt: Receipt;
+  onChange: (receipt: Receipt) => void;
+};
+
+type MoneyInputProps = {
+  minor: number;
+  ariaLabel: string;
+  onValidChange: (minor: number) => void;
+  className?: string;
+};
+
+/**
+ * Para alanı. Kaynak değer minor unit'tir; kullanıcı `320,50` veya `320.50`
+ * yazabilir. Geçersiz girdi sessizce yuvarlanmaz: son geçerli değer korunur ve
+ * alanın altında açık bir hata gösterilir.
+ */
+function MoneyInput({
+  minor,
+  ariaLabel,
+  onValidChange,
+  className,
+}: MoneyInputProps) {
+  const errorId = useId();
+  const [text, setText] = useState(() => formatMinorForInput(minor));
+  const [error, setError] = useState<string | null>(null);
+
+  const handleChange = (value: string) => {
+    setText(value);
+
+    const result = parseMoneyToMinor(value);
+    if (result.ok) {
+      setError(null);
+      onValidChange(result.minor);
+      return;
+    }
+    setError(describeMoneyParseFailure(result.reason));
+  };
+
+  return (
+    <div className={className}>
+      <input
+        type="text"
+        inputMode="decimal"
+        value={text}
+        aria-label={ariaLabel}
+        aria-invalid={error === null ? undefined : true}
+        aria-describedby={error === null ? undefined : errorId}
+        onChange={(event) => handleChange(event.target.value)}
+        className={`w-full rounded-xl border bg-white px-3 py-2 text-right text-sm tabular-nums text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+          error === null
+            ? "border-slate-200 focus:border-violet-300"
+            : "border-red-300 bg-red-50/50"
+        }`}
+      />
+      {error !== null && (
+        <p id={errorId} className="mt-1 text-[11px] leading-snug text-red-600">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
+  const totals = checkTotals(receipt);
+  const currencyLabel =
+    receipt.currency === UNKNOWN_CURRENCY ? "belirlenemedi" : receipt.currency;
+
+  const updateItem = (
+    id: string,
+    patch: Partial<Pick<ReceiptItem, "name" | "totalMinor">>,
+  ) => {
+    onChange({
+      ...receipt,
+      items: receipt.items.map((item) =>
+        item.id === id ? { ...item, ...patch } : item,
+      ),
+    });
+  };
+
+  const removeItem = (id: string) => {
+    onChange({
+      ...receipt,
+      items: receipt.items.filter((item) => item.id !== id),
+    });
+  };
+
+  const addItem = () => {
+    onChange({
+      ...receipt,
+      items: [
+        ...receipt.items,
+        { id: createItemId(), name: "", totalMinor: 0 },
+      ],
+    });
+  };
+
+  return (
+    <section
+      aria-label="Fiş içeriği"
+      className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-card sm:p-5"
+    >
+      <header className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold tracking-tight text-slate-900">
+          {receipt.merchantName ?? "Satıcı adı okunamadı"}
+        </h2>
+        <p className="text-xs text-slate-500">
+          Para birimi: {currencyLabel} · Analiz sonucunu kontrol edip
+          düzeltebilirsin.
+        </p>
+      </header>
+
+      {receipt.warnings.length > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+          <p className="text-xs font-semibold text-amber-900">Analiz notları</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-amber-800">
+            {receipt.warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          Ürünler
+        </h3>
+
+        {receipt.items.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+            Ürün listesi boş. Aşağıdan ürün ekleyebilirsin.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {receipt.items.map((item, index) => (
+              <li
+                key={item.id}
+                className="flex flex-col gap-2 rounded-2xl border border-slate-200 p-2.5 sm:flex-row sm:items-start sm:gap-3"
+              >
+                <input
+                  type="text"
+                  value={item.name}
+                  placeholder="Ürün adı"
+                  aria-label={`${index + 1}. ürünün adı`}
+                  onChange={(event) =>
+                    updateItem(item.id, { name: event.target.value })
+                  }
+                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus:border-violet-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                />
+
+                <div className="flex items-start gap-2">
+                  <MoneyInput
+                    minor={item.totalMinor}
+                    ariaLabel={`${index + 1}. ürünün tutarı`}
+                    onValidChange={(minor) =>
+                      updateItem(item.id, { totalMinor: minor })
+                    }
+                    className="w-32 shrink-0"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    aria-label={`${index + 1}. ürünü sil`}
+                    className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  >
+                    Sil
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <button
+          type="button"
+          onClick={addItem}
+          className="self-start rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+        >
+          + Ürün ekle
+        </button>
+      </div>
+
+      <dl className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-sm text-slate-500">Ürünler toplamı</dt>
+          <dd className="text-sm tabular-nums text-slate-500">
+            {formatMinorForDisplay(totals.itemsSubtotalMinor, receipt.currency)}
+          </dd>
+        </div>
+
+        <SummaryRow
+          label="Vergi (KDV)"
+          minor={receipt.taxMinor}
+          onValidChange={(taxMinor) => onChange({ ...receipt, taxMinor })}
+        />
+        <SummaryRow
+          label="Servis ücreti"
+          minor={receipt.serviceChargeMinor}
+          onValidChange={(serviceChargeMinor) =>
+            onChange({ ...receipt, serviceChargeMinor })
+          }
+        />
+        <SummaryRow
+          label="İndirim"
+          minor={receipt.discountMinor}
+          onValidChange={(discountMinor) =>
+            onChange({ ...receipt, discountMinor })
+          }
+        />
+        <SummaryRow
+          label="Genel toplam"
+          minor={receipt.totalMinor}
+          emphasized
+          onValidChange={(totalMinor) => onChange({ ...receipt, totalMinor })}
+        />
+      </dl>
+
+      {!totals.matches && (
+        <p
+          role="status"
+          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+        >
+          Ürünler + vergi + servis - indirim{" "}
+          <strong className="font-semibold tabular-nums">
+            {formatMinorForDisplay(totals.expectedTotalMinor, receipt.currency)}
+          </strong>{" "}
+          ediyor ama fişteki genel toplam{" "}
+          <strong className="font-semibold tabular-nums">
+            {formatMinorForDisplay(totals.statedTotalMinor, receipt.currency)}
+          </strong>
+          . Değerleri senin onayın olmadan değiştirmiyoruz; kontrol edip
+          düzeltebilirsin.
+        </p>
+      )}
+
+      <p className="text-xs text-slate-400">
+        Kişilere dağıtma, borç hesaplama ve ödeme adımları sonraki aşamada
+        gelecek.
+      </p>
+    </section>
+  );
+}
+
+type SummaryRowProps = {
+  label: string;
+  minor: number;
+  emphasized?: boolean;
+  onValidChange: (minor: number) => void;
+};
+
+function SummaryRow({
+  label,
+  minor,
+  emphasized = false,
+  onValidChange,
+}: SummaryRowProps) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span
+        className={`pt-2 text-sm ${
+          emphasized ? "font-semibold text-slate-900" : "text-slate-600"
+        }`}
+      >
+        {label}
+      </span>
+      <MoneyInput
+        minor={minor}
+        ariaLabel={label}
+        onValidChange={onValidChange}
+        className="w-32 shrink-0"
+      />
+    </div>
+  );
+}

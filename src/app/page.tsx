@@ -1,5 +1,5 @@
 import { ProgressSteps } from "@/components/ProgressSteps";
-import { ReceiptUploader } from "@/components/ReceiptUploader";
+import { ReceiptFlow } from "@/components/ReceiptFlow";
 
 export default function Home() {
   return (
@@ -30,7 +30,7 @@ export default function Home() {
 
       <ProgressSteps />
 
-      <ReceiptUploader />
+      <ReceiptFlow />
     </main>
   );
 }
