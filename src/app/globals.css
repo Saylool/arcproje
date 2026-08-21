@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+@theme {
+  /* Uzak font bağımlılığı yok: yalnızca işletim sisteminde hazır bulunan yüzler. */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+
+  --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04),
+    0 16px 40px -24px rgb(15 23 42 / 0.24);
+}
+
+body {
+  min-height: 100dvh;
+  background-color: #ffffff;
+  background-image: radial-gradient(
+    52rem 26rem at 50% -14rem,
+    rgb(139 92 246 / 0.12),
+    rgb(139 92 246 / 0) 70%
+  );
+  background-repeat: no-repeat;
+  color: #0f172a;
+}
