@@ -9,6 +9,17 @@ import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
 
 const GENERIC_ERROR_MESSAGE = "Fiş analiz edilemedi. Lütfen tekrar dene.";
+const TIMEOUT_ERROR_MESSAGE =
+  "Analiz zaman aşımına uğradı. Lütfen tekrar dene.";
+const NETWORK_ERROR_MESSAGE =
+  "Sunucuya ulaşılamadı. Bağlantını kontrol edip tekrar dene.";
+
+/**
+ * Sunucu tarafındaki 30 saniyelik OpenAI timeout'undan birkaç saniye uzun.
+ * Böylece sunucu kendi kontrollü 504'ünü döndürebilirse istemci onu gösterir;
+ * istek tamamen takılırsa devreye bu sınır girer.
+ */
+const CLIENT_TIMEOUT_MS = 35_000;
 
 /** Sunucunun { error: { code, message } } sözleşmesinden mesajı güvenle okur. */
 function readErrorMessage(payload: unknown): string {
@@ -57,6 +68,13 @@ export function ReceiptFlow() {
     setStatus("analyzing");
     setErrorMessage(null);
 
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeoutId = window.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, CLIENT_TIMEOUT_MS);
+
     try {
       const body = new FormData();
       body.append("receipt", file);
@@ -64,6 +82,7 @@ export function ReceiptFlow() {
       const response = await fetch("/api/receipts/analyze", {
         method: "POST",
         body,
+        signal: controller.signal,
       });
       const payload: unknown = await response.json().catch(() => null);
 
@@ -84,11 +103,11 @@ export function ReceiptFlow() {
       setAnalysisKey((key) => key + 1);
       setStatus("ready");
     } catch {
-      setErrorMessage(
-        "Sunucuya ulaşılamadı. Bağlantını kontrol edip tekrar dene.",
-      );
+      setErrorMessage(didTimeout ? TIMEOUT_ERROR_MESSAGE : NETWORK_ERROR_MESSAGE);
       setStatus("error");
     } finally {
+      // Timer her başarı ve hata yolunda temizlenir.
+      window.clearTimeout(timeoutId);
       isAnalyzingRef.current = false;
     }
   };

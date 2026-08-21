@@ -135,10 +135,13 @@ function buildReceipt(overrides: Partial<Receipt> = {}): Receipt {
       { id: "a", name: "Çay", totalMinor: 2500 },
       { id: "b", name: "Kek", totalMinor: 7500 },
     ],
-    taxMinor: 1800,
-    serviceChargeMinor: 1000,
-    discountMinor: 800,
-    totalMinor: 12000,
+    taxMinor: 0,
+    taxTreatment: "included_in_items",
+    serviceChargeMinor: 0,
+    serviceChargeTreatment: "included_in_items",
+    discountMinor: 0,
+    discountTreatment: "included_in_items",
+    totalMinor: 10000,
     warnings: [],
     ...overrides,
   };
@@ -149,20 +152,167 @@ describe("checkTotals", () => {
     expect(sumItemsMinor(buildReceipt().items)).toBe(10000);
   });
 
-  it("tutarlı fişte uyuşmazlık bildirmez", () => {
-    const totals = checkTotals(buildReceipt());
+  it("KDV ürün fiyatlarına dahilken vergiyi toplama eklemez", () => {
+    // Türkiye'deki tipik durum: ürünler = genel toplam, KDV bilgilendirme amaçlı.
+    const totals = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "included_in_items",
+        totalMinor: 10000,
+      }),
+    );
+    expect(totals.status).toBe("match");
     expect(totals.itemsSubtotalMinor).toBe(10000);
-    expect(totals.expectedTotalMinor).toBe(12000);
-    expect(totals.differenceMinor).toBe(0);
-    expect(totals.matches).toBe(true);
   });
 
-  it("toplam uyuşmazlığını farkıyla birlikte bildirir", () => {
-    const totals = checkTotals(buildReceipt({ totalMinor: 11500 }));
-    expect(totals.matches).toBe(false);
-    expect(totals.statedTotalMinor).toBe(11500);
-    expect(totals.expectedTotalMinor).toBe(12000);
-    expect(totals.differenceMinor).toBe(500);
+  it("vergi ayrı uygulanıyorsa toplama ekler", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "separate",
+        totalMinor: 11800,
+      }),
+    );
+    expect(totals.status).toBe("match");
+  });
+
+  it("servis ücreti ayrı uygulanıyorsa toplama ekler", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        serviceChargeMinor: 1000,
+        serviceChargeTreatment: "separate",
+        totalMinor: 11000,
+      }),
+    );
+    expect(totals.status).toBe("match");
+  });
+
+  it("indirim ayrı uygulanıyorsa toplamdan düşer", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        discountMinor: 800,
+        discountTreatment: "separate",
+        totalMinor: 9200,
+      }),
+    );
+    expect(totals.status).toBe("match");
+  });
+
+  it("ayrı uygulanan kalemleri birlikte hesaplar", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "separate",
+        serviceChargeMinor: 1000,
+        serviceChargeTreatment: "separate",
+        discountMinor: 800,
+        discountTreatment: "separate",
+        totalMinor: 12000,
+      }),
+    );
+    expect(totals.status).toBe("match");
+  });
+
+  it("included_in_items olan tutarı ikinci kez uygulamaz", () => {
+    // Çift sayılsaydı beklenen toplam 11800 olur ve mismatch üretirdi.
+    const included = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "included_in_items",
+        totalMinor: 10000,
+      }),
+    );
+    expect(included.status).toBe("match");
+
+    const separate = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "separate",
+        totalMinor: 10000,
+      }),
+    );
+    expect(separate.status).toBe("mismatch");
+    if (separate.status === "mismatch") {
+      expect(separate.expectedTotalMinor).toBe(11800);
+      expect(separate.differenceMinor).toBe(1800);
+    }
+  });
+
+  it("gerçek uyuşmazlığı farkıyla birlikte bildirir", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "separate",
+        totalMinor: 11500,
+      }),
+    );
+    expect(totals.status).toBe("mismatch");
+    if (totals.status === "mismatch") {
+      expect(totals.statedTotalMinor).toBe(11500);
+      expect(totals.expectedTotalMinor).toBe(11800);
+      expect(totals.differenceMinor).toBe(300);
+    }
+  });
+
+  it("sıfırdan farklı unknown kalem varsa indeterminate döner", () => {
+    const totals = checkTotals(
+      buildReceipt({ taxMinor: 1800, taxTreatment: "unknown" }),
+    );
+    expect(totals.status).toBe("indeterminate");
+    if (totals.status === "indeterminate") {
+      expect(totals.uncertainAdjustments).toEqual(["tax"]);
+    }
+  });
+
+  it("birden fazla belirsiz kalemi listeler", () => {
+    const totals = checkTotals(
+      buildReceipt({
+        taxMinor: 1800,
+        taxTreatment: "unknown",
+        serviceChargeMinor: 1000,
+        serviceChargeTreatment: "unknown",
+        discountMinor: 800,
+        discountTreatment: "unknown",
+      }),
+    );
+    expect(totals.status).toBe("indeterminate");
+    if (totals.status === "indeterminate") {
+      expect(totals.uncertainAdjustments).toEqual([
+        "tax",
+        "serviceCharge",
+        "discount",
+      ]);
+    }
+  });
+
+  it("değeri sıfır olan unknown kalem belirsizlik yaratmaz", () => {
+    const totals = checkTotals(
+      buildReceipt({ taxMinor: 0, taxTreatment: "unknown" }),
+    );
+    expect(totals.status).toBe("match");
+  });
+
+  it("kullanıcı treatment'ı değiştirince sonuç anında değişir", () => {
+    const base = buildReceipt({
+      taxMinor: 1800,
+      taxTreatment: "unknown",
+      totalMinor: 11800,
+    });
+    expect(checkTotals(base).status).toBe("indeterminate");
+
+    // Kullanıcı "Ayrı uygula" seçer -> matematik tutar.
+    const asSeparate = checkTotals({ ...base, taxTreatment: "separate" });
+    expect(asSeparate.status).toBe("match");
+
+    // Kullanıcı "Ürün fiyatlarına dahil" seçer -> 1800 fark ortaya çıkar.
+    const asIncluded = checkTotals({
+      ...base,
+      taxTreatment: "included_in_items",
+    });
+    expect(asIncluded.status).toBe("mismatch");
+    if (asIncluded.status === "mismatch") {
+      expect(asIncluded.differenceMinor).toBe(-1800);
+    }
   });
 
   it("hiçbir değeri değiştirmez", () => {
@@ -170,5 +320,6 @@ describe("checkTotals", () => {
     checkTotals(receipt);
     expect(receipt.totalMinor).toBe(999);
     expect(receipt.items).toHaveLength(2);
+    expect(receipt.taxTreatment).toBe("included_in_items");
   });
 });

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ADJUSTMENT_TREATMENTS,
+  AdjustmentTreatmentSchema,
   MinorUnitSchema,
   ReceiptExtractionSchema,
   ReceiptItemSchema,
@@ -17,8 +19,11 @@ function buildReceipt(overrides: Partial<Receipt> = {}): Receipt {
     currency: "TRY",
     items: [{ id: "a", name: "Çay", totalMinor: 2500 }],
     taxMinor: 450,
+    taxTreatment: "included_in_items",
     serviceChargeMinor: 0,
+    serviceChargeTreatment: "included_in_items",
     discountMinor: 0,
+    discountTreatment: "included_in_items",
     totalMinor: 2950,
     warnings: [],
     ...overrides,
@@ -126,8 +131,11 @@ describe("ReceiptExtractionSchema", () => {
       currency: "TRY",
       items: [{ name: "Çay", totalMinor: 2500 }],
       taxMinor: 0,
+      taxTreatment: "included_in_items",
       serviceChargeMinor: 0,
+      serviceChargeTreatment: "separate",
       discountMinor: 0,
+      discountTreatment: "unknown",
       totalMinor: 2500,
       warnings: [],
     });
@@ -140,8 +148,11 @@ describe("ReceiptExtractionSchema", () => {
       currency: "TRY",
       items: [{ name: "Çay", totalMinor: 25.5 }],
       taxMinor: 0,
+      taxTreatment: "included_in_items",
       serviceChargeMinor: 0,
+      serviceChargeTreatment: "included_in_items",
       discountMinor: 0,
+      discountTreatment: "included_in_items",
       totalMinor: 25.5,
       warnings: [],
     });
@@ -161,6 +172,73 @@ describe("normalizeCurrency", () => {
     expect(normalizeCurrency("₺")).toBe(UNKNOWN_CURRENCY);
     expect(normalizeCurrency("")).toBe(UNKNOWN_CURRENCY);
     expect(normalizeCurrency("TURKISH LIRA")).toBe(UNKNOWN_CURRENCY);
+  });
+});
+
+describe("adjustment treatment", () => {
+  it("yalnızca üç bilinen değeri kabul eder", () => {
+    expect(ADJUSTMENT_TREATMENTS).toEqual([
+      "included_in_items",
+      "separate",
+      "unknown",
+    ]);
+    for (const treatment of ADJUSTMENT_TREATMENTS) {
+      expect(AdjustmentTreatmentSchema.safeParse(treatment).success).toBe(true);
+    }
+  });
+
+  it("tanınmayan değeri reddeder", () => {
+    expect(AdjustmentTreatmentSchema.safeParse("included").success).toBe(false);
+    expect(AdjustmentTreatmentSchema.safeParse("").success).toBe(false);
+    expect(AdjustmentTreatmentSchema.safeParse(null).success).toBe(false);
+  });
+
+  it("ReceiptSchema'da treatment alanları zorunludur", () => {
+    for (const field of [
+      "taxTreatment",
+      "serviceChargeTreatment",
+      "discountTreatment",
+    ]) {
+      const withoutField: Record<string, unknown> = { ...buildReceipt() };
+      delete withoutField[field];
+      expect(
+        ReceiptSchema.safeParse(withoutField).success,
+        `${field} eksikken kabul edildi`,
+      ).toBe(false);
+    }
+  });
+
+  it("ReceiptExtractionSchema'da treatment alanları zorunludur", () => {
+    const base: Record<string, unknown> = {
+      merchantName: null,
+      currency: "TRY",
+      items: [{ name: "Çay", totalMinor: 2500 }],
+      taxMinor: 0,
+      taxTreatment: "included_in_items",
+      serviceChargeMinor: 0,
+      serviceChargeTreatment: "included_in_items",
+      discountMinor: 0,
+      discountTreatment: "included_in_items",
+      totalMinor: 2500,
+      warnings: [],
+    };
+    expect(ReceiptExtractionSchema.safeParse(base).success).toBe(true);
+
+    const withoutTreatment = { ...base };
+    delete withoutTreatment.taxTreatment;
+    expect(ReceiptExtractionSchema.safeParse(withoutTreatment).success).toBe(
+      false,
+    );
+  });
+
+  it("geçersiz treatment değerini reddeder", () => {
+    expect(
+      ReceiptSchema.safeParse(
+        buildReceipt({
+          taxTreatment: "maybe" as unknown as Receipt["taxTreatment"],
+        }),
+      ).success,
+    ).toBe(false);
   });
 });
 

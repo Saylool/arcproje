@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { APIConnectionTimeoutError } from "openai";
 import { zodTextFormat } from "openai/helpers/zod";
 
 import {
@@ -10,6 +10,16 @@ import {
 } from "./schema";
 
 const DEFAULT_RECEIPT_MODEL = "gpt-5.6-luna";
+
+/** Demoda beklemeyi öngörülebilir tutmak için tek denemede 30 saniye sınır. */
+export const ANALYSIS_TIMEOUT_MS = 30_000;
+
+/**
+ * Otomatik retry kapalı. SDK varsayılanı 2 denemedir; 30 saniyelik timeout ile
+ * birlikte bu, en kötü durumda 90 saniyeye çıkar ve demo akışını kilitler.
+ * Kullanıcı zaten "Tekrar dene" ile isteği yineleyebiliyor.
+ */
+const MAX_RETRIES = 0;
 
 const SYSTEM_PROMPT = `You extract structured data from a photograph of a retail or restaurant receipt.
 
@@ -24,6 +34,21 @@ items:
 - Include only purchased product or service lines.
 - Exclude subtotal ("ARA TOPLAM", "SUBTOTAL"), tax ("KDV", "VAT", "TAX"), service charge ("SERVIS", "SERVICE"), discount ("INDIRIM", "DISCOUNT"), grand total ("TOPLAM", "GENEL TOPLAM", "TOTAL"), payment and change lines ("NAKIT", "KREDI KARTI", "PARA USTU", "CASH", "CHANGE"), and loyalty or point lines.
 - Use the printed LINE TOTAL as the item price, not the unit price. If a line shows "2 x 45,00 = 90,00", the item total is 9000.
+
+Treatment fields (taxTreatment, serviceChargeTreatment, discountTreatment):
+These say whether an amount must still be applied on top of the item lines when computing the grand total. Decide each one from the arithmetic that is actually VISIBLE on the receipt.
+- "included_in_items": the amount is already contained in the item line prices. Applying it again would double count it.
+- "separate": the amount is added on top of the item lines (tax, service) or subtracted from them (discount).
+- "unknown": the receipt does not let you tell.
+
+How to decide:
+- The mere presence of a "KDV" or "VAT" line does NOT mean the tax is added on top. It is very often printed only as information about tax already contained in the prices.
+- Compare the numbers: if the item line totals already equal the printed grand total, then tax (and any other listed amount) is "included_in_items".
+- If item line totals plus the amount equal the printed grand total, that amount is "separate".
+- In Turkey KDV is usually included in the displayed prices, but do NOT assume this blindly. Use the receipt's own arithmetic.
+- Apply the same reasoning to service charge and discount independently. They can differ from each other.
+- If the visible arithmetic does not settle it, return "unknown" and add a short Turkish note in warnings explaining what was ambiguous.
+- When an amount is 0 because the receipt has no such line, "included_in_items" or "unknown" are both acceptable; the value is 0 either way.
 
 Other fields:
 - totalMinor: the grand total PRINTED on the receipt. Do not recompute it from the items, even if the items do not add up.
@@ -51,6 +76,7 @@ export type ExtractionFailureCode =
   | "MODEL_REFUSED"
   | "RECEIPT_NOT_READABLE"
   | "INVALID_RECEIPT_DATA"
+  | "ANALYSIS_TIMEOUT"
   | "ANALYSIS_FAILED";
 
 export type ExtractionResult =
@@ -70,7 +96,11 @@ export async function extractReceipt(
     return { ok: false, code: "ANALYSIS_FAILED" };
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({
+    apiKey,
+    timeout: ANALYSIS_TIMEOUT_MS,
+    maxRetries: MAX_RETRIES,
+  });
 
   let response;
   try {
@@ -93,6 +123,11 @@ export async function extractReceipt(
       text: { format: zodTextFormat(ReceiptExtractionSchema, "receipt") },
     });
   } catch (error) {
+    // Metin eşleştirmesi yerine SDK'nın kendi timeout sınıfı kullanılır.
+    if (error instanceof APIConnectionTimeoutError) {
+      console.error("[receipt-analyze] OpenAI isteği zaman aşımına uğradı.");
+      return { ok: false, code: "ANALYSIS_TIMEOUT" };
+    }
     // Sağlayıcı hatasının ayrıntısı yalnızca sunucu logunda kalır.
     console.error("[receipt-analyze] OpenAI isteği başarısız:", toLogMessage(error));
     return { ok: false, code: "ANALYSIS_FAILED" };
@@ -139,8 +174,11 @@ export async function extractReceipt(
       totalMinor: item.totalMinor,
     })),
     taxMinor: parsed.taxMinor,
+    taxTreatment: parsed.taxTreatment,
     serviceChargeMinor: parsed.serviceChargeMinor,
+    serviceChargeTreatment: parsed.serviceChargeTreatment,
     discountMinor: parsed.discountMinor,
+    discountTreatment: parsed.discountTreatment,
     totalMinor: parsed.totalMinor,
     warnings,
   };

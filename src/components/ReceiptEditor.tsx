@@ -10,11 +10,26 @@ import {
   parseMoneyToMinor,
 } from "@/lib/receipt/money";
 import {
+  ADJUSTMENT_TREATMENTS,
   UNKNOWN_CURRENCY,
   createItemId,
+  type AdjustmentKind,
+  type AdjustmentTreatment,
   type Receipt,
   type ReceiptItem,
 } from "@/lib/receipt/schema";
+
+const TREATMENT_LABELS: Record<AdjustmentTreatment, string> = {
+  included_in_items: "Ürün fiyatlarına dahil",
+  separate: "Ayrı uygula",
+  unknown: "Belirsiz",
+};
+
+const ADJUSTMENT_LABELS: Record<AdjustmentKind, string> = {
+  tax: "vergi",
+  serviceCharge: "servis ücreti",
+  discount: "indirim",
+};
 
 type ReceiptEditorProps = {
   receipt: Receipt;
@@ -199,22 +214,32 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
         </button>
       </div>
 
-      <dl className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
         <div className="flex items-center justify-between gap-3">
-          <dt className="text-sm text-slate-500">Ürünler toplamı</dt>
-          <dd className="text-sm tabular-nums text-slate-500">
+          <span className="text-sm text-slate-500">Ürünler toplamı</span>
+          <span className="text-sm tabular-nums text-slate-500">
             {formatMinorForDisplay(totals.itemsSubtotalMinor, receipt.currency)}
-          </dd>
+          </span>
         </div>
 
         <SummaryRow
           label="Vergi (KDV)"
           minor={receipt.taxMinor}
+          treatment={receipt.taxTreatment}
+          treatmentHint="Ayrı uygula seçilirse genel toplama eklenir."
+          onTreatmentChange={(taxTreatment) =>
+            onChange({ ...receipt, taxTreatment })
+          }
           onValidChange={(taxMinor) => onChange({ ...receipt, taxMinor })}
         />
         <SummaryRow
           label="Servis ücreti"
           minor={receipt.serviceChargeMinor}
+          treatment={receipt.serviceChargeTreatment}
+          treatmentHint="Ayrı uygula seçilirse genel toplama eklenir."
+          onTreatmentChange={(serviceChargeTreatment) =>
+            onChange({ ...receipt, serviceChargeTreatment })
+          }
           onValidChange={(serviceChargeMinor) =>
             onChange({ ...receipt, serviceChargeMinor })
           }
@@ -222,6 +247,11 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
         <SummaryRow
           label="İndirim"
           minor={receipt.discountMinor}
+          treatment={receipt.discountTreatment}
+          treatmentHint="Ayrı uygula seçilirse genel toplamdan düşülür."
+          onTreatmentChange={(discountTreatment) =>
+            onChange({ ...receipt, discountTreatment })
+          }
           onValidChange={(discountMinor) =>
             onChange({ ...receipt, discountMinor })
           }
@@ -232,14 +262,14 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           emphasized
           onValidChange={(totalMinor) => onChange({ ...receipt, totalMinor })}
         />
-      </dl>
+      </div>
 
-      {!totals.matches && (
+      {totals.status === "mismatch" && (
         <p
           role="status"
           className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
         >
-          Ürünler + vergi + servis - indirim{" "}
+          Ürünler ve ayrı uygulanan kalemler{" "}
           <strong className="font-semibold tabular-nums">
             {formatMinorForDisplay(totals.expectedTotalMinor, receipt.currency)}
           </strong>{" "}
@@ -249,6 +279,22 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           </strong>
           . Değerleri senin onayın olmadan değiştirmiyoruz; kontrol edip
           düzeltebilirsin.
+        </p>
+      )}
+
+      {totals.status === "indeterminate" && (
+        <p
+          role="status"
+          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-700"
+        >
+          Bazı ücretlerin ürün fiyatlarına dahil olup olmadığı belirsiz:{" "}
+          <strong className="font-semibold">
+            {totals.uncertainAdjustments
+              .map((kind) => ADJUSTMENT_LABELS[kind])
+              .join(", ")}
+          </strong>
+          . Bu yüzden genel toplamı doğrulamıyoruz. Yukarıdaki seçimleri
+          güncelleyerek netleştirebilirsin.
         </p>
       )}
 
@@ -264,6 +310,10 @@ type SummaryRowProps = {
   label: string;
   minor: number;
   emphasized?: boolean;
+  /** Verilirse satırda erişilebilir bir "nasıl uygulanacak" seçimi gösterilir. */
+  treatment?: AdjustmentTreatment;
+  treatmentHint?: string;
+  onTreatmentChange?: (treatment: AdjustmentTreatment) => void;
   onValidChange: (minor: number) => void;
 };
 
@@ -271,23 +321,48 @@ function SummaryRow({
   label,
   minor,
   emphasized = false,
+  treatment,
+  treatmentHint,
+  onTreatmentChange,
   onValidChange,
 }: SummaryRowProps) {
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <span
-        className={`pt-2 text-sm ${
+        className={`text-sm sm:pt-2 ${
           emphasized ? "font-semibold text-slate-900" : "text-slate-600"
         }`}
       >
         {label}
       </span>
-      <MoneyInput
-        minor={minor}
-        ariaLabel={label}
-        onValidChange={onValidChange}
-        className="w-32 shrink-0"
-      />
+
+      <div className="flex items-start gap-2">
+        {treatment !== undefined && onTreatmentChange !== undefined && (
+          <select
+            value={treatment}
+            aria-label={`${label} nasıl uygulanacak${
+              treatmentHint === undefined ? "" : `. ${treatmentHint}`
+            }`}
+            onChange={(event) =>
+              onTreatmentChange(event.target.value as AdjustmentTreatment)
+            }
+            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 transition-colors focus:border-violet-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 sm:w-44 sm:flex-none"
+          >
+            {ADJUSTMENT_TREATMENTS.map((option) => (
+              <option key={option} value={option}>
+                {TREATMENT_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <MoneyInput
+          minor={minor}
+          ariaLabel={label}
+          onValidChange={onValidChange}
+          className="w-28 shrink-0 sm:w-32"
+        />
+      </div>
     </div>
   );
 }

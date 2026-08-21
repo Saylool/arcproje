@@ -4,6 +4,28 @@ import { z } from "zod";
 export const UNKNOWN_CURRENCY = "UNKNOWN";
 
 /**
+ * Bir vergi/servis/indirim tutarının genel toplama nasıl yansıdığı.
+ *
+ * Türkiye'deki fişlerde KDV çoğunlukla ürün satır fiyatlarına dahildir ve
+ * fişte yalnızca bilgilendirme amacıyla yazılır. Böyle bir tutarı toplama
+ * tekrar eklemek yanlış toplam ve ileride çift borçlandırma üretir.
+ */
+export const ADJUSTMENT_TREATMENTS = [
+  /** Tutar ürün satır fiyatlarının içinde; toplama tekrar uygulanmaz. */
+  "included_in_items",
+  /** Vergi ve servis ürünlerin üzerine eklenir, indirim ürünlerden düşülür. */
+  "separate",
+  /** Fişten güvenle anlaşılamadı. */
+  "unknown",
+] as const;
+
+export const AdjustmentTreatmentSchema = z.enum(ADJUSTMENT_TREATMENTS);
+export type AdjustmentTreatment = z.infer<typeof AdjustmentTreatmentSchema>;
+
+/** checkTotals sonucunda hangi kalemin belirsiz olduğunu adlandırmak için. */
+export type AdjustmentKind = "tax" | "serviceCharge" | "discount";
+
+/**
  * OpenAI Structured Outputs'a gönderilen şema.
  *
  * Structured Outputs, JSON Schema'nın yalnızca bir alt kümesini kabul eder;
@@ -11,6 +33,7 @@ export const UNKNOWN_CURRENCY = "UNKNOWN";
  * sadece tipleri bildirir. Negatif olmama gibi katı kurallar, cevap alındıktan
  * sonra aşağıdaki `ReceiptSchema` ile uygulanır.
  *
+ * Tüm alanlar zorunludur (Structured Outputs optional alan kabul etmez).
  * Item `id`'leri bilerek burada yok: ID'yi modelden istemiyoruz, sunucuda
  * kendimiz üretiyoruz.
  */
@@ -24,8 +47,11 @@ export const ReceiptExtractionSchema = z.object({
     }),
   ),
   taxMinor: z.number().int(),
+  taxTreatment: AdjustmentTreatmentSchema,
   serviceChargeMinor: z.number().int(),
+  serviceChargeTreatment: AdjustmentTreatmentSchema,
   discountMinor: z.number().int(),
+  discountTreatment: AdjustmentTreatmentSchema,
   totalMinor: z.number().int(),
   warnings: z.array(z.string()),
 });
@@ -52,8 +78,11 @@ export const ReceiptSchema = z.object({
   currency: z.string(),
   items: z.array(ReceiptItemSchema),
   taxMinor: MinorUnitSchema,
+  taxTreatment: AdjustmentTreatmentSchema,
   serviceChargeMinor: MinorUnitSchema,
+  serviceChargeTreatment: AdjustmentTreatmentSchema,
   discountMinor: MinorUnitSchema,
+  discountTreatment: AdjustmentTreatmentSchema,
   totalMinor: MinorUnitSchema,
   warnings: z.array(z.string()),
 });

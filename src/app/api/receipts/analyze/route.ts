@@ -5,13 +5,16 @@ import {
   isReceiptAnalysisConfigured,
   type ExtractionFailureCode,
 } from "@/lib/receipt/extract";
+import {
+  resolveImageMimeType,
+  type ImageTypeResolution,
+} from "@/lib/receipt/image-type";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 /** multipart gövdesinin dosya dışındaki payı için pay bırakılır. */
 const MAX_BODY_SIZE_BYTES = MAX_FILE_SIZE_BYTES + 64 * 1024;
-const ALLOWED_MIME_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 const FAILURE_RESPONSES: Record<
   ExtractionFailureCode,
@@ -31,6 +34,11 @@ const FAILURE_RESPONSES: Record<
     status: 422,
     message: "Fiş verisi beklenen biçimde alınamadı. Lütfen tekrar dene.",
   },
+  ANALYSIS_TIMEOUT: {
+    status: 504,
+    message:
+      "Analiz zaman aşımına uğradı. Lütfen tekrar dene; sorun sürerse daha küçük bir görsel deneyebilirsin.",
+  },
   ANALYSIS_FAILED: {
     status: 502,
     message: "Analiz servisine şu anda ulaşılamıyor. Lütfen birazdan tekrar dene.",
@@ -41,45 +49,14 @@ function errorResponse(status: number, code: string, message: string) {
   return NextResponse.json({ error: { code, message } }, { status });
 }
 
-/**
- * Dosyanın gerçek türünü içeriğinden tespit eder. Client'ın bildirdiği MIME
- * type'a güvenilmez.
- */
-function detectImageMimeType(bytes: Uint8Array): string | null {
-  if (
-    bytes.length >= 3 &&
-    bytes[0] === 0xff &&
-    bytes[1] === 0xd8 &&
-    bytes[2] === 0xff
-  ) {
-    return "image/jpeg";
-  }
-
-  const pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-  if (
-    bytes.length >= pngSignature.length &&
-    pngSignature.every((byte, index) => bytes[index] === byte)
-  ) {
-    return "image/png";
-  }
-
-  // "RIFF" .... "WEBP"
-  if (
-    bytes.length >= 12 &&
-    bytes[0] === 0x52 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x46 &&
-    bytes[8] === 0x57 &&
-    bytes[9] === 0x45 &&
-    bytes[10] === 0x42 &&
-    bytes[11] === 0x50
-  ) {
-    return "image/webp";
-  }
-
-  return null;
-}
+const IMAGE_TYPE_MESSAGES: Record<
+  Extract<ImageTypeResolution, { ok: false }>["reason"],
+  string
+> = {
+  unsupportedDeclared: "Yalnızca JPG, PNG ve WEBP dosyaları desteklenir.",
+  notAnImage: "Dosya geçerli bir JPG, PNG veya WEBP görseli değil.",
+  mismatch: "Dosyanın içeriği bildirilen dosya türüyle eşleşmiyor.",
+};
 
 export async function POST(request: Request) {
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
@@ -130,21 +107,14 @@ export async function POST(request: Request) {
       "Görsel çok büyük. En fazla 10 MB yükleyebilirsin.",
     );
   }
-  if (!ALLOWED_MIME_TYPES.has(receiptField.type)) {
-    return errorResponse(
-      415,
-      "UNSUPPORTED_FILE_TYPE",
-      "Yalnızca JPG, PNG ve WEBP dosyaları desteklenir.",
-    );
-  }
-
   const bytes = new Uint8Array(await receiptField.arrayBuffer());
-  const detectedMimeType = detectImageMimeType(bytes);
-  if (detectedMimeType === null || detectedMimeType !== receiptField.type) {
+  // Bildirilen MIME type'a tek başına güvenilmez; içerik imzasıyla uzlaştırılır.
+  const imageType = resolveImageMimeType(receiptField.type, bytes);
+  if (!imageType.ok) {
     return errorResponse(
       415,
       "UNSUPPORTED_FILE_TYPE",
-      "Dosya geçerli bir JPG, PNG veya WEBP görseli değil.",
+      IMAGE_TYPE_MESSAGES[imageType.reason],
     );
   }
 
@@ -158,7 +128,7 @@ export async function POST(request: Request) {
   }
 
   // Görsel yalnızca bellekte tutulur; diske yazılmaz, veritabanına kaydedilmez.
-  const imageDataUrl = `data:${detectedMimeType};base64,${Buffer.from(bytes).toString("base64")}`;
+  const imageDataUrl = `data:${imageType.mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 
   try {
     const result = await extractReceipt(imageDataUrl);

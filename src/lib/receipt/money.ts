@@ -1,4 +1,4 @@
-import type { Receipt, ReceiptItem } from "./schema";
+import type { AdjustmentKind, Receipt, ReceiptItem } from "./schema";
 
 export type MoneyParseFailureReason =
   | "empty"
@@ -144,34 +144,97 @@ export function sumItemsMinor(items: readonly ReceiptItem[]): number {
   return items.reduce((total, item) => total + item.totalMinor, 0);
 }
 
-export type TotalsCheck = {
+export type TotalsCheckBase = {
   itemsSubtotalMinor: number;
-  /** Ürünler + vergi + servis - indirim */
-  expectedTotalMinor: number;
   /** Fişte basılı olan genel toplam */
   statedTotalMinor: number;
-  differenceMinor: number;
-  matches: boolean;
 };
+
+export type TotalsCheck =
+  | (TotalsCheckBase & {
+      status: "match";
+      /** Ürünler + yalnızca "separate" işaretli düzeltmeler */
+      expectedTotalMinor: number;
+      differenceMinor: 0;
+    })
+  | (TotalsCheckBase & {
+      status: "mismatch";
+      expectedTotalMinor: number;
+      differenceMinor: number;
+    })
+  | (TotalsCheckBase & {
+      status: "indeterminate";
+      /** Sıfırdan farklı olduğu hâlde nasıl uygulanacağı bilinmeyen kalemler */
+      uncertainAdjustments: AdjustmentKind[];
+    });
 
 /**
  * Ürün toplamları ile fişteki genel toplamı karşılaştırır. Hiçbir değeri
- * değiştirmez; uyuşmazlık yalnızca kullanıcıya gösterilmek üzere raporlanır.
+ * değiştirmez; sonuç yalnızca kullanıcıya gösterilmek üzere raporlanır.
+ *
+ * Yalnızca "separate" işaretli düzeltmeler uygulanır. "included_in_items"
+ * olan bir tutar ürün fiyatlarının içinde zaten sayıldığı için toplama
+ * ikinci kez eklenmez.
+ *
+ * Sıfırdan farklı bir tutarın uygulaması "unknown" ise doğru toplam
+ * bilinemez; bu durumda yanlış bir uyuşmazlık iddiası üretmek yerine
+ * "indeterminate" döndürülür.
  */
 export function checkTotals(receipt: Receipt): TotalsCheck {
   const itemsSubtotalMinor = sumItemsMinor(receipt.items);
-  const expectedTotalMinor =
-    itemsSubtotalMinor +
-    receipt.taxMinor +
-    receipt.serviceChargeMinor -
-    receipt.discountMinor;
-  const differenceMinor = expectedTotalMinor - receipt.totalMinor;
+  const statedTotalMinor = receipt.totalMinor;
+
+  const uncertainAdjustments: AdjustmentKind[] = [];
+  if (receipt.taxTreatment === "unknown" && receipt.taxMinor !== 0) {
+    uncertainAdjustments.push("tax");
+  }
+  if (
+    receipt.serviceChargeTreatment === "unknown" &&
+    receipt.serviceChargeMinor !== 0
+  ) {
+    uncertainAdjustments.push("serviceCharge");
+  }
+  if (receipt.discountTreatment === "unknown" && receipt.discountMinor !== 0) {
+    uncertainAdjustments.push("discount");
+  }
+
+  if (uncertainAdjustments.length > 0) {
+    return {
+      status: "indeterminate",
+      itemsSubtotalMinor,
+      statedTotalMinor,
+      uncertainAdjustments,
+    };
+  }
+
+  let expectedTotalMinor = itemsSubtotalMinor;
+  if (receipt.taxTreatment === "separate") {
+    expectedTotalMinor += receipt.taxMinor;
+  }
+  if (receipt.serviceChargeTreatment === "separate") {
+    expectedTotalMinor += receipt.serviceChargeMinor;
+  }
+  if (receipt.discountTreatment === "separate") {
+    expectedTotalMinor -= receipt.discountMinor;
+  }
+
+  const differenceMinor = expectedTotalMinor - statedTotalMinor;
+
+  if (differenceMinor === 0) {
+    return {
+      status: "match",
+      itemsSubtotalMinor,
+      statedTotalMinor,
+      expectedTotalMinor,
+      differenceMinor: 0,
+    };
+  }
 
   return {
+    status: "mismatch",
     itemsSubtotalMinor,
+    statedTotalMinor,
     expectedTotalMinor,
-    statedTotalMinor: receipt.totalMinor,
     differenceMinor,
-    matches: differenceMinor === 0,
   };
 }
