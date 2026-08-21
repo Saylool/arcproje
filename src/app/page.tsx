@@ -1,4 +1,3 @@
-import { ProgressSteps } from "@/components/ProgressSteps";
 import { ReceiptFlow } from "@/components/ReceiptFlow";
 
 export default function Home() {
@@ -27,8 +26,6 @@ export default function Home() {
           </p>
         </div>
       </header>
-
-      <ProgressSteps />
 
       <ReceiptFlow />
     </main>

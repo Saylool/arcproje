@@ -297,11 +297,6 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           güncelleyerek netleştirebilirsin.
         </p>
       )}
-
-      <p className="text-xs text-slate-400">
-        Kişilere dağıtma, borç hesaplama ve ödeme adımları sonraki aşamada
-        gelecek.
-      </p>
     </section>
   );
 }

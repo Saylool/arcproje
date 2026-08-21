@@ -2,11 +2,23 @@
 
 import { useCallback, useRef, useState } from "react";
 
+import { AssignmentSummaryView } from "@/components/AssignmentSummary";
+import { ParticipantAssignment } from "@/components/ParticipantAssignment";
+import { ProgressSteps, type FlowStepId } from "@/components/ProgressSteps";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
 import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
+import {
+  checkReceiptReadyForSplit,
+  createInitialAssignmentState,
+  normalizeAssignments,
+  type AssignmentState,
+} from "@/lib/split/participants";
 
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
+
+/** Fiş düzenleme, kişi atama ve özet arasında geçiş yapılan akış adımı. */
+type FlowScreen = "receipt" | "participants" | "summary";
 
 const GENERIC_ERROR_MESSAGE = "Fiş analiz edilemedi. Lütfen tekrar dene.";
 const TIMEOUT_ERROR_MESSAGE =
@@ -52,11 +64,33 @@ export function ReceiptFlow() {
   const [analysisKey, setAnalysisKey] = useState(0);
   const isAnalyzingRef = useRef(false);
 
+  const [screen, setScreen] = useState<FlowScreen>("receipt");
+  // Üretilen ID'ler ilk render'da DOM'a yazılmaz; kişi ekranı başlangıçta kapalı.
+  const [assignment, setAssignment] = useState<AssignmentState>(
+    createInitialAssignmentState,
+  );
+  const [splitError, setSplitError] = useState<string | null>(null);
+
   const handleFileChange = useCallback((next: File | null) => {
     setFile(next);
     setReceipt(null);
     setErrorMessage(null);
     setStatus("idle");
+    setScreen("receipt");
+    setSplitError(null);
+    setAssignment(createInitialAssignmentState());
+  }, []);
+
+  /** Fiş düzenlenince atamaları mevcut ürün ID'lerine göre güvenli tut. */
+  const handleReceiptChange = useCallback((next: Receipt) => {
+    setReceipt(next);
+    setSplitError(null);
+    setAssignment((previous) =>
+      normalizeAssignments(
+        previous,
+        next.items.map((item) => item.id),
+      ),
+    );
   }, []);
 
   const analyze = async () => {
@@ -102,6 +136,10 @@ export function ReceiptFlow() {
       setReceipt(parsed.data);
       setAnalysisKey((key) => key + 1);
       setStatus("ready");
+      // Yeni fiş, yeni atama.
+      setScreen("receipt");
+      setSplitError(null);
+      setAssignment(createInitialAssignmentState());
     } catch {
       setErrorMessage(didTimeout ? TIMEOUT_ERROR_MESSAGE : NETWORK_ERROR_MESSAGE);
       setStatus("error");
@@ -110,6 +148,19 @@ export function ReceiptFlow() {
       window.clearTimeout(timeoutId);
       isAnalyzingRef.current = false;
     }
+  };
+
+  const goToParticipants = () => {
+    if (receipt === null) {
+      return;
+    }
+    const readiness = checkReceiptReadyForSplit(receipt);
+    if (!readiness.ok) {
+      setSplitError(readiness.message);
+      return;
+    }
+    setSplitError(null);
+    setScreen("participants");
   };
 
   const isAnalyzing = status === "analyzing";
@@ -121,46 +172,100 @@ export function ReceiptFlow() {
         ? "Yeniden analiz et"
         : "Fişi analiz et";
 
+  const currentStepId: FlowStepId =
+    screen === "receipt" ? "receipt" : "participants";
+
   return (
-    <div className="flex flex-col gap-4">
-      <ReceiptUploader onFileChange={handleFileChange} disabled={isAnalyzing} />
+    <div className="flex flex-col gap-6">
+      <ProgressSteps currentStepId={currentStepId} />
 
-      {file !== null && (
-        <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
-          <div className="flex flex-col gap-2">
-            <button
-              type="button"
-              onClick={analyze}
-              disabled={isAnalyzing}
-              className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300 disabled:shadow-none"
-            >
-              {ctaLabel}
-            </button>
-            <p className="text-xs leading-relaxed text-slate-400">
-              Fiş görselin analiz için OpenAI&apos;ye gönderilir. Görsel
-              sunucuda saklanmaz.
-            </p>
-          </div>
+      {screen === "receipt" && (
+        <div className="flex flex-col gap-4">
+          <ReceiptUploader
+            onFileChange={handleFileChange}
+            disabled={isAnalyzing}
+          />
 
-          {isAnalyzing && (
-            <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs leading-relaxed text-violet-800 sm:text-sm">
-              Fişteki ürünler okunuyor, bu birkaç saniye sürebilir…
-            </p>
+          {file !== null && (
+            <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={analyze}
+                  disabled={isAnalyzing}
+                  className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300 disabled:shadow-none"
+                >
+                  {ctaLabel}
+                </button>
+                <p className="text-xs leading-relaxed text-slate-400">
+                  Fiş görselin analiz için OpenAI&apos;ye gönderilir. Görsel
+                  sunucuda saklanmaz.
+                </p>
+              </div>
+
+              {isAnalyzing && (
+                <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs leading-relaxed text-violet-800 sm:text-sm">
+                  Fişteki ürünler okunuyor, bu birkaç saniye sürebilir…
+                </p>
+              )}
+
+              {status === "error" && errorMessage !== null && (
+                <p className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700 sm:text-sm">
+                  {errorMessage}
+                </p>
+              )}
+            </div>
           )}
 
-          {status === "error" && errorMessage !== null && (
-            <p className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700 sm:text-sm">
-              {errorMessage}
-            </p>
+          {receipt !== null && (
+            <>
+              <ReceiptEditor
+                key={analysisKey}
+                receipt={receipt}
+                onChange={handleReceiptChange}
+              />
+
+              <div className="flex flex-col gap-2 rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
+                <button
+                  type="button"
+                  onClick={goToParticipants}
+                  className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                >
+                  Kişilere dağıt
+                </button>
+                {splitError === null ? (
+                  <p className="text-xs leading-relaxed text-slate-400">
+                    Ürünleri kişilere dağıtmadan önce tutarları kontrol et.
+                  </p>
+                ) : (
+                  <p
+                    role="alert"
+                    className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+                  >
+                    {splitError}
+                  </p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
 
-      {receipt !== null && (
-        <ReceiptEditor
-          key={analysisKey}
+      {screen === "participants" && receipt !== null && (
+        <ParticipantAssignment
           receipt={receipt}
-          onChange={setReceipt}
+          state={assignment}
+          onChange={setAssignment}
+          onBack={() => setScreen("receipt")}
+          onComplete={() => setScreen("summary")}
+        />
+      )}
+
+      {screen === "summary" && receipt !== null && (
+        <AssignmentSummaryView
+          receipt={receipt}
+          state={assignment}
+          onEdit={() => setScreen("participants")}
         />
       )}
 
@@ -169,9 +274,13 @@ export function ReceiptFlow() {
           ? "Fiş analiz ediliyor."
           : status === "error" && errorMessage !== null
             ? errorMessage
-            : status === "ready"
-              ? "Fiş analizi tamamlandı. Ürünleri düzenleyebilirsin."
-              : ""}
+            : screen === "summary"
+              ? "Atamalar hazır. Özet gösteriliyor."
+              : screen === "participants"
+                ? "Kişi atama adımındasın."
+                : status === "ready"
+                  ? "Fiş analizi tamamlandı. Ürünleri düzenleyebilirsin."
+                  : ""}
       </p>
     </div>
   );

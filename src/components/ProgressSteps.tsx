@@ -1,19 +1,29 @@
-const STEPS = [
-  { id: "upload", label: "Fiş Yükle" },
-  { id: "assign", label: "Ürünleri Ata" },
-  { id: "pay", label: "Ödeme" },
+export const FLOW_STEPS = [
+  { id: "receipt", label: "Fiş" },
+  { id: "participants", label: "Kişiler" },
+  { id: "payment", label: "Ödeme" },
 ] as const;
 
-/** Bu aşamada yalnızca ilk adım aktif; sonraki adımlar henüz uygulanmadı. */
-const ACTIVE_STEP_INDEX = 0;
+export type FlowStepId = (typeof FLOW_STEPS)[number]["id"];
 
-export function ProgressSteps() {
+/** Ödeme adımı henüz uygulanmadı; hiçbir zaman aktif gösterilmez. */
+const UNAVAILABLE_STEP_ID: FlowStepId = "payment";
+
+type ProgressStepsProps = {
+  currentStepId: FlowStepId;
+};
+
+export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
+  const currentIndex = FLOW_STEPS.findIndex((step) => step.id === currentStepId);
+
   return (
     <nav aria-label="İlerleme durumu">
       <ol className="flex items-center">
-        {STEPS.map((step, index) => {
-          const isActive = index === ACTIVE_STEP_INDEX;
-          const isLast = index === STEPS.length - 1;
+        {FLOW_STEPS.map((step, index) => {
+          const isActive = index === currentIndex;
+          const isCompleted = index < currentIndex;
+          const isUnavailable = step.id === UNAVAILABLE_STEP_ID;
+          const isLast = index === FLOW_STEPS.length - 1;
 
           return (
             <li
@@ -26,28 +36,42 @@ export function ProgressSteps() {
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-7 sm:w-7 sm:text-xs ${
                   isActive
                     ? "bg-violet-600 text-white shadow-sm shadow-violet-200"
-                    : "border border-slate-200 bg-white text-slate-400"
+                    : isCompleted
+                      ? "bg-violet-100 text-violet-700"
+                      : "border border-slate-200 bg-white text-slate-400"
                 }`}
               >
-                {index + 1}
+                {isCompleted ? "✓" : index + 1}
               </span>
 
               <span
                 className={`whitespace-nowrap text-[11px] font-medium sm:text-sm ${
-                  isActive ? "text-slate-900" : "text-slate-400"
+                  isActive
+                    ? "text-slate-900"
+                    : isCompleted
+                      ? "text-violet-700"
+                      : "text-slate-400"
                 }`}
               >
                 {step.label}
               </span>
 
               <span className="sr-only">
-                {isActive ? "(şu anki adım)" : "(henüz tamamlanmadı)"}
+                {isActive
+                  ? "(şu anki adım)"
+                  : isCompleted
+                    ? "(tamamlandı)"
+                    : isUnavailable
+                      ? "(sonraki aşama, henüz hazır değil)"
+                      : "(henüz tamamlanmadı)"}
               </span>
 
               {!isLast && (
                 <span
                   aria-hidden="true"
-                  className="mx-1 h-px flex-1 bg-slate-200 sm:mx-2"
+                  className={`mx-1 h-px flex-1 sm:mx-2 ${
+                    isCompleted ? "bg-violet-200" : "bg-slate-200"
+                  }`}
                 />
               )}
             </li>
