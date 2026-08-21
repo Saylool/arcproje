@@ -3,11 +3,17 @@
 import { useCallback, useRef, useState } from "react";
 
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
+import { DebtSummaryView } from "@/components/DebtSummary";
 import { ParticipantAssignment } from "@/components/ParticipantAssignment";
 import { ProgressSteps, type FlowStepId } from "@/components/ProgressSteps";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
 import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
+import {
+  calculateDebts,
+  type DebtCalculationFailure,
+  type DebtCalculationSuccess,
+} from "@/lib/split/debts";
 import {
   checkReceiptReadyForSplit,
   createInitialAssignmentState,
@@ -17,8 +23,31 @@ import {
 
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
 
-/** Fiş düzenleme, kişi atama ve özet arasında geçiş yapılan akış adımı. */
-type FlowScreen = "receipt" | "participants" | "summary";
+/** Fiş düzenleme, kişi atama, atama özeti ve pay/borç ekranı. */
+type FlowScreen = "receipt" | "participants" | "summary" | "debts";
+
+const SCREEN_HEADINGS: Record<FlowScreen, { title: string; description: string }> = {
+  receipt: {
+    title: "Fişini yükle",
+    description:
+      "Fişin fotoğrafını ekle. Sonraki adımlarda ürünleri kişilere dağıtıp herkesin payını hesaplayacağız.",
+  },
+  participants: {
+    title: "Ürünleri kişilere dağıt",
+    description:
+      "Kişileri ekle ve her ürünü kimin aldığını işaretle. Bir ürünü birden fazla kişiye atayabilirsin.",
+  },
+  summary: {
+    title: "Ürünleri kişilere dağıt",
+    description:
+      "Atamaların hazır. Kontrol edip herkesin payını hesaplayabilirsin.",
+  },
+  debts: {
+    title: "Payları kontrol et",
+    description:
+      "Herkesin payı ve fişi ödeyene olan borcu aşağıda. Tutarlar kuruşuna kadar dağıtıldı.",
+  },
+};
 
 const GENERIC_ERROR_MESSAGE = "Fiş analiz edilemedi. Lütfen tekrar dene.";
 const TIMEOUT_ERROR_MESSAGE =
@@ -70,6 +99,18 @@ export function ReceiptFlow() {
     createInitialAssignmentState,
   );
   const [splitError, setSplitError] = useState<string | null>(null);
+  const [debtResult, setDebtResult] = useState<DebtCalculationSuccess | null>(
+    null,
+  );
+  const [debtError, setDebtError] = useState<DebtCalculationFailure | null>(
+    null,
+  );
+
+  /** Atama veya fiş değişince önceki hesap geçersizdir. */
+  const invalidateDebts = useCallback(() => {
+    setDebtResult(null);
+    setDebtError(null);
+  }, []);
 
   const handleFileChange = useCallback((next: File | null) => {
     setFile(next);
@@ -79,19 +120,48 @@ export function ReceiptFlow() {
     setScreen("receipt");
     setSplitError(null);
     setAssignment(createInitialAssignmentState());
+    setDebtResult(null);
+    setDebtError(null);
   }, []);
 
   /** Fiş düzenlenince atamaları mevcut ürün ID'lerine göre güvenli tut. */
-  const handleReceiptChange = useCallback((next: Receipt) => {
-    setReceipt(next);
-    setSplitError(null);
-    setAssignment((previous) =>
-      normalizeAssignments(
-        previous,
-        next.items.map((item) => item.id),
-      ),
-    );
-  }, []);
+  const handleReceiptChange = useCallback(
+    (next: Receipt) => {
+      setReceipt(next);
+      setSplitError(null);
+      invalidateDebts();
+      setAssignment((previous) =>
+        normalizeAssignments(
+          previous,
+          next.items.map((item) => item.id),
+        ),
+      );
+    },
+    [invalidateDebts],
+  );
+
+  const handleAssignmentChange = useCallback(
+    (next: AssignmentState) => {
+      setAssignment(next);
+      invalidateDebts();
+    },
+    [invalidateDebts],
+  );
+
+  const calculate = () => {
+    if (receipt === null) {
+      return;
+    }
+    const result = calculateDebts(receipt, assignment);
+    if (result.status === "success") {
+      setDebtResult(result);
+      setDebtError(null);
+      setScreen("debts");
+      return;
+    }
+    setDebtResult(null);
+    setDebtError(result);
+  };
 
   const analyze = async () => {
     // Aynı isteğin tekrar gönderilmesini engelle.
@@ -140,6 +210,8 @@ export function ReceiptFlow() {
       setScreen("receipt");
       setSplitError(null);
       setAssignment(createInitialAssignmentState());
+      setDebtResult(null);
+      setDebtError(null);
     } catch {
       setErrorMessage(didTimeout ? TIMEOUT_ERROR_MESSAGE : NETWORK_ERROR_MESSAGE);
       setStatus("error");
@@ -173,10 +245,25 @@ export function ReceiptFlow() {
         : "Fişi analiz et";
 
   const currentStepId: FlowStepId =
-    screen === "receipt" ? "receipt" : "participants";
+    screen === "receipt"
+      ? "receipt"
+      : screen === "debts"
+        ? "payment"
+        : "participants";
+
+  const heading = SCREEN_HEADINGS[screen];
 
   return (
     <div className="flex flex-col gap-6">
+      <header className="flex flex-col gap-2">
+        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+          {heading.title}
+        </h1>
+        <p className="text-sm leading-relaxed text-slate-500 sm:text-base">
+          {heading.description}
+        </p>
+      </header>
+
       <ProgressSteps currentStepId={currentStepId} />
 
       {screen === "receipt" && (
@@ -255,7 +342,7 @@ export function ReceiptFlow() {
         <ParticipantAssignment
           receipt={receipt}
           state={assignment}
-          onChange={setAssignment}
+          onChange={handleAssignmentChange}
           onBack={() => setScreen("receipt")}
           onComplete={() => setScreen("summary")}
         />
@@ -266,6 +353,19 @@ export function ReceiptFlow() {
           receipt={receipt}
           state={assignment}
           onEdit={() => setScreen("participants")}
+          onCalculate={calculate}
+          onFixReceipt={() => setScreen("receipt")}
+          error={debtError}
+        />
+      )}
+
+      {screen === "debts" && receipt !== null && debtResult !== null && (
+        <DebtSummaryView
+          receipt={receipt}
+          participants={assignment.participants}
+          result={debtResult}
+          onEditAssignments={() => setScreen("participants")}
+          onEditReceipt={() => setScreen("receipt")}
         />
       )}
 
@@ -274,13 +374,15 @@ export function ReceiptFlow() {
           ? "Fiş analiz ediliyor."
           : status === "error" && errorMessage !== null
             ? errorMessage
-            : screen === "summary"
-              ? "Atamalar hazır. Özet gösteriliyor."
-              : screen === "participants"
-                ? "Kişi atama adımındasın."
-                : status === "ready"
-                  ? "Fiş analizi tamamlandı. Ürünleri düzenleyebilirsin."
-                  : ""}
+            : screen === "debts"
+              ? "Paylar hesaplandı."
+              : screen === "summary"
+                ? "Atamalar hazır. Özet gösteriliyor."
+                : screen === "participants"
+                  ? "Kişi atama adımındasın."
+                  : status === "ready"
+                    ? "Fiş analizi tamamlandı. Ürünleri düzenleyebilirsin."
+                    : ""}
       </p>
     </div>
   );

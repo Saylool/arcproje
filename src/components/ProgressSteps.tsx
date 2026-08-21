@@ -6,8 +6,8 @@ export const FLOW_STEPS = [
 
 export type FlowStepId = (typeof FLOW_STEPS)[number]["id"];
 
-/** Ödeme adımı henüz uygulanmadı; hiçbir zaman aktif gösterilmez. */
-const UNAVAILABLE_STEP_ID: FlowStepId = "payment";
+/** Ödeme adımı yalnızca paylar hesaplandığında aktif olur. */
+const PAYMENT_STEP_ID: FlowStepId = "payment";
 
 type ProgressStepsProps = {
   currentStepId: FlowStepId;
@@ -22,7 +22,7 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
         {FLOW_STEPS.map((step, index) => {
           const isActive = index === currentIndex;
           const isCompleted = index < currentIndex;
-          const isUnavailable = step.id === UNAVAILABLE_STEP_ID;
+          const isPaymentPreview = step.id === PAYMENT_STEP_ID && !isActive;
           const isLast = index === FLOW_STEPS.length - 1;
 
           return (
@@ -61,7 +61,7 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
                   ? "(şu anki adım)"
                   : isCompleted
                     ? "(tamamlandı)"
-                    : isUnavailable
+                    : isPaymentPreview
                       ? "(sonraki aşama, henüz hazır değil)"
                       : "(henüz tamamlanmadı)"}
               </span>
