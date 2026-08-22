@@ -191,7 +191,7 @@ export function DebtSummaryView({
             onClick={onPay}
             className="self-start rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
           >
-            Arc Testnet ile öde
+            Ödeme talebi oluştur
           </button>
         )}
 
@@ -213,8 +213,8 @@ export function DebtSummaryView({
         </div>
 
         <p className="text-xs leading-relaxed text-slate-400">
-          Ödeme Arc Testnet üzerinde test USDC ile yapılır; gerçek bir para
-          transferi değildir.
+          Her borçlu için ayrı bir ödeme talebi imzalarsın; borçlu kendi
+          cüzdanında onaylar. Arc Testnet test USDC&apos;si kullanılır.
         </p>
       </div>
     </section>

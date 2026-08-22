@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import { ArcPayment } from "@/components/ArcPayment";
+import { PaymentRequestCreator } from "@/components/PaymentRequestCreator";
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
 import { DebtSummaryView } from "@/components/DebtSummary";
 import { ParticipantAssignment } from "@/components/ParticipantAssignment";
@@ -49,9 +49,9 @@ const SCREEN_HEADINGS: Record<FlowScreen, { title: string; description: string }
       "Herkesin payı ve fişi ödeyene olan borcu aşağıda. Tutarlar kuruşuna kadar dağıtıldı.",
   },
   payment: {
-    title: "Arc Testnet ile öde",
+    title: "Ödeme talebi oluştur",
     description:
-      "Borcu test USDC ile kendi tarayıcı cüzdanından gönder. Tutarlar test ağına aittir.",
+      "Fişi sen ödedin. Her borçlu için ayrı bir ödeme talebi imzala; borçlu kendi cüzdanında onaylasın.",
   },
 };
 
@@ -377,7 +377,7 @@ export function ReceiptFlow() {
       )}
 
       {screen === "payment" && receipt !== null && debtResult !== null && (
-        <ArcPayment
+        <PaymentRequestCreator
           receipt={receipt}
           participants={assignment.participants}
           result={debtResult}
@@ -391,7 +391,7 @@ export function ReceiptFlow() {
           : status === "error" && errorMessage !== null
             ? errorMessage
             : screen === "payment"
-              ? "Arc Testnet ödeme adımındasın."
+              ? "Ödeme talebi adımındasın."
               : screen === "debts"
                 ? "Paylar hesaplandı."
               : screen === "summary"

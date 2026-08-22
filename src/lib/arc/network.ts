@@ -10,30 +10,30 @@
  * - USDC ERC-20 arayüzü: 6 ondalık (transfer ve bakiye için)
  * Bu iki gösterim asla birbirine karıştırılmaz.
  */
-export const ARC_TESTNET_CHAIN_ID = 5042002;
+import { ACTIVE_NETWORK_PROFILE } from "./profile";
+
+export const ARC_TESTNET_CHAIN_ID = ACTIVE_NETWORK_PROFILE.chainId;
 /**
  * Cüzdan RPC'leri chainId'yi hex bekler. Elle yazılmış bir hex sabiti yanlış
  * ağın eklenmesine yol açabileceği için ondalık kimlikten türetilir.
  */
 export const ARC_TESTNET_CHAIN_ID_HEX = `0x${ARC_TESTNET_CHAIN_ID.toString(16)}`;
-export const ARC_TESTNET_RPC_URL = "https://rpc.testnet.arc.io";
-export const ARC_TESTNET_EXPLORER_URL = "https://testnet.arcscan.app";
-export const ARC_TESTNET_FAUCET_URL = "https://faucet.circle.com";
-export const ARC_TESTNET_DOCS_URL =
-  "https://docs.arc.io/arc/references/connect-to-arc";
+export const ARC_TESTNET_RPC_URL = ACTIVE_NETWORK_PROFILE.rpcUrl;
+export const ARC_TESTNET_EXPLORER_URL = ACTIVE_NETWORK_PROFILE.explorerUrl;
+export const ARC_TESTNET_FAUCET_URL = ACTIVE_NETWORK_PROFILE.faucetUrl;
+export const ARC_TESTNET_DOCS_URL = ACTIVE_NETWORK_PROFILE.docsUrl;
 
 /** App Kit'in zincir kimliği (kurulu chains.d.ts ile doğrulandı). */
-export const ARC_TESTNET_APP_KIT_CHAIN = "Arc_Testnet";
+export const ARC_TESTNET_APP_KIT_CHAIN = ACTIVE_NETWORK_PROFILE.appKitChain;
 
 /** USDC ERC-20 arayüzü — transfer ve bakiye bu adres ve ondalıkla okunur. */
-export const ARC_USDC_ERC20_ADDRESS =
-  "0x3600000000000000000000000000000000000000";
-export const ARC_USDC_ERC20_DECIMALS = 6;
+export const ARC_USDC_ERC20_ADDRESS = ACTIVE_NETWORK_PROFILE.tokenErc20Address;
+export const ARC_USDC_ERC20_DECIMALS = ACTIVE_NETWORK_PROFILE.tokenDecimals;
 
 /** Native gas token ondalığı. Transfer tutarında ASLA kullanılmaz. */
-export const ARC_NATIVE_GAS_DECIMALS = 18;
+export const ARC_NATIVE_GAS_DECIMALS = ACTIVE_NETWORK_PROFILE.nativeGasDecimals;
 
-const EXPLORER_HOST_SUFFIX = "arcscan.app";
+const EXPLORER_HOST_SUFFIX = ACTIVE_NETWORK_PROFILE.explorerHostSuffix;
 
 /**
  * `wallet_addEthereumChain` parametreleri. Native para birimi 18 ondalıktır;
@@ -48,10 +48,10 @@ export function buildAddArcTestnetParams(): {
 } {
   return {
     chainId: ARC_TESTNET_CHAIN_ID_HEX,
-    chainName: "Arc Testnet",
+    chainName: ACTIVE_NETWORK_PROFILE.displayName,
     nativeCurrency: {
-      name: "USDC",
-      symbol: "USDC",
+      name: ACTIVE_NETWORK_PROFILE.nativeGasSymbol,
+      symbol: ACTIVE_NETWORK_PROFILE.nativeGasSymbol,
       decimals: ARC_NATIVE_GAS_DECIMALS,
     },
     rpcUrls: [ARC_TESTNET_RPC_URL],
