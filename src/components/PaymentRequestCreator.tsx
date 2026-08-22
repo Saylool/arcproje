@@ -17,7 +17,9 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
+import { prepareLabel } from "@/lib/arc/labels";
 import {
+  MAX_LABEL_LENGTH,
   createPaymentRequestPayload,
   describePaymentRequestProblem,
 } from "@/lib/arc/payment-request";
@@ -228,8 +230,16 @@ export function PaymentRequestCreator({
       rateNumerator: parsedRate.rate.numerator,
       rateDenominator: parsedRate.rate.denominator,
       microUsdc: conversion.microUsdc,
-      recipientLabel: nameOf(selectedDebt.toParticipantId).slice(0, 40),
-      debtorLabel: nameOf(selectedDebt.fromParticipantId).slice(0, 40),
+      // İsimler kanonik biçime (NFC) indirgenip kod noktası sınırında kesilir;
+      // katı doğrulama yine createPaymentRequestPayload içinde yapılır.
+      recipientLabel: prepareLabel(
+        nameOf(selectedDebt.toParticipantId),
+        MAX_LABEL_LENGTH,
+      ),
+      debtorLabel: prepareLabel(
+        nameOf(selectedDebt.fromParticipantId),
+        MAX_LABEL_LENGTH,
+      ),
     });
     if (!built.ok) {
       setErrorMessage(describePaymentRequestProblem(built.problem));

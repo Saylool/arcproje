@@ -58,6 +58,8 @@ const { signPaymentRequest, verifyPaymentRequestSignature } = await import(
 
 const DEBTOR = "0x0000000000000000000000000000000000000aBc";
 const NOW = 1_700_000_000_000;
+/** Belirlenimci zaman kaynağı; üretimde her zaman geçerli zaman kullanılır. */
+const at = (nowMs: number) => () => nowMs;
 
 /** Test süresince bellekte kalan geçici imzalayan. */
 const signerAccount = privateKeyToAccount(generatePrivateKey());
@@ -169,6 +171,7 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "accountChanged" });
   });
@@ -178,6 +181,7 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "noAccount" });
   });
@@ -187,6 +191,7 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "networkChanged" });
   });
@@ -196,14 +201,16 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "networkChanged" });
   });
 
-  it("geçersiz alıcı adresini imzalamaz", async () => {
+  it("geçersiz alıcı adresi imza öncesi doğrulamada takılır", async () => {
     const payload = payloadFor(signerAccount.address, { recipient: "0x1" });
-    const result = await signPaymentRequest("w", payload);
-    expect(result).toEqual({ ok: false, code: "invalidRecipient" });
+    const result = await signPaymentRequest("w", payload, at(NOW));
+    // Adres artık gövde doğrulamasında yakalanır; sağlayıcıya hiç gidilmez.
+    expect(result).toEqual({ ok: false, code: "invalidPayload" });
   });
 
   it("kullanıcı reddederse hata döner", async () => {
@@ -211,6 +218,7 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "rejected" });
   });
@@ -220,6 +228,7 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
     const result = await signPaymentRequest(
       "w",
       payloadFor(signerAccount.address),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "signatureFormat" });
   });
@@ -227,17 +236,18 @@ describe("signPaymentRequest — imza öncesi preflight", () => {
   it("imza başka bir hesaptan geldiyse talep üretilmez", async () => {
     const payload = payloadFor(signerAccount.address);
     signResponse = await signWith(otherAccount, payload);
-    const result = await signPaymentRequest("w", payload);
+    const result = await signPaymentRequest("w", payload, at(NOW));
     expect(result).toEqual({ ok: false, code: "signerMismatch" });
   });
 
   it("geçerli akışta imzalı talep üretir", async () => {
     const payload = payloadFor(signerAccount.address);
     signResponse = await signWith(signerAccount, payload);
-    const result = await signPaymentRequest("w", payload);
+    const result = await signPaymentRequest("w", payload, at(NOW));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.request.payload).toBe(payload);
+    // İmzalanan ve döndürülen gövde, doğrulanmış kanonik gövdedir.
+    expect(result.request.payload).toEqual(payload);
     expect(result.request.signature).toBe(signResponse);
     expect(Object.isFrozen(result.request)).toBe(true);
     // Üretilen talep bağımsız olarak da doğrulanabilir.

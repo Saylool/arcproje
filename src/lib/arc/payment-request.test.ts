@@ -21,20 +21,23 @@ const DEBTOR = "0x0000000000000000000000000000000000000aBc";
 const NOW = 1_700_000_000_000;
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 
+/** 20000 kuruş, 1 USDC = 40 TRY -> tam olarak 5.000.000 mikro USDC. */
+const baseInput = {
+  recipient: RECIPIENT,
+  debtor: DEBTOR,
+  debtKey: "b->a",
+  tryMinor: 20000,
+  rateNumerator: BigInt(40),
+  rateDenominator: BigInt(1),
+  microUsdc: BigInt(5_000_000),
+  recipientLabel: "Sen",
+  debtorLabel: "Ayşe",
+  nowMs: NOW,
+  requestId: REQUEST_ID,
+};
+
 function payloadOf(over: Partial<PaymentRequestPayload> = {}): PaymentRequestPayload {
-  const created = createPaymentRequestPayload({
-    recipient: RECIPIENT,
-    debtor: DEBTOR,
-    debtKey: "b->a",
-    tryMinor: 20000,
-    rateNumerator: BigInt(40),
-    rateDenominator: BigInt(1),
-    microUsdc: BigInt(5_000_000),
-    recipientLabel: "Sen",
-    debtorLabel: "Ayşe",
-    nowMs: NOW,
-    requestId: REQUEST_ID,
-  });
+  const created = createPaymentRequestPayload(baseInput);
   if (!created.ok) {
     throw new Error(`payload üretilemedi: ${created.problem}`);
   }
@@ -400,5 +403,51 @@ describe("isValidSignatureFormat", () => {
     expect(isValidSignatureFormat("0x")).toBe(false);
     expect(isValidSignatureFormat(null)).toBe(false);
     expect(isValidSignatureFormat(123)).toBe(false);
+  });
+});
+
+
+describe("debtKey de kontrol/biçim karakterlerine karşı korunur", () => {
+  const at = (codePoint: number) => String.fromCodePoint(codePoint);
+
+  it("üretilen borç kimliklerini olduğu gibi kabul eder", () => {
+    // debtIdentityKey biçimi: "<fromParticipantId>-><toParticipantId>"
+    for (const debtKey of [
+      "b->a",
+      "3f2504e0-4f89-11d3-9a0c-0305e82c3301->9f8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+      "p_lz4k9x_ab12cd34->p_lz4k9y_ef56gh78",
+    ]) {
+      const created = createPaymentRequestPayload({ ...baseInput, debtKey });
+      expect(created.ok, debtKey).toBe(true);
+      if (!created.ok) return;
+      expect(created.payload.debtKey).toBe(debtKey);
+    }
+  });
+
+  it("kontrol, biçim ve boşluk hatalarını reddeder", () => {
+    for (const debtKey of [
+      `b->${at(0x200b)}a`,
+      `b->${at(0x202e)}a`,
+      `b->a${at(0x0000)}`,
+      `b->a${at(0x007f)}`,
+      " b->a",
+      "b->a ",
+      "",
+      "   ",
+    ]) {
+      expect(
+        createPaymentRequestPayload({ ...baseInput, debtKey }),
+        JSON.stringify(debtKey),
+      ).toEqual({ ok: false, problem: "invalidDebtKey" });
+    }
+  });
+
+  it("sınırı aşan borç kimliğini reddeder", () => {
+    expect(
+      createPaymentRequestPayload({
+        ...baseInput,
+        debtKey: "a".repeat(MAX_DEBT_KEY_LENGTH + 1),
+      }),
+    ).toEqual({ ok: false, problem: "invalidDebtKey" });
   });
 });

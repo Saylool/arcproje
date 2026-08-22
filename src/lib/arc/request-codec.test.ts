@@ -209,3 +209,73 @@ describe("buildShareUrl", () => {
     expect(decodeSignedRequest(param ?? "", NOW).ok).toBe(true);
   });
 });
+
+
+/** Zarfı elle kurabilmek için codec ile aynı base64url kodlaması. */
+function encodeRawJson(json: string): string {
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+describe("yinelenen anahtar taraması (uçtan uca)", () => {
+  it("zarf düzeyindeki yinelenen anahtarı reddeder", () => {
+    const request = signedOf();
+    const base = JSON.stringify({
+      payload: request.payload,
+      signature: request.signature,
+    });
+    // {"payload":{...},"payload":{...},"signature":"0x..."}
+    const duplicated = `{"payload":${JSON.stringify(request.payload)},${base.slice(1)}`;
+
+    expect(decodeSignedRequest(encodeRawJson(duplicated), NOW)).toEqual({
+      ok: false,
+      problem: "duplicateKey",
+    });
+  });
+
+  it("gövde içindeki yinelenen alanı reddeder", () => {
+    const request = signedOf();
+    const payloadJson = JSON.stringify(request.payload);
+    // JSON.parse sessizce SONUNCU değeri alır; tarama olmasa bu zarf dürüst
+    // görünüp geçerdi.
+    const duplicatedPayload = `{"microUsdc":"9999999",${payloadJson.slice(1)}`;
+    const json = `{"payload":${duplicatedPayload},"signature":${JSON.stringify(
+      request.signature,
+    )}}`;
+
+    expect(decodeSignedRequest(encodeRawJson(json), NOW)).toEqual({
+      ok: false,
+      problem: "duplicateKey",
+    });
+  });
+
+  it("etiket içindeki anahtar benzeri metni anahtar sanmaz", () => {
+    const request = signedOf({ recipientLabel: 'x"payload": 1' });
+    const decoded = decodeSignedRequest(encodeSignedRequest(request), NOW);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.request.payload.recipientLabel).toBe('x"payload": 1');
+  });
+
+  it("kaçışlı tırnak ve ters bölü içeren etiket tarayıcıyı şaşırtmaz", () => {
+    const label = 'Ay\\"şe';
+    const request = signedOf({ debtorLabel: label });
+    const decoded = decodeSignedRequest(encodeSignedRequest(request), NOW);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.request.payload.debtorLabel).toBe(label);
+  });
+
+  it("üretilen geçerli zarf çözülmeye devam eder", () => {
+    const request = signedOf();
+    const decoded = decodeSignedRequest(encodeSignedRequest(request), NOW);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+    expect(decoded.request.payload).toEqual(request.payload);
+    expect(decoded.request.signature).toBe(request.signature);
+  });
+});

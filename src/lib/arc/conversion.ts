@@ -138,6 +138,69 @@ export function parseRate(input: string): RateParseResult {
   return { ok: true, rate: { numerator, denominator } };
 }
 
+/**
+ * Kanonik ondalık paydalar: 10^0 .. 10^MAX_RATE_DECIMALS.
+ *
+ * `parseRate` yalnızca bunları üretebilir. İmzalı gövdede başka bir payda
+ * görmek, kurun uygulamanın üretmediği bir yoldan geldiği anlamına gelir.
+ */
+const CANONICAL_DENOMINATORS: readonly bigint[] = Array.from(
+  { length: MAX_RATE_DECIMALS + 1 },
+  (_unused, index) => BIG_TEN ** BigInt(index),
+);
+
+export function isCanonicalRateDenominator(denominator: bigint): boolean {
+  return CANONICAL_DENOMINATORS.some((allowed) => allowed === denominator);
+}
+
+/** MAX_RATE_VALUE * 10^MAX_RATE_DECIMALS = 10^18 -> en fazla 19 basamak. */
+const MAX_RATE_NUMERATOR_DIGITS = 19;
+/** "1000000" -> en fazla 7 basamak. */
+const MAX_RATE_DENOMINATOR_DIGITS = MAX_RATE_DECIMALS + 1;
+
+const RATE_COMPONENT = /^(0|[1-9][0-9]*)$/;
+
+/**
+ * İmzalı gövdedeki kur alanlarını, elle girilen kurla AYNI sınırlara göre
+ * doğrular. Kur, imza tarafından korunsa bile uygulamanın üretebileceği
+ * aralığın dışında olamaz; imza yalnızca alanların değişmediğini kanıtlar.
+ */
+export function parseSignedRate(
+  numeratorText: unknown,
+  denominatorText: unknown,
+): RateParseResult {
+  if (typeof numeratorText !== "string" || typeof denominatorText !== "string") {
+    return { ok: false, reason: "invalid" };
+  }
+  if (
+    numeratorText.length > MAX_RATE_NUMERATOR_DIGITS ||
+    denominatorText.length > MAX_RATE_DENOMINATOR_DIGITS
+  ) {
+    return { ok: false, reason: "tooLong" };
+  }
+  if (
+    !RATE_COMPONENT.test(numeratorText) ||
+    !RATE_COMPONENT.test(denominatorText)
+  ) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  const numerator = BigInt(numeratorText);
+  const denominator = BigInt(denominatorText);
+
+  if (!isCanonicalRateDenominator(denominator)) {
+    return { ok: false, reason: "invalid" };
+  }
+  if (numerator <= BIG_ZERO) {
+    return { ok: false, reason: "notPositive" };
+  }
+  if (numerator > MAX_RATE_VALUE * denominator) {
+    return { ok: false, reason: "tooLarge" };
+  }
+
+  return { ok: true, rate: { numerator, denominator } };
+}
+
 /** Negatif olmayan bölme, yarım yukarı yuvarlama. */
 function divideRoundHalfUp(numerator: bigint, denominator: bigint): bigint {
   const quotient = numerator / denominator;
@@ -145,29 +208,33 @@ function divideRoundHalfUp(numerator: bigint, denominator: bigint): bigint {
   return remainder * BIG_TWO >= denominator ? quotient + BIG_ONE : quotient;
 }
 
-export type ConversionFailure = "notPositiveDebt" | "zeroAmount";
+export type ConversionFailure = "notPositiveDebt" | "zeroAmount" | "invalidRate";
 
 export type ConversionResult =
   | { ok: true; microUsdc: bigint; amount: string }
   | { ok: false; reason: ConversionFailure };
 
 /**
- * TRY kuruş tutarını mikro USDC'ye çevirir.
+ * Dönüşümün BigInt çekirdeği. Tutar doğrulaması ve talep üretimi AYNI bu
+ * fonksiyonu çağırır; yuvarlama farkı doğan bir tutarsızlık mümkün değildir.
  *
  *   USDC        = (kurus / 100) / X            , X = numerator / denominator
  *   mikroUSDC   = kurus * denominator * 1e6 / (100 * numerator)
  *
  * Bölüm tam çıkmazsa en yakın mikro USDC'ye yarım yukarı yuvarlanır.
  */
-export function convertTryMinorToMicroUsdc(
-  tryMinor: number,
+export function convertTryMinorBigIntToMicroUsdc(
+  tryMinor: bigint,
   rate: ParsedRate,
 ): ConversionResult {
-  if (!Number.isSafeInteger(tryMinor) || tryMinor <= 0) {
+  if (rate.numerator <= BIG_ZERO || rate.denominator <= BIG_ZERO) {
+    return { ok: false, reason: "invalidRate" };
+  }
+  if (tryMinor <= BIG_ZERO) {
     return { ok: false, reason: "notPositiveDebt" };
   }
 
-  const numerator = BigInt(tryMinor) * rate.denominator * MICRO_USDC_PER_USDC;
+  const numerator = tryMinor * rate.denominator * MICRO_USDC_PER_USDC;
   const denominator = KURUS_PER_TRY * rate.numerator;
   const microUsdc = divideRoundHalfUp(numerator, denominator);
 
@@ -176,6 +243,20 @@ export function convertTryMinorToMicroUsdc(
   }
 
   return { ok: true, microUsdc, amount: formatMicroUsdcAmount(microUsdc) };
+}
+
+/**
+ * TRY kuruş tutarını mikro USDC'ye çevirir. Sayısal girdi yalnızca güvenli tam
+ * sayı sınırında kabul edilir; aritmetiğin tamamı BigInt çekirdekte yapılır.
+ */
+export function convertTryMinorToMicroUsdc(
+  tryMinor: number,
+  rate: ParsedRate,
+): ConversionResult {
+  if (!Number.isSafeInteger(tryMinor) || tryMinor <= 0) {
+    return { ok: false, reason: "notPositiveDebt" };
+  }
+  return convertTryMinorBigIntToMicroUsdc(BigInt(tryMinor), rate);
 }
 
 /**

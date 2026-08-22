@@ -1,4 +1,9 @@
 import { normalizeWalletAddress, walletAddressesEqual } from "./address";
+import {
+  convertTryMinorBigIntToMicroUsdc,
+  parseSignedRate,
+} from "./conversion";
+import { toCanonicalLabel, validateCanonicalLabel } from "./labels";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
 
 /**
@@ -91,6 +96,7 @@ export type PaymentRequestProblem =
   | "selfTransfer"
   | "invalidDebtKey"
   | "invalidAmount"
+  | "inconsistentAmount"
   | "invalidRate"
   | "invalidLabel"
   | "invalidTimestamps"
@@ -111,6 +117,8 @@ const PROBLEM_MESSAGES: Record<PaymentRequestProblem, string> = {
   selfTransfer: "Gönderen ve alıcı aynı adres olamaz.",
   invalidDebtKey: "Borç kimliği geçersiz.",
   invalidAmount: "Talepteki tutar geçersiz.",
+  inconsistentAmount:
+    "Talepteki USDC tutarı, borç ve kurla uyuşmuyor. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
   invalidRate: "Talepteki kur geçersiz.",
   invalidLabel: "Talepteki isim alanı geçersiz.",
   invalidTimestamps: "Talebin zaman bilgisi geçersiz.",
@@ -126,19 +134,17 @@ export function describePaymentRequestProblem(
   return PROBLEM_MESSAGES[problem];
 }
 
-/** Kontrol karakterleri (C0 aralığı ve DEL) etiketlerde kabul edilmez. */
-const CONTROL_CHARS = new RegExp("[\\u0000-\\u001f\\u007f]");
 const DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;
 const REQUEST_ID = new RegExp(`^0x[0-9a-f]{${REQUEST_ID_HEX_LENGTH}}$`, "i");
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
 
+/**
+ * İmzalanan metin alanları Unicode'a duyarlı biçimde doğrulanır: kanonik
+ * biçim (NFC) şarttır, kontrol/biçim/bidi/sıfır genişlikli karakterler
+ * reddedilir. Ayrıntı ve gerekçe için `./labels`.
+ */
 function isSafeLabel(value: unknown, maxLength: number): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= maxLength &&
-    !CONTROL_CHARS.test(value)
-  );
+  return validateCanonicalLabel(value, maxLength).ok;
 }
 
 function isDecimalString(value: unknown): value is string {
@@ -176,9 +182,37 @@ export type CreatePayloadResult =
   | { ok: true; payload: PaymentRequestPayload }
   | { ok: false; problem: PaymentRequestProblem };
 
+/**
+ * Ondalık metin üretimi. Güvenli tam sayı olmayan veya negatif bir sayı,
+ * `isDecimalString`in reddedeceği bir metne dönüşür ("1.5", "-3", "1e+21",
+ * "NaN"); kural burada tekrar yazılmaz, doğrulama sınırında uygulanır.
+ */
+function toDecimalText(value: number | bigint): string {
+  return typeof value === "bigint" ? value.toString() : String(value);
+}
+
+/**
+ * Talebi üretir.
+ *
+ * Üretim ve tüketim TEK bir katı yoldan geçer: burada yalnızca aday gövde
+ * kurulur, kuralların tamamını `validatePaymentRequestPayload` uygular. Böylece
+ * "üretirken izin verilen ama okurken reddedilen" (veya tersi) bir alan
+ * mümkün değildir; ekonomik tutarlılık, talep kimliği biçimi, etiket
+ * kanonikliği ve ondalık sınırları üretilen talep için de zorunludur.
+ */
 export function createPaymentRequestPayload(
   input: CreatePayloadInput,
 ): CreatePayloadResult {
+  const lifetimeMs = input.lifetimeMs ?? REQUEST_DEFAULT_LIFETIME_MS;
+  if (!Number.isFinite(lifetimeMs) || lifetimeMs <= 0 || lifetimeMs > REQUEST_MAX_LIFETIME_MS) {
+    return { ok: false, problem: "lifetimeTooLong" };
+  }
+
+  const nowMs = input.nowMs ?? Date.now();
+  if (!Number.isSafeInteger(nowMs) || nowMs <= 0) {
+    return { ok: false, problem: "invalidTimestamps" };
+  }
+
   const recipient = normalizeWalletAddress(input.recipient);
   if (recipient === null) {
     return { ok: false, problem: "invalidRecipient" };
@@ -187,56 +221,26 @@ export function createPaymentRequestPayload(
   if (debtor === null) {
     return { ok: false, problem: "invalidDebtor" };
   }
-  if (walletAddressesEqual(recipient, debtor)) {
-    return { ok: false, problem: "selfTransfer" };
-  }
-  if (!isSafeLabel(input.debtKey, MAX_DEBT_KEY_LENGTH)) {
-    return { ok: false, problem: "invalidDebtKey" };
-  }
-  if (
-    !isSafeLabel(input.recipientLabel, MAX_LABEL_LENGTH) ||
-    !isSafeLabel(input.debtorLabel, MAX_LABEL_LENGTH)
-  ) {
-    return { ok: false, problem: "invalidLabel" };
-  }
-  if (!Number.isSafeInteger(input.tryMinor) || input.tryMinor <= 0) {
-    return { ok: false, problem: "invalidAmount" };
-  }
-  if (input.microUsdc <= BigInt(0)) {
-    return { ok: false, problem: "invalidAmount" };
-  }
-  if (input.rateNumerator <= BigInt(0) || input.rateDenominator <= BigInt(0)) {
-    return { ok: false, problem: "invalidRate" };
-  }
 
-  const lifetimeMs = input.lifetimeMs ?? REQUEST_DEFAULT_LIFETIME_MS;
-  if (lifetimeMs <= 0 || lifetimeMs > REQUEST_MAX_LIFETIME_MS) {
-    return { ok: false, problem: "lifetimeTooLong" };
-  }
-
-  const nowMs = input.nowMs ?? Date.now();
-  const issuedAt = Math.floor(nowMs / 1000);
-  const expiresAt = Math.floor((nowMs + lifetimeMs) / 1000);
-
-  return {
-    ok: true,
-    payload: Object.freeze({
-      schemaVersion: PAYMENT_REQUEST_SCHEMA_VERSION,
-      requestId: input.requestId ?? createRequestId(),
-      chainId: ACTIVE_NETWORK_PROFILE.chainId,
-      recipient,
-      debtor,
-      debtKey: input.debtKey,
-      tryMinor: String(input.tryMinor),
-      rateNumerator: input.rateNumerator.toString(),
-      rateDenominator: input.rateDenominator.toString(),
-      microUsdc: input.microUsdc.toString(),
-      issuedAt,
-      expiresAt,
-      recipientLabel: input.recipientLabel,
-      debtorLabel: input.debtorLabel,
-    }),
+  const candidate: Record<string, unknown> = {
+    schemaVersion: PAYMENT_REQUEST_SCHEMA_VERSION,
+    requestId: input.requestId ?? createRequestId(),
+    chainId: ACTIVE_NETWORK_PROFILE.chainId,
+    recipient,
+    debtor,
+    // Etiketler ve borç kimliği kanonik biçimde saklanır ve öyle imzalanır.
+    debtKey: toCanonicalLabel(input.debtKey),
+    tryMinor: toDecimalText(input.tryMinor),
+    rateNumerator: toDecimalText(input.rateNumerator),
+    rateDenominator: toDecimalText(input.rateDenominator),
+    microUsdc: toDecimalText(input.microUsdc),
+    issuedAt: Math.floor(nowMs / 1000),
+    expiresAt: Math.floor((nowMs + lifetimeMs) / 1000),
+    recipientLabel: toCanonicalLabel(input.recipientLabel),
+    debtorLabel: toCanonicalLabel(input.debtorLabel),
   };
+
+  return validatePaymentRequestPayload(candidate, nowMs);
 }
 
 /**
@@ -348,11 +352,34 @@ export function validatePaymentRequestPayload(
   }
   if (
     !isDecimalString(record.rateNumerator) ||
-    !isDecimalString(record.rateDenominator) ||
-    BigInt(record.rateNumerator) <= BigInt(0) ||
-    BigInt(record.rateDenominator) <= BigInt(0)
+    !isDecimalString(record.rateDenominator)
   ) {
     return { ok: false, problem: "invalidRate" };
+  }
+  // Kur, elle girilen kurla aynı sınırlara tabidir: kanonik ondalık payda,
+  // pozitif pay ve MAX_RATE_VALUE üst sınırı.
+  const rate = parseSignedRate(record.rateNumerator, record.rateDenominator);
+  if (!rate.ok) {
+    return { ok: false, problem: "invalidRate" };
+  }
+
+  /*
+   * Geçerli bir imza YALNIZCA alanları kimin imzaladığını kanıtlar; bu
+   * alanların birbiriyle tutarlı olduğunu kanıtlamaz. Kötü niyetli bir talep
+   * oluşturucu, küçük bir TRY borcunu büyük bir USDC tutarıyla eşleştirip
+   * kriptografik olarak geçerli biçimde imzalayabilir. Bu yüzden tutar,
+   * dürüst üretimin kullandığı BigInt çekirdeğiyle (aynı yarım-yukarı
+   * yuvarlama) yeniden hesaplanır ve birebir eşitlik aranır.
+   */
+  const recomputed = convertTryMinorBigIntToMicroUsdc(
+    BigInt(record.tryMinor),
+    rate.rate,
+  );
+  if (!recomputed.ok) {
+    return { ok: false, problem: "invalidAmount" };
+  }
+  if (recomputed.microUsdc !== BigInt(record.microUsdc)) {
+    return { ok: false, problem: "inconsistentAmount" };
   }
 
   const issuedAt = record.issuedAt;

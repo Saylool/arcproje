@@ -123,8 +123,14 @@ function snapshotFromPayload(payload: PaymentRequestPayload) {
     amount: formatMicroUsdcAmount(micro),
     displayAmount: formatMicroUsdcForDisplay(micro),
     chainId: payload.chainId,
+    requestId: payload.requestId,
+    issuedAt: payload.issuedAt,
+    expiresAt: payload.expiresAt,
   });
 }
+
+/** Belirlenimci zaman kaynağı; üretimde her zaman geçerli zaman kullanılır. */
+const at = (nowMs: number) => () => nowMs;
 
 beforeEach(() => {
   sendMock.mockReset();
@@ -138,7 +144,7 @@ describe("imzalı talepten anlık görüntü", () => {
   it("yalnızca imzalı gövdeden kurulur ve sınır doğrulamasını geçer", () => {
     const payload = payloadOf();
     const snapshot = snapshotFromPayload(payload);
-    expect(validatePaymentSnapshot(snapshot)).toBeNull();
+    expect(validatePaymentSnapshot(snapshot, NOW)).toBeNull();
     expect(snapshot.recipientAddress).toBe(payload.recipient);
     expect(snapshot.debtorAddress).toBe(payload.debtor);
     expect(snapshot.microUsdc).toBe("50000");
@@ -162,7 +168,7 @@ describe("imzalı talepten anlık görüntü", () => {
 describe("App Kit sınırı — borçlu tarafı", () => {
   it("bağlı hesap talepteki borçlu değilse App Kit çağrılmaz", async () => {
     accountsResponse = [payerAccount.address];
-    const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()));
+    const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()), at(NOW));
     expect(result).toEqual({ ok: false, code: "accountChanged" });
     expect(sendMock).not.toHaveBeenCalled();
     expect(adapterMock).not.toHaveBeenCalled();
@@ -170,7 +176,7 @@ describe("App Kit sınırı — borçlu tarafı", () => {
 
   it("ağ Arc Testnet değilse App Kit çağrılmaz", async () => {
     chainResponse = "0x1";
-    const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()));
+    const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()), at(NOW));
     expect(result).toEqual({ ok: false, code: "networkChanged" });
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -180,14 +186,14 @@ describe("App Kit sınırı — borçlu tarafı", () => {
       ...snapshotFromPayload(payloadOf()),
       recipientAddress: debtorAccount.address,
     };
-    const result = await sendArcUsdc("w", snapshot);
+    const result = await sendArcUsdc("w", snapshot, at(NOW));
     expect(result).toEqual({ ok: false, code: "selfTransfer" });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("geçerli talepte tahmin başarılı olur", async () => {
     estimateMock.mockResolvedValue({ totalFee: "0.0001" });
-    const result = await estimateArcSend("w", snapshotFromPayload(payloadOf()));
+    const result = await estimateArcSend("w", snapshotFromPayload(payloadOf()), at(NOW));
     expect(result.ok).toBe(true);
     expect(estimateMock).toHaveBeenCalledTimes(1);
   });
@@ -196,7 +202,7 @@ describe("App Kit sınırı — borçlu tarafı", () => {
     sendMock.mockResolvedValue({ txHash: TX_HASH, state: "COMPLETE" });
     const payload = payloadOf();
     const snapshot = snapshotFromPayload(payload);
-    const result = await sendArcUsdc("w", snapshot);
+    const result = await sendArcUsdc("w", snapshot, at(NOW));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -216,15 +222,34 @@ describe("App Kit sınırı — borçlu tarafı", () => {
     expect(params.from.chain).toBe(ACTIVE_NETWORK_PROFILE.appKitChain);
   });
 
-  it("kurcalanmış tutar imza doğrulamasında yakalanır", async () => {
+  it("kurcalanmış tutar daha imza doğrulamasına gelmeden reddedilir", async () => {
     const payload = payloadOf();
     const { encoded } = await signedLinkFor(payload);
     const decoded = decodeSignedRequest(encoded, NOW);
     expect(decoded.ok).toBe(true);
     if (!decoded.ok) return;
 
-    // Tutar değiştirilirse zarf yeniden kodlansa bile imza tutmaz.
+    // Tutar borç ve kurla artık tutarsız; çözümleme bunu imzaya bakmadan görür.
     const tampered = { ...decoded.request.payload, microUsdc: "5000000" };
+    const reencoded = encodeSignedRequest({
+      payload: tampered,
+      signature: decoded.request.signature,
+    });
+    expect(decodeSignedRequest(reencoded, NOW)).toEqual({
+      ok: false,
+      problem: "inconsistentAmount",
+    });
+  });
+
+  it("ekonomik olarak tutarlı ama kurcalanmış alan imza doğrulamasında yakalanır", async () => {
+    const payload = payloadOf();
+    const { encoded } = await signedLinkFor(payload);
+    const decoded = decodeSignedRequest(encoded, NOW);
+    expect(decoded.ok).toBe(true);
+    if (!decoded.ok) return;
+
+    // Etiket değişimi tutarları bozmaz; bu katmanı yalnızca imza yakalayabilir.
+    const tampered = { ...decoded.request.payload, recipientLabel: "Başkası" };
     const reencoded = encodeSignedRequest({
       payload: tampered,
       signature: decoded.request.signature,

@@ -5,6 +5,7 @@ import { isArcTestnet, parseChainId } from "./network";
 import {
   buildTypedData,
   isValidSignatureFormat,
+  validatePaymentRequestPayload,
   type PaymentRequestPayload,
   type SignedPaymentRequest,
 } from "./payment-request";
@@ -16,6 +17,11 @@ import { withProvider } from "./wallet";
  * İmza YALNIZCA talebi oluşturur; hiçbir transfer yetkisi vermez. İmzalayan,
  * fişi ödeyen (alıcı) olmalıdır. İmzadan hemen önce provider'a hesap ve zincir
  * yeniden sorulur; değişmişse imzalama yapılmaz.
+ *
+ * Cüzdana hiçbir şey sorulmadan ÖNCE gövdenin tamamı katı doğrulamadan geçer.
+ * Kullanıcıya, uygulamanın kendi kurallarını geçemeyen bir gövde için cüzdan
+ * onay ekranı gösterilmez; imzalanan şey her zaman doğrulanmış kanonik
+ * gövdedir.
  *
  * Doğrulama viem'in `recoverTypedDataAddress` fonksiyonuyla yapılır; bu EOA
  * (harici hesap) imzalarını güvenle çözer. Sözleşme hesapları (ERC-1271) için
@@ -29,6 +35,7 @@ export type RequestSigningErrorCode =
   | "noAccount"
   | "accountChanged"
   | "networkChanged"
+  | "invalidPayload"
   | "invalidRecipient"
   | "signatureFormat"
   | "signerMismatch"
@@ -42,6 +49,8 @@ const MESSAGES: Record<RequestSigningErrorCode, string> = {
     "Cüzdandaki aktif hesap, talebin alıcısı değil. Fişi ödeyen hesaba geçip tekrar dene.",
   networkChanged:
     "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
+  invalidPayload:
+    "Ödeme talebi kendi doğrulamamızdan geçmedi; cüzdana hiçbir şey gönderilmedi. Tutarı, kuru ve adresleri kontrol edip tekrar dene.",
   invalidRecipient: "Alıcı cüzdan adresi geçersiz.",
   signatureFormat: "Cüzdan beklenen biçimde bir imza döndürmedi.",
   signerMismatch:
@@ -95,12 +104,30 @@ function toEip712Json(payload: PaymentRequestPayload): string {
 /**
  * Talebi imzalar. Alıcı adresi, imzalayan hesapla birebir eşleşmelidir.
  * İmza alındıktan sonra, paylaşılabilir bağlantı üretilmeden önce doğrulanır.
+ *
+ * `now` yalnızca testlerde belirlenimci zaman vermek içindir; üretimde geçerli
+ * zaman kullanılır.
  */
 export async function signPaymentRequest(
   walletUuid: string,
   payload: PaymentRequestPayload,
+  now: () => number = Date.now,
 ): Promise<RequestSigningResult> {
-  const recipient = normalizeWalletAddress(payload.recipient);
+  /*
+   * Sağlayıcıya dokunmadan önce gövdenin TAMAMI doğrulanır: talep kimliği,
+   * zincir, adresler, zaman alanları, etiketler, kur, tutar ve tutarın borçla
+   * ekonomik tutarlılığı. Geçersiz bir gövde için `withProvider` hiç çağrılmaz,
+   * dolayısıyla `eth_signTypedData_v4` de çağrılmaz ve paylaşılabilir bir
+   * bağlantı üretilemez.
+   */
+  const validated = validatePaymentRequestPayload(payload, now());
+  if (!validated.ok) {
+    return { ok: false, code: "invalidPayload" };
+  }
+  // Bundan sonra yalnızca normalleştirilmiş kanonik gövde kullanılır.
+  const canonical = validated.payload;
+
+  const recipient = normalizeWalletAddress(canonical.recipient);
   if (recipient === null) {
     return { ok: false, code: "invalidRecipient" };
   }
@@ -136,7 +163,7 @@ export async function signPaymentRequest(
 
     const result = await provider.request({
       method: "eth_signTypedData_v4",
-      params: [active, toEip712Json(payload)],
+      params: [active, toEip712Json(canonical)],
     });
     if (!isValidSignatureFormat(result)) {
       guard = "signatureFormat";
@@ -160,12 +187,15 @@ export async function signPaymentRequest(
   signature = outcome.value;
 
   // Paylaşılabilir bağlantı üretilmeden önce imza doğrulanır.
-  const verified = await verifyPaymentRequestSignature({ payload, signature });
+  const verified = await verifyPaymentRequestSignature({
+    payload: canonical,
+    signature,
+  });
   if (!verified.ok) {
     return { ok: false, code: "signerMismatch" };
   }
 
-  return { ok: true, request: Object.freeze({ payload, signature }) };
+  return { ok: true, request: Object.freeze({ payload: canonical, signature }) };
 }
 
 export type VerifyResult =
