@@ -1,3 +1,4 @@
+import { scanForDuplicateKeys } from "./json-duplicate-keys";
 import {
   describePaymentRequestProblem,
   isValidSignatureFormat,
@@ -80,24 +81,6 @@ function fromBase64Url(value: string): string | null {
   }
 }
 
-/**
- * Düz nesnelerde yinelenen anahtar tespiti.
- *
- * `JSON.parse` yinelenen anahtarda sessizce son değeri alır. Bu tarama düz
- * (iç içe olmayan) gövdeler için yeterlidir; kaçırdığı bir durum olsa bile
- * EIP-712 imza doğrulaması değiştirilmiş gövdeyi zaten reddeder.
- */
-function hasDuplicateTopLevelKey(json: string, keys: readonly string[]): boolean {
-  for (const key of keys) {
-    const pattern = new RegExp(`"${key}"\\s*:`, "g");
-    const matches = json.match(pattern);
-    if (matches !== null && matches.length > 1) {
-      return true;
-    }
-  }
-  return false;
-}
-
 const ENVELOPE_KEYS = ["payload", "signature"] as const;
 
 export function encodeSignedRequest(request: SignedPaymentRequest): string {
@@ -133,6 +116,17 @@ export function decodeSignedRequest(
     return { ok: false, problem: "tooLong" };
   }
 
+  // Yinelenen anahtar taraması AYRIŞTIRMADAN ÖNCE çalışır: `JSON.parse` bu
+  // belirsizliği sessizce yutar. Tarama zarfı da gövdeyi de, her nesne
+  // kapsamını ayrı ayrı denetler.
+  const scan = scanForDuplicateKeys(json);
+  if (scan === "duplicate") {
+    return { ok: false, problem: "duplicateKey" };
+  }
+  if (scan === "malformed") {
+    return { ok: false, problem: "malformedJson" };
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(json);
@@ -151,9 +145,6 @@ export function decodeSignedRequest(
   }
   if (!("payload" in envelope) || !("signature" in envelope)) {
     return { ok: false, problem: "invalidEnvelope" };
-  }
-  if (hasDuplicateTopLevelKey(json, ENVELOPE_KEYS)) {
-    return { ok: false, problem: "duplicateKey" };
   }
   if (!isValidSignatureFormat(envelope.signature)) {
     return { ok: false, problem: "invalidSignatureFormat" };

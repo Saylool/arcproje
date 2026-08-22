@@ -58,6 +58,13 @@ const DEBTOR = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 const RECIPIENT = "0x0000000000000000000000000000000000000aBc";
 const TX_HASH = `0x${"ab".repeat(32)}`;
 
+/** Belirlenimci test zamanı; üretimde her zaman geçerli zaman kullanılır. */
+const NOW = 1_700_000_000_000;
+const NOW_SECONDS = Math.floor(NOW / 1000);
+const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
+const REQUEST_ID = `0x${"11".repeat(32)}`;
+const at = (nowMs: number) => () => nowMs;
+
 function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot {
   return Object.freeze({
     debtKey: "b->a",
@@ -72,6 +79,9 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     amount: "5.00",
     displayAmount: "5,00",
     chainId: ARC_TESTNET_CHAIN_ID,
+    requestId: REQUEST_ID,
+    issuedAt: NOW_SECONDS,
+    expiresAt: NOW_SECONDS + SEVEN_DAYS_SECONDS,
     ...over,
   });
 }
@@ -89,6 +99,7 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
     const result = await sendArcUsdc(
       "w",
       snapshotOf({ recipientAddress: DEBTOR.toLowerCase() }),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "selfTransfer" });
     expect(sendMock).not.toHaveBeenCalled();
@@ -96,7 +107,7 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
   });
 
   it("geçersiz alıcıda App Kit çağrılmaz", async () => {
-    const result = await sendArcUsdc("w", snapshotOf({ recipientAddress: "0x1" }));
+    const result = await sendArcUsdc("w", snapshotOf({ recipientAddress: "0x1" }), at(NOW));
     expect(result).toEqual({ ok: false, code: "invalidRecipient" });
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -105,6 +116,7 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
     const result = await sendArcUsdc(
       "w",
       snapshotOf({ amount: "1e6", microUsdc: "1000000000000" }),
+      at(NOW),
     );
     expect(result).toEqual({ ok: false, code: "invalidAmount" });
     expect(sendMock).not.toHaveBeenCalled();
@@ -112,7 +124,7 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
 
   it("hesap değiştiyse App Kit çağrılmaz", async () => {
     accountsResponse = ["0x1111111111111111111111111111111111111111"];
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "accountChanged" });
     expect(sendMock).not.toHaveBeenCalled();
     expect(adapterMock).not.toHaveBeenCalled();
@@ -120,28 +132,28 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
 
   it("hesap kalmadıysa App Kit çağrılmaz", async () => {
     accountsResponse = [];
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "noAccount" });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("ağ değiştiyse App Kit çağrılmaz", async () => {
     chainResponse = "0x1";
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "networkChanged" });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("bozuk zincir cevabı ağ değişmiş sayılır", async () => {
     chainResponse = "0x4cef52junk";
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "networkChanged" });
     expect(sendMock).not.toHaveBeenCalled();
   });
 
   it("preflight tahmin için de çalışır", async () => {
     chainResponse = "0x1";
-    const result = await estimateArcSend("w", snapshotOf());
+    const result = await estimateArcSend("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "networkChanged" });
     expect(estimateMock).not.toHaveBeenCalled();
   });
@@ -149,12 +161,12 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
   it("tahmin başarılı olsa bile gönderimden önce preflight tekrarlanır", async () => {
     estimateMock.mockResolvedValue({ totalFee: "0.01" });
     const snapshot = snapshotOf();
-    expect((await estimateArcSend("w", snapshot)).ok).toBe(true);
+    expect((await estimateArcSend("w", snapshot, at(NOW))).ok).toBe(true);
     expect(estimateMock).toHaveBeenCalledTimes(1);
 
     // Tahminden sonra hesap değişir.
     accountsResponse = ["0x1111111111111111111111111111111111111111"];
-    const result = await sendArcUsdc("w", snapshot);
+    const result = await sendArcUsdc("w", snapshot, at(NOW));
     expect(result).toEqual({ ok: false, code: "accountChanged" });
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -170,7 +182,7 @@ describe("başarılı gönderim (taklit App Kit)", () => {
     });
 
     const snapshot = snapshotOf();
-    const result = await sendArcUsdc("w", snapshot);
+    const result = await sendArcUsdc("w", snapshot, at(NOW));
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -185,7 +197,7 @@ describe("başarılı gönderim (taklit App Kit)", () => {
 
   it("App Kit'e onaylanan snapshot'ın tutarı ve alıcısı gönderilir", async () => {
     sendMock.mockResolvedValue({ txHash: TX_HASH });
-    await sendArcUsdc("w", snapshotOf());
+    await sendArcUsdc("w", snapshotOf(), at(NOW));
     const params = sendMock.mock.calls[0][0];
     expect(params.to).toBe(RECIPIENT);
     expect(params.amount).toBe("5.00");
@@ -195,13 +207,13 @@ describe("başarılı gönderim (taklit App Kit)", () => {
 
   it("SDK geçersiz bir hash döndürürse başarı sayılmaz", async () => {
     sendMock.mockResolvedValue({ txHash: "0xdeadbeef" });
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "sendFailed" });
   });
 
   it("cüzdan reddi kullanıcıya uygun kodla döner", async () => {
     sendMock.mockRejectedValue(Object.assign(new Error("user rejected"), { code: 4001 }));
-    const result = await sendArcUsdc("w", snapshotOf());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "rejected" });
   });
 });

@@ -11,6 +11,11 @@ import {
   isValidTransactionHash,
   parseChainId,
 } from "./network";
+import {
+  REQUEST_ID_HEX_LENGTH,
+  REQUEST_MAX_CLOCK_SKEW_MS,
+  REQUEST_MAX_LIFETIME_MS,
+} from "./payment-request";
 import { withProvider, type Eip1193Provider } from "./wallet";
 
 /**
@@ -23,6 +28,11 @@ import { withProvider, type Eip1193Provider } from "./wallet";
  *
  * App Kit ve adaptör dinamik import edilir: yalnızca tarayıcıda, yalnızca
  * doğrulama geçtikten sonra yüklenir. Ham SDK/provider hataları dışarı verilmez.
+ *
+ * Talebin geçerlilik süresi bu sınırda, React'ten BAĞIMSIZ olarak uygulanır ve
+ * her adımda yeniden ölçülür: girişte, preflight'tan sonra (App Kit henüz
+ * yüklenmeden) ve `estimateSend`/`send` çağrısından hemen önce. İnceleme ile
+ * gönderim arasında geçen sürede dolmuş bir talep gönderilemez.
  */
 
 const BIG_ZERO = BigInt(0);
@@ -49,6 +59,11 @@ export type ArcPaymentSnapshot = Readonly<{
   /** Kullanıcıya gösterilen tutar. */
   displayAmount: string;
   chainId: number;
+  /** İmzalı talebin kimliği (0x + 64 hex). Sonucu talebe bağlar. */
+  requestId: string;
+  /** İmzalı talepten birebir taşınan Unix saniye alanları. */
+  issuedAt: number;
+  expiresAt: number;
 }>;
 
 export type ArcSendErrorCode =
@@ -61,6 +76,9 @@ export type ArcSendErrorCode =
   | "invalidSender"
   | "selfTransfer"
   | "invalidAmount"
+  | "invalidRequestId"
+  | "invalidRequestTime"
+  | "expiredRequest"
   | "insufficientFunds"
   | "estimateFailed"
   | "sendFailed";
@@ -78,6 +96,10 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
   selfTransfer:
     "Gönderen ve alıcı aynı cüzdan adresi. Kendine ödeme yapılamaz.",
   invalidAmount: "Gönderilecek tutar geçerli değil.",
+  invalidRequestId: "Ödeme talebinin kimliği geçersiz.",
+  invalidRequestTime: "Ödeme talebinin geçerlilik bilgisi geçersiz.",
+  expiredRequest:
+    "Bu ödeme talebinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   insufficientFunds:
     "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
   estimateFailed:
@@ -119,12 +141,49 @@ export function amountToMicroUsdc(amount: string): bigint | null {
   return whole * MICRO_USDC_PER_USDC + BigInt(fraction);
 }
 
+const REQUEST_ID_PATTERN = new RegExp(
+  `^0x[0-9a-fA-F]{${REQUEST_ID_HEX_LENGTH}}$`,
+);
+
+/**
+ * Talebin zaman geçerliliği. Ucuzdur ve gönderim yolunda birden fazla kez
+ * çağrılır; sağlayıcıya sorulan hiçbir şeye bağlı değildir.
+ */
+export function checkSnapshotRequestTime(
+  snapshot: ArcPaymentSnapshot,
+  nowMs: number,
+): ArcSendErrorCode | null {
+  const { issuedAt, expiresAt } = snapshot;
+  if (
+    !Number.isSafeInteger(issuedAt) ||
+    !Number.isSafeInteger(expiresAt) ||
+    issuedAt <= 0 ||
+    expiresAt <= issuedAt ||
+    (expiresAt - issuedAt) * 1000 > REQUEST_MAX_LIFETIME_MS
+  ) {
+    return "invalidRequestTime";
+  }
+
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const skewSeconds = Math.floor(REQUEST_MAX_CLOCK_SKEW_MS / 1000);
+  if (issuedAt - skewSeconds > nowSeconds) {
+    return "invalidRequestTime";
+  }
+  if (expiresAt <= nowSeconds) {
+    return "expiredRequest";
+  }
+  return null;
+}
+
 /**
  * Snapshot'ın her alanını yeniden doğrular. React state'inde ne olduğuna
  * bakılmaksızın bu kontroller geçilmeden App Kit çağrılmaz.
+ *
+ * `nowMs` yalnızca testlerde belirlenimci zaman vermek içindir.
  */
 export function validatePaymentSnapshot(
   snapshot: ArcPaymentSnapshot,
+  nowMs: number = Date.now(),
 ): ArcSendErrorCode | null {
   const recipient = normalizeWalletAddress(snapshot.recipientAddress);
   if (recipient === null) {
@@ -159,7 +218,14 @@ export function validatePaymentSnapshot(
   if (!Number.isSafeInteger(snapshot.tryMinor) || snapshot.tryMinor <= 0) {
     return "invalidAmount";
   }
-  return null;
+
+  if (
+    typeof snapshot.requestId !== "string" ||
+    !REQUEST_ID_PATTERN.test(snapshot.requestId)
+  ) {
+    return "invalidRequestId";
+  }
+  return checkSnapshotRequestTime(snapshot, nowMs);
 }
 
 /** Provider'a doğrudan sorarak hesabı ve ağı App Kit'ten hemen önce doğrular. */
@@ -258,16 +324,19 @@ type BoundaryOutcome<T> =
 /**
  * Doğrulama + preflight + işlem. Preflight her çağrıda tekrarlanır; tahmin
  * daha önce başarılı olsa bile gönderimden hemen önce yeniden çalışır.
+ * Talebin süresi üç noktada ölçülür: girişte, App Kit yüklenmeden hemen önce
+ * ve zincir çağrısından hemen önce.
  */
 async function runGuarded<T>(
   walletUuid: string,
   snapshot: ArcPaymentSnapshot,
   fallbackCode: ArcSendErrorCode,
+  now: () => number,
   action: (
     context: { kit: Awaited<ReturnType<typeof buildSendParams>>["kit"]; params: Awaited<ReturnType<typeof buildSendParams>>["params"] },
   ) => Promise<T>,
 ): Promise<BoundaryOutcome<T>> {
-  const invalid = validatePaymentSnapshot(snapshot);
+  const invalid = validatePaymentSnapshot(snapshot, now());
   if (invalid !== null) {
     // App Kit hiç import edilmez.
     return { ok: false, code: invalid };
@@ -281,7 +350,18 @@ async function runGuarded<T>(
     if (guardCode !== null) {
       throw new Error("preflight");
     }
+    // Preflight sağlayıcıyla konuşurken zaman ilerlemiş olabilir; süresi dolmuş
+    // bir talep için App Kit import bile edilmez.
+    guardCode = checkSnapshotRequestTime(snapshot, now());
+    if (guardCode !== null) {
+      throw new Error("expired");
+    }
     const { kit, params } = await buildSendParams(provider, snapshot);
+    // Zincire giden çağrıdan hemen önceki son ölçüm.
+    guardCode = checkSnapshotRequestTime(snapshot, now());
+    if (guardCode !== null) {
+      throw new Error("expired");
+    }
     try {
       return await action({ kit, params });
     } catch (error) {
@@ -305,11 +385,13 @@ async function runGuarded<T>(
   return { ok: false, code: fallbackCode };
 }
 
+/** `now` yalnızca testlerde belirlenimci zaman vermek içindir. */
 export async function estimateArcSend(
   walletUuid: string,
   snapshot: ArcPaymentSnapshot,
+  now: () => number = Date.now,
 ): Promise<ArcSendResult<ArcEstimate>> {
-  return runGuarded(walletUuid, snapshot, "estimateFailed", async ({ kit, params }) => {
+  return runGuarded(walletUuid, snapshot, "estimateFailed", now, async ({ kit, params }) => {
     const estimate = await kit.estimateSend(params);
     return {
       summary:
@@ -320,11 +402,13 @@ export async function estimateArcSend(
   });
 }
 
+/** `now` yalnızca testlerde belirlenimci zaman vermek içindir. */
 export async function sendArcUsdc(
   walletUuid: string,
   snapshot: ArcPaymentSnapshot,
+  now: () => number = Date.now,
 ): Promise<ArcSendResult<ArcSendSuccess>> {
-  return runGuarded(walletUuid, snapshot, "sendFailed", async ({ kit, params }) => {
+  return runGuarded(walletUuid, snapshot, "sendFailed", now, async ({ kit, params }) => {
     const result = await kit.send(params);
     const txHash = readString(result, "txHash");
     if (txHash === null || !isValidTransactionHash(txHash)) {

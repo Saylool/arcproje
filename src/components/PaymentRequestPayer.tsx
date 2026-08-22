@@ -159,6 +159,11 @@ export function PaymentRequestPayer() {
       amount: formatMicroUsdcAmount(micro),
       displayAmount: formatMicroUsdcForDisplay(micro),
       chainId: request.payload.chainId,
+      // Kimlik ve süre alanları gönderim sınırına taşınır; süre orada
+      // React'ten bağımsız olarak yeniden ölçülür.
+      requestId: request.payload.requestId,
+      issuedAt: request.payload.issuedAt,
+      expiresAt: request.payload.expiresAt,
     });
   }, [request]);
 
@@ -223,12 +228,25 @@ export function PaymentRequestPayer() {
     !busy &&
     !alreadyPaid;
 
+  /** İncelemeyi düşürür: onay kutusu ve gönder düğmesi ekrandan kalkar. */
+  const dropReview = (message: string) => {
+    setErrorMessage(message);
+    setEstimateSummary(null);
+    setConfirmed(false);
+    setStatus("idle");
+  };
+
   const estimate = async () => {
     if (!canEstimate || snapshot === null || selectedWalletUuid === null) return;
     // Talebin süresi bu arada dolmuş olabilir.
-    if (encoded !== null && !decodeSignedRequest(encoded, Date.now()).ok) {
-      setErrorMessage("Bu ödeme talebinin süresi dolmuş.");
-      return;
+    if (encoded !== null) {
+      const fresh = decodeSignedRequest(encoded, Date.now());
+      if (!fresh.ok) {
+        dropReview(
+          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+        );
+        return;
+      }
     }
     setStatus("estimating");
     setErrorMessage(null);
@@ -252,6 +270,38 @@ export function PaymentRequestPayer() {
     ) {
       return;
     }
+
+    /*
+     * İnceleme ile onay arasında zaman geçti. Bağlantı yeniden çözülür, imzası
+     * yeniden doğrulanır ve çözülen talebin incelenen talebin AYNISI olduğu
+     * talep kimliğiyle kanıtlanır. Bu kontroller React tarafındaki ilk savunma
+     * katmanıdır; gönderim sınırı aynı süreyi kendisi de ayrıca ölçer.
+     */
+    if (encoded === null) {
+      dropReview("Bağlantıda ödeme talebi bulunamadı.");
+      return;
+    }
+    const fresh = decodeSignedRequest(encoded, Date.now());
+    if (!fresh.ok) {
+      dropReview(
+        `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+      );
+      return;
+    }
+    const reverified = await verifyPaymentRequestSignature(fresh.request);
+    if (!reverified.ok) {
+      dropReview(
+        "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
+      );
+      return;
+    }
+    if (fresh.request.payload.requestId !== snapshot.requestId) {
+      dropReview(
+        "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
+      );
+      return;
+    }
+
     setStatus("sending");
     setErrorMessage(null);
     const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
@@ -307,15 +357,29 @@ export function PaymentRequestPayer() {
             TEST AĞI
           </span>
           <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
-            imza doğrulandı
+            cüzdan imzası doğrulandı
           </span>
         </div>
         <p className="text-xs leading-relaxed text-slate-500">
-          Bu talebi{" "}
-          <strong className="font-semibold">{payload.recipientLabel}</strong>{" "}
-          (fişi ödeyen / alıcı) imzaladı. Ödemeyi{" "}
+          Bu talep,{" "}
+          <span className="font-mono">
+            {shortenWalletAddress(payload.recipient)}
+          </span>{" "}
+          adresli cüzdan tarafından imzalandı. Ödemeyi{" "}
           <strong className="font-semibold">kendi cüzdanında sen onaylarsın</strong>;
           kimse senin cüzdanından para çekemez.
+        </p>
+        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
+          <strong className="font-semibold">İsimler kimlik kanıtı değildir.</strong>{" "}
+          &quot;{payload.recipientLabel}&quot; ve &quot;{payload.debtorLabel}&quot;
+          bu talebi oluşturan kişinin yazdığı etiketlerdir. İmza yalnızca{" "}
+          <strong className="font-semibold">cüzdan adresinin</strong> bu talebi
+          imzaladığını kanıtlar; kişinin gerçek veya yasal kimliğini kanıtlamaz.
+          Ödemeden önce aşağıdaki tam alıcı adresini, fişi ödeyen kişiyle{" "}
+          <strong className="font-semibold">
+            güvendiğin bir iletişim kanalından
+          </strong>{" "}
+          (yüz yüze, telefon) karşılaştır.
         </p>
       </header>
 
@@ -338,6 +402,16 @@ export function PaymentRequestPayer() {
         <Row label="Ağ" value={ACTIVE_NETWORK_PROFILE.displayName} />
         <Row label="Geçerlilik" value={expiresText} />
       </dl>
+      <div className="flex flex-col gap-2">
+        <AddressDisclosure
+          title="Alıcı (fişi ödeyen) adresinin tamamı"
+          address={payload.recipient}
+        />
+        <AddressDisclosure
+          title="Gönderen (senin) adresinin tamamı"
+          address={payload.debtor}
+        />
+      </div>
       <p className="text-[11px] leading-relaxed text-slate-400">
         Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler, kur ve ağ
         yalnızca talebi imzalayan kişi tarafından belirlenmiştir.
@@ -578,6 +652,51 @@ function formatRate(numerator: string, denominator: string): string {
   const remainder = num % den;
   const decimals = denominator.length - 1;
   return `${whole.toString()},${remainder.toString().padStart(decimals, "0")}`;
+}
+
+/**
+ * Adresin TAMAMINI inceleme ve kopyalama. Kısaltılmış gösterim baştaki ve
+ * sondaki birkaç karakteri eşleştiren sahte adresleri ayırt etmeye yetmez;
+ * karşılaştırma her zaman tam adres üzerinden yapılabilmelidir.
+ */
+function AddressDisclosure({
+  title,
+  address,
+}: {
+  title: string;
+  address: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <details className="rounded-2xl border border-slate-200 px-3 py-2 text-xs">
+      <summary className="cursor-pointer text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500">
+        {title}
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <code className="block overflow-x-auto break-all rounded-xl bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-800">
+          {address}
+        </code>
+        <button
+          type="button"
+          onClick={copy}
+          className="self-start rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+        >
+          {copied ? "Kopyalandı" : "Adresi kopyala"}
+        </button>
+      </div>
+    </details>
+  );
 }
 
 function Row({

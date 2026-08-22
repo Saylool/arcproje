@@ -11,6 +11,12 @@ import {
 const DEBTOR = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 const RECIPIENT = "0x0000000000000000000000000000000000000aBc";
 
+/** Belirlenimci test zamanı; üretimde her zaman geçerli zaman kullanılır. */
+const NOW = 1_700_000_000_000;
+const NOW_SECONDS = Math.floor(NOW / 1000);
+const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
+const REQUEST_ID = `0x${"11".repeat(32)}`;
+
 function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot {
   return Object.freeze({
     debtKey: "b->a",
@@ -25,6 +31,9 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     amount: "5.00",
     displayAmount: "5,00",
     chainId: ARC_TESTNET_CHAIN_ID,
+    requestId: REQUEST_ID,
+    issuedAt: NOW_SECONDS,
+    expiresAt: NOW_SECONDS + SEVEN_DAYS_SECONDS,
     ...over,
   });
 }
@@ -68,20 +77,20 @@ describe("amountToMicroUsdc", () => {
 
 describe("validatePaymentSnapshot", () => {
   it("geçerli snapshot'ı kabul eder", () => {
-    expect(validatePaymentSnapshot(snapshotOf())).toBeNull();
+    expect(validatePaymentSnapshot(snapshotOf(), NOW)).toBeNull();
   });
 
   it("geçersiz alıcı adresini reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ recipientAddress: "0x123" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ recipientAddress: "0x123" }), NOW)).toBe(
       "invalidRecipient",
     );
-    expect(validatePaymentSnapshot(snapshotOf({ recipientAddress: "" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ recipientAddress: "" }), NOW)).toBe(
       "invalidRecipient",
     );
   });
 
   it("geçersiz gönderen adresini reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ debtorAddress: "yok" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ debtorAddress: "yok" }), NOW)).toBe(
       "invalidSender",
     );
   });
@@ -90,6 +99,7 @@ describe("validatePaymentSnapshot", () => {
     expect(
       validatePaymentSnapshot(
         snapshotOf({ debtorAddress: RECIPIENT, recipientAddress: RECIPIENT }),
+        NOW,
       ),
     ).toBe("selfTransfer");
   });
@@ -101,6 +111,7 @@ describe("validatePaymentSnapshot", () => {
           debtorAddress: RECIPIENT.toLowerCase(),
           recipientAddress: RECIPIENT.toUpperCase().replace("0X", "0x"),
         }),
+        NOW,
       ),
     ).toBe("selfTransfer");
   });
@@ -114,46 +125,47 @@ describe("validatePaymentSnapshot", () => {
           debtorAddress: DEBTOR,
           recipientAddress: DEBTOR.toLowerCase(),
         }),
+        NOW,
       ),
     ).toBe("selfTransfer");
   });
 
   it("Arc Testnet dışındaki zinciri reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ chainId: 1 }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ chainId: 1 }), NOW)).toBe(
       "networkChanged",
     );
   });
 
   it("sıfır ve geçersiz tutarı reddeder", () => {
     expect(
-      validatePaymentSnapshot(snapshotOf({ amount: "0", microUsdc: "0" })),
+      validatePaymentSnapshot(snapshotOf({ amount: "0", microUsdc: "0" }), NOW),
     ).toBe("invalidAmount");
     expect(
-      validatePaymentSnapshot(snapshotOf({ amount: "0.000000", microUsdc: "0" })),
+      validatePaymentSnapshot(snapshotOf({ amount: "0.000000", microUsdc: "0" }), NOW),
     ).toBe("invalidAmount");
-    expect(validatePaymentSnapshot(snapshotOf({ amount: "1e6" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ amount: "1e6" }), NOW)).toBe(
       "invalidAmount",
     );
   });
 
   it("tutar ile mikro birim uyuşmazsa reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ microUsdc: "4999999" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ microUsdc: "4999999" }), NOW)).toBe(
       "invalidAmount",
     );
-    expect(validatePaymentSnapshot(snapshotOf({ microUsdc: "abc" }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ microUsdc: "abc" }), NOW)).toBe(
       "invalidAmount",
     );
   });
 
   it("geçersiz TRY borcunu reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: 0 }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: 0 }), NOW)).toBe(
       "invalidAmount",
     );
-    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: -5 }))).toBe(
+    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: -5 }), NOW)).toBe(
       "invalidAmount",
     );
     expect(
-      validatePaymentSnapshot(snapshotOf({ tryMinor: Number.MAX_SAFE_INTEGER + 2 })),
+      validatePaymentSnapshot(snapshotOf({ tryMinor: Number.MAX_SAFE_INTEGER + 2 }), NOW),
     ).toBe("invalidAmount");
   });
 
@@ -185,6 +197,6 @@ describe("snapshot değişmezliği", () => {
     expect(reviewed.amount).toBe("5.00");
     expect(reviewed.microUsdc).toBe("5000000");
     expect(later.amount).not.toBe(reviewed.amount);
-    expect(validatePaymentSnapshot(reviewed)).toBeNull();
+    expect(validatePaymentSnapshot(reviewed, NOW)).toBeNull();
   });
 });
