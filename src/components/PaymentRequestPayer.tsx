@@ -21,6 +21,7 @@ import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
 import {
   describeArcSendError,
   estimateArcSend,
+  reviewStateAfterSendFailure,
   sendArcUsdc,
   type ArcPaymentSnapshot,
   type ArcSendSuccess,
@@ -306,7 +307,15 @@ export function PaymentRequestPayer() {
     setErrorMessage(null);
     const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
     if (!outcome.ok) {
-      setErrorMessage(describeArcSendError(outcome.code));
+      const message = describeArcSendError(outcome.code);
+      // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
+      // kurulu bir onay düğmesi ekranda bırakılmaz. Karar sınırın kendi
+      // hata koduna bakan saf fonksiyonundan gelir.
+      if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
+        dropReview(message);
+        return;
+      }
+      setErrorMessage(message);
       setStatus("review");
       return;
     }

@@ -106,7 +106,8 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
   inconsistentAmount:
     "Gönderilecek tutar, borç ve kurla uyuşmuyor; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   invalidRequestId: "Ödeme talebinin kimliği geçersiz.",
-  invalidRequestTime: "Ödeme talebinin geçerlilik bilgisi geçersiz.",
+  invalidRequestTime:
+    "Ödeme talebinin geçerlilik bilgisi geçersiz; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   expiredRequest:
     "Bu ödeme talebinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   insufficientFunds:
@@ -118,6 +119,27 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
 
 export function describeArcSendError(code: ArcSendErrorCode): string {
   return ARC_SEND_MESSAGES[code];
+}
+
+/**
+ * Gönderim hatasından sonra inceleme ekranı korunmalı mı?
+ *
+ * Talebin geçerlilik penceresi kapandıysa hata KALICIDIR: aynı imzalı talep
+ * bir daha hiçbir denemede gönderilemez. Bu durumda onay kutusu ve gönder
+ * düğmesi ekranda bırakılmaz; kullanıcının yeni bir bağlantı istemesi gerekir.
+ *
+ * Hesap, ağ, bakiye veya geçici SDK hataları kullanıcı tarafından düzeltilip
+ * tekrar denenebilir; onlarda inceleme korunur.
+ *
+ * Bu karar burada saf bir fonksiyon olarak durur ki React'ten bağımsız test
+ * edilebilsin; bileşen yalnızca sonucu uygular.
+ */
+export function reviewStateAfterSendFailure(
+  code: ArcSendErrorCode,
+): "leaveReview" | "keepReview" {
+  return code === "expiredRequest" || code === "invalidRequestTime"
+    ? "leaveReview"
+    : "keepReview";
 }
 
 export type ArcSendResult<T> =

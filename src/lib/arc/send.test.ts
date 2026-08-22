@@ -5,8 +5,10 @@ import { ARC_TESTNET_CHAIN_ID } from "./network";
 import {
   amountToMicroUsdc,
   describeArcSendError,
+  reviewStateAfterSendFailure,
   validatePaymentSnapshot,
   type ArcPaymentSnapshot,
+  type ArcSendErrorCode,
 } from "./send";
 
 const DEBTOR = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
@@ -290,5 +292,80 @@ describe("snapshot sınırı tutarı kurdan yeniden türetir", () => {
         NOW,
       ),
     ).toBeNull();
+  });
+});
+
+
+describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
+  /*
+   * Bu tablo Record<ArcSendErrorCode, ...> olarak yazılır: yeni bir hata kodu
+   * eklendiğinde burada karşılığı verilmezse TypeScript derlemeyi durdurur.
+   * Böylece "karar verilmemiş" bir hata kodu sessizce eklenemez.
+   */
+  const BEKLENEN: Record<ArcSendErrorCode, "leaveReview" | "keepReview"> = {
+    // Talebin geçerlilik penceresi kapandı: aynı talep bir daha gönderilemez.
+    expiredRequest: "leaveReview",
+    invalidRequestTime: "leaveReview",
+    // Kullanıcının düzeltip tekrar deneyebileceği durumlar.
+    noProvider: "keepReview",
+    rejected: "keepReview",
+    noAccount: "keepReview",
+    accountChanged: "keepReview",
+    networkChanged: "keepReview",
+    invalidRecipient: "keepReview",
+    invalidSender: "keepReview",
+    selfTransfer: "keepReview",
+    invalidAmount: "keepReview",
+    invalidRate: "keepReview",
+    inconsistentAmount: "keepReview",
+    invalidRequestId: "keepReview",
+    insufficientFunds: "keepReview",
+    estimateFailed: "keepReview",
+    sendFailed: "keepReview",
+  };
+
+  it("süresi dolmuş talepte inceleme bırakılır", () => {
+    expect(reviewStateAfterSendFailure("expiredRequest")).toBe("leaveReview");
+  });
+
+  it("geçersiz zaman bilgisinde de inceleme bırakılır", () => {
+    expect(reviewStateAfterSendFailure("invalidRequestTime")).toBe("leaveReview");
+  });
+
+  it("sıradan gönderim hatasında inceleme korunur (tekrar denenebilir)", () => {
+    for (const code of ["sendFailed", "rejected", "insufficientFunds"] as const) {
+      expect(reviewStateAfterSendFailure(code), code).toBe("keepReview");
+    }
+  });
+
+  it("her hata kodu için karar tablodakiyle aynıdır", () => {
+    for (const [code, beklenen] of Object.entries(BEKLENEN)) {
+      expect(
+        reviewStateAfterSendFailure(code as ArcSendErrorCode),
+        code,
+      ).toBe(beklenen);
+    }
+  });
+
+  it("yalnızca zaman penceresi hataları incelemeyi düşürür", () => {
+    const dusurenler = Object.entries(BEKLENEN)
+      .filter(([, karar]) => karar === "leaveReview")
+      .map(([code]) => code)
+      .sort();
+    expect(dusurenler).toEqual(["expiredRequest", "invalidRequestTime"]);
+  });
+
+  it("incelemeyi düşüren hatalar yeni bağlantı istemeyi açıkça söyler", () => {
+    for (const code of ["expiredRequest", "invalidRequestTime"] as const) {
+      const mesaj = describeArcSendError(code);
+      expect(mesaj, code).toMatch(/gönderim yapılmadı/);
+      expect(mesaj, code).toMatch(/yeni bir bağlantı iste/);
+    }
+  });
+
+  it("tekrar denenebilir hatalar yeni bağlantı istemeyi söylemez", () => {
+    for (const code of ["accountChanged", "networkChanged", "insufficientFunds"] as const) {
+      expect(describeArcSendError(code), code).not.toMatch(/yeni bir bağlantı iste/);
+    }
   });
 });
