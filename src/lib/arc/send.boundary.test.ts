@@ -122,6 +122,29 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
+  it("tutar borç ve kurla uyuşmuyorsa App Kit çağrılmaz", async () => {
+    // İmza doğrulaması bu sınırın dışındadır; sınır tutarı kendisi türetir.
+    const result = await sendArcUsdc(
+      "w",
+      snapshotOf({ microUsdc: "500000000", amount: "500.00" }),
+      at(NOW),
+    );
+    expect(result).toEqual({ ok: false, code: "inconsistentAmount" });
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(adapterMock).not.toHaveBeenCalled();
+  });
+
+  it("kur alanı bozuksa App Kit çağrılmaz", async () => {
+    const result = await sendArcUsdc(
+      "w",
+      snapshotOf({ rateDenominator: "3" }),
+      at(NOW),
+    );
+    expect(result).toEqual({ ok: false, code: "invalidRate" });
+    expect(sendMock).not.toHaveBeenCalled();
+    expect(adapterMock).not.toHaveBeenCalled();
+  });
+
   it("hesap değiştiyse App Kit çağrılmaz", async () => {
     accountsResponse = ["0x1111111111111111111111111111111111111111"];
     const result = await sendArcUsdc("w", snapshotOf(), at(NOW));

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MAX_RATE_VALUE } from "./conversion";
 import { ARC_TESTNET_CHAIN_ID } from "./network";
 import {
   amountToMicroUsdc,
@@ -198,5 +199,96 @@ describe("snapshot değişmezliği", () => {
     expect(reviewed.microUsdc).toBe("5000000");
     expect(later.amount).not.toBe(reviewed.amount);
     expect(validatePaymentSnapshot(reviewed, NOW)).toBeNull();
+  });
+});
+
+
+describe("snapshot sınırı tutarı kurdan yeniden türetir", () => {
+  // Taban snapshot: 20000 kuruş, 1 USDC = 40 TRY -> tam 5.000.000 mikro USDC.
+  it("tutarsız tutarı reddeder", () => {
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ microUsdc: "500000000", amount: "500.00" }),
+        NOW,
+      ),
+    ).toBe("inconsistentAmount");
+  });
+
+  it("tek mikro USDC'lik sapmayı bile yakalar", () => {
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ microUsdc: "5000001", amount: "5.000001" }),
+        NOW,
+      ),
+    ).toBe("inconsistentAmount");
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ microUsdc: "4999999", amount: "4.999999" }),
+        NOW,
+      ),
+    ).toBe("inconsistentAmount");
+  });
+
+  it("kanonik olmayan kur paydasını reddeder", () => {
+    for (const rateDenominator of ["3", "20", "10000000", "0"]) {
+      expect(
+        validatePaymentSnapshot(snapshotOf({ rateDenominator }), NOW),
+        rateDenominator,
+      ).toBe("invalidRate");
+    }
+  });
+
+  it("üst sınırın üstündeki kuru reddeder", () => {
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ rateNumerator: (MAX_RATE_VALUE + BigInt(1)).toString() }),
+        NOW,
+      ),
+    ).toBe("invalidRate");
+  });
+
+  it("sıfır veya bozuk kur alanını reddeder", () => {
+    expect(validatePaymentSnapshot(snapshotOf({ rateNumerator: "0" }), NOW)).toBe(
+      "invalidRate",
+    );
+    expect(
+      validatePaymentSnapshot(snapshotOf({ rateNumerator: "abc" }), NOW),
+    ).toBe("invalidRate");
+  });
+
+  it("yarım yukarı yuvarlama sınırını üretimle aynı uygular", () => {
+    // 1 kuruş, 1 USDC = 32 TRY -> 312,5 mikro USDC -> yarım yukarı -> 313.
+    const halfUp = {
+      tryMinor: 1,
+      rateNumerator: "32",
+      rateDenominator: "1",
+    } as const;
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ ...halfUp, microUsdc: "313", amount: "0.000313" }),
+        NOW,
+      ),
+    ).toBeNull();
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({ ...halfUp, microUsdc: "312", amount: "0.000312" }),
+        NOW,
+      ),
+    ).toBe("inconsistentAmount");
+  });
+
+  it("kanonik paydalı geçerli kuru kabul eder", () => {
+    // 1 USDC = 400,0 TRY -> 4000/10; 20000 kuruş -> 500.000 mikro USDC.
+    expect(
+      validatePaymentSnapshot(
+        snapshotOf({
+          rateNumerator: "4000",
+          rateDenominator: "10",
+          microUsdc: "500000",
+          amount: "0.50",
+        }),
+        NOW,
+      ),
+    ).toBeNull();
   });
 });

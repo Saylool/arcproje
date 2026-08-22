@@ -666,15 +666,22 @@ function AddressDisclosure({
   title: string;
   address: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
 
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(address);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
     } catch {
-      setCopied(false);
+      /*
+       * Pano yazma güvensiz bağlamda veya izin politikası altında reddedilebilir.
+       * Kullanıcı hiçbir şey olmayan bir düğmeyle baş başa bırakılmaz: adres
+       * zaten seçilebilir metin olarak ekranda duruyor, bunu söyleriz.
+       */
+      setCopyState("failed");
     }
   };
 
@@ -692,8 +699,15 @@ function AddressDisclosure({
           onClick={copy}
           className="self-start rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
         >
-          {copied ? "Kopyalandı" : "Adresi kopyala"}
+          {copyState === "copied" ? "Kopyalandı" : "Adresi kopyala"}
         </button>
+        <p aria-live="polite" className="text-[11px] text-slate-500">
+          {copyState === "copied"
+            ? "Adres panoya kopyalandı."
+            : copyState === "failed"
+              ? "Tarayıcı pano erişimine izin vermedi. Adresi yukarıdan seçip elle kopyalayabilirsin."
+              : ""}
+        </p>
       </div>
     </details>
   );

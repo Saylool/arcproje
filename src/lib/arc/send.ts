@@ -2,7 +2,11 @@ import {
   normalizeWalletAddress,
   walletAddressesEqual,
 } from "./address";
-import { MICRO_USDC_PER_USDC } from "./conversion";
+import {
+  MICRO_USDC_PER_USDC,
+  convertTryMinorBigIntToMicroUsdc,
+  parseSignedRate,
+} from "./conversion";
 import {
   ARC_TESTNET_APP_KIT_CHAIN,
   ARC_TESTNET_CHAIN_ID,
@@ -76,6 +80,8 @@ export type ArcSendErrorCode =
   | "invalidSender"
   | "selfTransfer"
   | "invalidAmount"
+  | "invalidRate"
+  | "inconsistentAmount"
   | "invalidRequestId"
   | "invalidRequestTime"
   | "expiredRequest"
@@ -96,6 +102,9 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
   selfTransfer:
     "Gönderen ve alıcı aynı cüzdan adresi. Kendine ödeme yapılamaz.",
   invalidAmount: "Gönderilecek tutar geçerli değil.",
+  invalidRate: "Ödeme talebindeki kur geçerli değil.",
+  inconsistentAmount:
+    "Gönderilecek tutar, borç ve kurla uyuşmuyor; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   invalidRequestId: "Ödeme talebinin kimliği geçersiz.",
   invalidRequestTime: "Ödeme talebinin geçerlilik bilgisi geçersiz.",
   expiredRequest:
@@ -217,6 +226,24 @@ export function validatePaymentSnapshot(
   }
   if (!Number.isSafeInteger(snapshot.tryMinor) || snapshot.tryMinor <= 0) {
     return "invalidAmount";
+  }
+
+  /*
+   * Kur alanları da bu sınırda yeniden doğrulanır ve tutar onlardan yeniden
+   * TÜRETİLİR. Snapshot'ı bugün yalnızca doğrulanmış imzalı gövdeden kuran bir
+   * çağıran var; bu sınır yine de o doğrulamanın yapılmış olmasına değil kendi
+   * hesabına güvenir, çünkü modülün sözleşmesi budur.
+   */
+  const rate = parseSignedRate(snapshot.rateNumerator, snapshot.rateDenominator);
+  if (!rate.ok) {
+    return "invalidRate";
+  }
+  const recomputed = convertTryMinorBigIntToMicroUsdc(
+    BigInt(snapshot.tryMinor),
+    rate.rate,
+  );
+  if (!recomputed.ok || recomputed.microUsdc !== declared) {
+    return "inconsistentAmount";
   }
 
   if (
