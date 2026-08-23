@@ -10,6 +10,7 @@ import {
 import { verifyRateQuote } from "./quote-auth";
 import { TEST_QUOTE_SECRET } from "./quote-fixture";
 import {
+  COOLDOWN_MAX_MS,
   PROVIDER_CACHE_TTL_MS,
   getUsdcTryObservation,
   mintUsdcTryQuote,
@@ -89,7 +90,7 @@ describe("önbellek ve tekilleştirme", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("başarısız çağrı önbelleklenmez", async () => {
+  it("başarısız çağrı başarı olarak önbelleklenmez", async () => {
     const fetchImpl = vi
       .fn()
       .mockResolvedValueOnce(new Response("{}", { status: 500 }))
@@ -97,8 +98,13 @@ describe("önbellek ve tekilleştirme", () => {
 
     const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
     expect(first.ok).toBe(false);
-    const second = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    expect(second.ok).toBe(true);
+
+    // Soğuma bittikten sonra yeniden denenir ve başarı gelir.
+    const after = await getUsdcTryObservation(NOW + COOLDOWN_MAX_MS, {
+      env: ENV,
+      fetchImpl: fetchImpl as never,
+    });
+    expect(after.ok).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
@@ -163,7 +169,7 @@ describe("teklif basımı", () => {
       fetchImpl: (async () => okResponse()) as never,
       nowMs: NOW,
     });
-    expect(result).toEqual({ ok: false, code: "secretMissing" });
+    expect(result).toMatchObject({ ok: false, code: "secretMissing" });
   });
 
   it("sağlayıcı hatası sessiz bir manuel kura düşmez", async () => {
@@ -172,7 +178,7 @@ describe("teklif basımı", () => {
       fetchImpl: (async () => new Response("{}", { status: 502 })) as never,
       nowMs: NOW,
     });
-    expect(result).toEqual({ ok: false, code: "providerUnavailable" });
+    expect(result).toMatchObject({ ok: false, code: "providerUnavailable" });
   });
 
   it("sonuçta anahtar veya sır görünmez", async () => {

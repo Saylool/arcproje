@@ -68,11 +68,38 @@ export type RequestSigningResult =
   | { ok: true; request: SignedPaymentRequest }
   | { ok: false; code: RequestSigningErrorCode };
 
-/** EIP-712 mesajı JSON'a yazılırken BigInt alanlar ondalık metne çevrilir. */
+/**
+ * EIP-712 mesajını cüzdanın beklediği JSON'a çevirir.
+ *
+ * Alan listesi ELLE YAZILMAZ: doğrudan `buildTypedData` çıktısı dönüştürülür.
+ * İkinci, elle tutulan bir liste şema büyüdüğünde sessizce eksik kalır ve
+ * cüzdana imzalatılan özet ile doğrulanan özet ayrışırdı.
+ *
+ * Yalnızca BigInt değerler ondalık metne çevrilir; metin, adres ve bayt
+ * alanları olduğu gibi kalır.
+ */
+function toEip712JsonValue(value: unknown): unknown {
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
+  if (Array.isArray(value)) {
+    return value.map(toEip712JsonValue);
+  }
+  if (typeof value === "object" && value !== null) {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        toEip712JsonValue(entry),
+      ]),
+    );
+  }
+  return value;
+}
+
 function toEip712Json(payload: PaymentRequestPayload): string {
   const typedData = buildTypedData(payload);
   return JSON.stringify({
-    domain: typedData.domain,
+    domain: toEip712JsonValue(typedData.domain),
     types: {
       EIP712Domain: [
         { name: "name", type: "string" },
@@ -82,22 +109,7 @@ function toEip712Json(payload: PaymentRequestPayload): string {
       ...typedData.types,
     },
     primaryType: typedData.primaryType,
-    message: {
-      schemaVersion: payload.schemaVersion,
-      requestId: payload.requestId,
-      chainId: String(payload.chainId),
-      recipient: payload.recipient,
-      debtor: payload.debtor,
-      debtKey: payload.debtKey,
-      tryMinor: payload.tryMinor,
-      rateNumerator: payload.rateNumerator,
-      rateDenominator: payload.rateDenominator,
-      microUsdc: payload.microUsdc,
-      issuedAt: String(payload.issuedAt),
-      expiresAt: String(payload.expiresAt),
-      recipientLabel: payload.recipientLabel,
-      debtorLabel: payload.debtorLabel,
-    },
+    message: toEip712JsonValue(typedData.message),
   });
 }
 

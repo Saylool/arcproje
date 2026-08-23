@@ -70,7 +70,7 @@ describe("createPaymentRequestPayload", () => {
     expect(() => JSON.stringify(payload)).not.toThrow();
   });
 
-  it("varsayılan olarak 7 günlük geçerlilik verir", () => {
+  it("varsayılan olarak teklif ömrü kadar geçerlilik verir", () => {
     const payload = payloadOf();
     // Talep, dayandığı teklifin ömrünü aşamaz: 5 dakika.
     expect(payload.expiresAt - payload.issuedAt).toBe(5 * 60);

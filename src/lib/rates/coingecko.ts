@@ -49,7 +49,34 @@ export type RateEnv = Record<string, string | undefined>;
 
 export type ProviderResult =
   | { ok: true; observation: ProviderObservation }
-  | { ok: false; code: ProviderFailureCode };
+  | {
+      ok: false;
+      code: ProviderFailureCode;
+      /** Sağlayıcının bildirdiği, sınırlanmış bekleme süresi (saniye). */
+      retryAfterSeconds: number | null;
+    };
+
+/** Retry-After üst sınırı; sağlayıcı devasa bir değer dayatamaz. */
+export const MAX_RETRY_AFTER_SECONDS = 300;
+
+/**
+ * `Retry-After` başlığını saniyeye çevirir. Yalnızca saniye biçimi kabul
+ * edilir ve değer her zaman güvenli bir aralığa kırpılır.
+ */
+export function parseRetryAfter(value: string | null): number | null {
+  if (value === null) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!/^\d{1,7}$/.test(trimmed)) {
+    return null;
+  }
+  const seconds = Number(trimmed);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+  return Math.min(seconds, MAX_RETRY_AFTER_SECONDS);
+}
 
 export function isCoinGeckoConfigured(
   env: RateEnv = process.env,
@@ -87,6 +114,8 @@ async function readBoundedText(response: Response): Promise<string | null> {
       if (value !== undefined) {
         total += value.byteLength;
         if (total > MAX_PROVIDER_RESPONSE_BYTES) {
+          // Kalan gövdeyi çekmeye devam etmeyiz; akış iptal edilir.
+          await reader.cancel().catch(() => undefined);
           return null;
         }
         chunks.push(value);
@@ -135,87 +164,113 @@ export async function fetchUsdcTryObservation(
   const env = options.env ?? process.env;
   const apiKey = env.COINGECKO_DEMO_API_KEY?.trim();
   if (apiKey === undefined || apiKey === "") {
-    return { ok: false, code: "notConfigured" };
+    return { ok: false, code: "notConfigured", retryAfterSeconds: null };
   }
 
   const fetchImpl = options.fetchImpl ?? fetch;
   const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    options.timeoutMs ?? PROVIDER_TIMEOUT_MS,
-  );
+  /*
+   * Zaman aşımı YALNIZCA başlıkları değil, gövdenin tamamının okunmasını da
+   * kapsar. Aksi hâlde sunucu başlıkları gönderip gövdeyi sonsuza kadar
+   * damlatarak bu süreçteki paylaşılan isteği kilitleyebilirdi.
+   */
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.timeoutMs ?? PROVIDER_TIMEOUT_MS);
 
-  let response: Response;
-  try {
-    response = await fetchImpl(buildCoinGeckoUrl(), {
-      method: "GET",
-      headers: {
-        accept: "application/json",
-        // Anahtar YALNIZCA bu başlıkta taşınır.
-        "x-cg-demo-api-key": apiKey,
-      },
-      signal: controller.signal,
-      cache: "no-store",
-    });
-  } catch (error) {
-    const aborted =
-      typeof error === "object" &&
+  const isAbort = (error: unknown): boolean =>
+    timedOut ||
+    (typeof error === "object" &&
       error !== null &&
       "name" in error &&
-      (error as { name: unknown }).name === "AbortError";
-    return { ok: false, code: aborted ? "timeout" : "providerUnavailable" };
+      (error as { name: unknown }).name === "AbortError");
+
+  try {
+    let response: Response;
+    try {
+      response = await fetchImpl(buildCoinGeckoUrl(), {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          // Anahtar YALNIZCA bu başlıkta taşınır.
+          "x-cg-demo-api-key": apiKey,
+        },
+        signal: controller.signal,
+        cache: "no-store",
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        code: isAbort(error) ? "timeout" : "providerUnavailable",
+        retryAfterSeconds: null,
+      };
+    }
+
+    if (!response.ok) {
+      // Sağlayıcının gövdesi okunmaz ve dışarı verilmez.
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        ok: false,
+        code: "providerUnavailable",
+        retryAfterSeconds: parseRetryAfter(response.headers.get("retry-after")),
+      };
+    }
+
+    let text: string | null;
+    try {
+      text = await readBoundedText(response);
+    } catch (error) {
+      // Gövde okunurken düşen abort da zaman aşımıdır, bozuk yanıt değil.
+      return {
+        ok: false,
+        code: isAbort(error) ? "timeout" : "malformedResponse",
+        retryAfterSeconds: null,
+      };
+    }
+    if (text === null) {
+      return { ok: false, code: "responseTooLarge", retryAfterSeconds: null };
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, code: "malformedResponse", retryAfterSeconds: null };
+    }
+
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ok: false, code: "malformedResponse", retryAfterSeconds: null };
+    }
+    const coin = (parsed as Record<string, unknown>)[COINGECKO_COIN_ID];
+    if (typeof coin !== "object" || coin === null || Array.isArray(coin)) {
+      return { ok: false, code: "malformedResponse", retryAfterSeconds: null };
+    }
+    const entry = coin as Record<string, unknown>;
+
+    const price = entry[COINGECKO_VS_CURRENCY];
+    if (typeof price !== "number") {
+      return { ok: false, code: "malformedResponse", retryAfterSeconds: null };
+    }
+    const rateText = canonicalizeProviderRate(price);
+    if (rateText === null) {
+      return { ok: false, code: "invalidRate", retryAfterSeconds: null };
+    }
+
+    const lastUpdated = entry.last_updated_at;
+    if (
+      typeof lastUpdated !== "number" ||
+      !Number.isSafeInteger(lastUpdated) ||
+      lastUpdated <= 0
+    ) {
+      return { ok: false, code: "invalidObservation", retryAfterSeconds: null };
+    }
+
+    return { ok: true, observation: { rateText, observedAt: lastUpdated } };
   } finally {
+    // Zamanlayıcı yalnızca gövde tüketimi bittikten (veya düştükten) sonra
+    // temizlenir.
     clearTimeout(timeout);
   }
-
-  if (!response.ok) {
-    // Sağlayıcının gövdesi okunmaz ve dışarı verilmez.
-    return { ok: false, code: "providerUnavailable" };
-  }
-
-  let text: string | null;
-  try {
-    text = await readBoundedText(response);
-  } catch {
-    return { ok: false, code: "malformedResponse" };
-  }
-  if (text === null) {
-    return { ok: false, code: "responseTooLarge" };
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return { ok: false, code: "malformedResponse" };
-  }
-
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return { ok: false, code: "malformedResponse" };
-  }
-  const coin = (parsed as Record<string, unknown>)[COINGECKO_COIN_ID];
-  if (typeof coin !== "object" || coin === null || Array.isArray(coin)) {
-    return { ok: false, code: "malformedResponse" };
-  }
-  const entry = coin as Record<string, unknown>;
-
-  const price = entry[COINGECKO_VS_CURRENCY];
-  if (typeof price !== "number") {
-    return { ok: false, code: "malformedResponse" };
-  }
-  const rateText = canonicalizeProviderRate(price);
-  if (rateText === null) {
-    return { ok: false, code: "invalidRate" };
-  }
-
-  const lastUpdated = entry.last_updated_at;
-  if (
-    typeof lastUpdated !== "number" ||
-    !Number.isSafeInteger(lastUpdated) ||
-    lastUpdated <= 0
-  ) {
-    return { ok: false, code: "invalidObservation" };
-  }
-
-  return { ok: true, observation: { rateText, observedAt: lastUpdated } };
 }

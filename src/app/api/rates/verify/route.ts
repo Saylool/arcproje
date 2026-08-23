@@ -27,6 +27,62 @@ const NO_STORE_HEADERS = {
   "cache-control": "no-store, private, max-age=0",
 } as const;
 
+type BoundedBody =
+  | { status: "ok"; text: string }
+  | { status: "tooLarge" }
+  | { status: "invalidEncoding" }
+  | { status: "unreadable" };
+
+/**
+ * Gövdeyi BAYT sayarak sınırlı okur.
+ *
+ * `request.text()` tüm gövdeyi önce belleğe alır ve sonuçtaki `length` UTF-16
+ * kod birimi sayar — çok baytlı UTF-8 içerikte gerçek bayt sayısından sapar.
+ * Burada alınan baytlar sayılır, sınır aşılır aşılmaz akış iptal edilir ve
+ * çözümleme yalnızca sınır içinde kalan veri üzerinde, katı UTF-8 ile yapılır.
+ */
+async function readBoundedBody(request: Request): Promise<BoundedBody> {
+  const stream = request.body;
+  if (stream === null) {
+    return { status: "ok", text: "" };
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      total += value.byteLength;
+      if (total > MAX_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return { status: "tooLarge" };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { status: "unreadable" };
+  } finally {
+    reader.releaseLock();
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return {
+      status: "ok",
+      text: new TextDecoder("utf-8", { fatal: true }).decode(merged),
+    };
+  } catch {
+    return { status: "invalidEncoding" };
+  }
+}
+
 function errorResponse(status: number, code: string, message: string) {
   return NextResponse.json(
     { valid: false, error: { code, message } },
@@ -44,19 +100,29 @@ export async function POST(request: Request) {
     );
   }
 
+  /*
+   * Content-Length yalnızca UCUZ bir ön elemedir; tek sınır olarak ona
+   * güvenilmez. Parçalı (chunked) bir istek onu hiç göndermeyebilir.
+   */
   const declared = Number(request.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
     return errorResponse(413, "BODY_TOO_LARGE", "İstek gövdesi çok büyük.");
   }
 
-  const raw = await request.text();
-  if (raw.length > MAX_BODY_BYTES) {
+  const bounded = await readBoundedBody(request);
+  if (bounded.status === "tooLarge") {
     return errorResponse(413, "BODY_TOO_LARGE", "İstek gövdesi çok büyük.");
+  }
+  if (bounded.status === "invalidEncoding") {
+    return errorResponse(400, "INVALID_ENCODING", "İstek gövdesi geçerli UTF-8 değil.");
+  }
+  if (bounded.status === "unreadable") {
+    return errorResponse(400, "INVALID_REQUEST", "İstek okunamadı.");
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(bounded.text);
   } catch {
     return errorResponse(400, "MALFORMED_JSON", "İstek gövdesi okunamadı.");
   }

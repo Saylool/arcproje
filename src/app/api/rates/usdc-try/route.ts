@@ -67,9 +67,25 @@ export async function GET() {
 
   if (!minted.ok) {
     const failure = FAILURES[minted.code];
+    /*
+     * Soğuma penceresindeyken sağlayıcıya hiç gidilmez; istemciye ne zaman
+     * tekrar deneyebileceği Retry-After ile bildirilir. Bu, süreç düzeyinde
+     * bir yukarı akış fırtınasını önler.
+     */
+    const headers: Record<string, string> = { ...NO_STORE_HEADERS };
+    if (minted.retryAfterSeconds !== null) {
+      headers["retry-after"] = String(minted.retryAfterSeconds);
+    }
     return NextResponse.json(
-      { error: { code: minted.code, message: failure.message } },
-      { status: failure.status, headers: NO_STORE_HEADERS },
+      {
+        error: {
+          code: minted.code,
+          message: minted.cooldown
+            ? `${failure.message} Kur servisi geçici olarak beklemede; birazdan tekrar dene.`
+            : failure.message,
+        },
+      },
+      { status: failure.status, headers },
     );
   }
 

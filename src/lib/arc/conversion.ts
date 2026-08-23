@@ -4,9 +4,11 @@
  * Borçlar TRY minor unit (1 TL = 100 kuruş) cinsindendir. USDC ise 6 ondalıklı
  * ERC-20 arayüzüyle gönderilir (1 USDC = 1.000.000 mikro USDC).
  *
- * Kur kullanıcı tarafından "1 USDC = X TRY" biçiminde elle girilir; canlı kur
- * çekilmez, varsayılmaz, sabit yazılmaz. Tüm aritmetik BigInt ile yapılır;
- * hiçbir adımda floating-point kullanılmaz.
+ * Kur "1 USDC = X TRY" biçiminde rasyonel tutulur. Değer artık sunucunun
+ * CoinGecko'dan alıp HMAC ile kimliklendirdiği teklifden gelir (bkz.
+ * `src/lib/rates`); elle girilmez, varsayılmaz, sabit yazılmaz. Tüm aritmetik
+ * BigInt ile yapılır; kanonikleştirmeden sonra hiçbir adımda floating-point
+ * kullanılmaz.
  */
 
 const BIG_ZERO = BigInt(0);

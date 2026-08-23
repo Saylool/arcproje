@@ -138,6 +138,34 @@ eşzamanlı örnek kendi önbelleğini tutar; bu yüzden önbellek bir garanti d
 bir iyileştirmedir. Paylaşılan/kalıcı önbellek bu sürümün kapsamı dışındadır
 (arka uç veya veritabanı eklenmemiştir).
 
+### Sağlayıcı hatalarında soğuma (negatif önbellek)
+
+Sağlayıcı 429/5xx/zaman aşımı döndüğünde her istek yeni bir yukarı akış çağrısı
+üretirse Demo kotası hızla tükenir. Bu yüzden ardışık hatalarda **sınırlı bir
+soğuma** uygulanır:
+
+| Davranış | Değer |
+| --- | --- |
+| Taban soğuma | 5 sn |
+| Üstel büyüme | her ardışık hatada iki katı |
+| Tavan | 120 sn |
+| `Retry-After` üst sınırı | 300 sn |
+
+- Soğuma boyunca CoinGecko **hiç çağrılmaz**; uygulama kontrollü ve yeniden
+  denenebilir bir hata ile `Retry-After` başlığı döner.
+- CoinGecko'nun `Retry-After` başlığı yalnızca saniye biçiminde ve güvenli bir
+  aralığa **kırpılarak** dikkate alınır.
+- İlk başarılı yanıt soğumayı sıfırlar.
+- Yapılandırma eksikliği (anahtar/sır yok) bir sağlayıcı arızası **değildir** ve
+  soğutulmaz.
+- Bozuk veya bayat veri asla geçerli başarı olarak önbelleklenmez.
+
+> **Bu koruma yalnızca MVP düzeyindedir.** Soğuma ve önbellek **süreç içidir**;
+> Vercel sunucusuz örnekleri arasında **paylaşılmaz**. Gerçek ölçekte, birden
+> çok örneğin toplam yukarı akış hızını sınırlayabilmek için paylaşılan bir
+> depo/oran sınırlayıcı (ör. Redis/KV tabanlı) gerekir. Bu odaklı düzeltmede
+> böyle bir bağımlılık eklenmemiştir.
+
 ### Hata davranışı
 
 Kur alınamaz veya doğrulanamazsa **elle girilen bir kura düşülmez** ve ödeme

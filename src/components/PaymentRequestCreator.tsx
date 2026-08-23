@@ -10,7 +10,7 @@ import {
   convertTryMinorToMicroUsdc,
   formatMicroUsdcForDisplay,
 } from "@/lib/arc/conversion";
-import { fetchQuoteFromServer } from "@/lib/rates/client";
+import { fetchQuoteFromServer, verifyQuoteWithServer } from "@/lib/rates/client";
 import {
   QUOTE_SOURCE,
   formatQuoteRate,
@@ -28,6 +28,7 @@ import {
   createPaymentRequestPayload,
   describePaymentRequestProblem,
 } from "@/lib/arc/payment-request";
+import { ensureSignedRequestPublishable } from "@/lib/arc/request-publication";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { buildShareUrl, encodeSignedRequest } from "@/lib/arc/request-codec";
 import {
@@ -68,6 +69,8 @@ type GeneratedRequest = {
   url: string;
   /** Üretildiği andaki girdi imzası; girdi değişirse bağlantı geçersiz sayılır. */
   inputsKey: string;
+  /** İmzalı talebin GERÇEK bitiş anı (Unix saniye). */
+  expiresAt: number;
 };
 
 type QuoteState =
@@ -171,6 +174,14 @@ export function PaymentRequestCreator({
             entry.debtKey === debtIdentityKey(selectedDebt) &&
             entry.inputsKey === inputsKey,
         ) ?? null);
+
+  const generatedSecondsLeft =
+    currentGenerated === null
+      ? 0
+      : Math.max(0, currentGenerated.expiresAt - nowSeconds);
+  /** Süresi dolan bağlantı kullanılabilir gibi sunulmaz. */
+  const generatedExpired =
+    currentGenerated !== null && generatedSecondsLeft === 0;
 
   const qrSvg = useMemo(
     () => (currentGenerated === null ? null : renderSVG(currentGenerated.url)),
@@ -326,6 +337,11 @@ export function PaymentRequestCreator({
     setSigning(true);
     setErrorMessage(null);
     setCopied(false);
+    // Önceki denemeden kalan bağlantı, yeni deneme sırasında gösterilmemeli.
+    const debtKeyForRun = debtIdentityKey(selectedDebt);
+    setGenerated((current) =>
+      current.filter((entry) => entry.debtKey !== debtKeyForRun),
+    );
     const signed = await signPaymentRequest(selectedWalletUuid, built.payload);
     setSigning(false);
 
@@ -334,12 +350,31 @@ export function PaymentRequestCreator({
       return;
     }
 
+    /*
+     * Kullanıcı cüzdanda onaylarken teklifin süresi dolmuş olabilir. Bağlantı
+     * ÜRETİLMEDEN önce imzalanan gövde ve teklifi güncel saatle yeniden
+     * doğrulanır; aynı katı doğrulayıcılar kullanılır, ayrı bir kısmi kontrol
+     * yazılmaz. Sunucu doğrulaması da URL açığa çıkmadan yapılır.
+     */
+    const publishable = await ensureSignedRequestPublishable(
+      signed.request,
+      verifyQuoteWithServer,
+    );
+    if (!publishable.ok) {
+      setErrorMessage(publishable.message);
+      return;
+    }
+
     const encoded = encodeSignedRequest(signed.request);
     const url = buildShareUrl(window.location.origin, encoded);
-    const debtKey = debtIdentityKey(selectedDebt);
     setGenerated((current) => [
-      ...current.filter((entry) => entry.debtKey !== debtKey),
-      { debtKey, url, inputsKey },
+      ...current.filter((entry) => entry.debtKey !== debtKeyForRun),
+      {
+        debtKey: debtKeyForRun,
+        url,
+        inputsKey,
+        expiresAt: signed.request.payload.expiresAt,
+      },
     ]);
   };
 
@@ -753,6 +788,7 @@ export function PaymentRequestCreator({
                 <button
                   type="button"
                   onClick={copyLink}
+                  disabled={generatedExpired}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 >
                   {copied ? "Kopyalandı" : "Talep bağlantısını kopyala"}
@@ -760,6 +796,7 @@ export function PaymentRequestCreator({
                 <button
                   type="button"
                   onClick={shareLink}
+                  disabled={generatedExpired}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 >
                   Paylaş
@@ -768,11 +805,32 @@ export function PaymentRequestCreator({
 
               <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
                 Bu bağlantı kişi adlarını, cüzdan adreslerini ve ödeme tutarını
-                içerir; yalnızca ilgili borçluyla paylaş. Bağlantı 7 gün
-                geçerlidir. Bağlantı teknik olarak tekrar açılabilir — aynı borç
-                için ikinci bir ödeme yapılmasını engelleyen bir sunucu veya
-                zincir üstü kayıt yoktur.
+                içerir; yalnızca ilgili borçluyla paylaş.{" "}
+                <strong className="font-semibold">
+                  Bağlantı yalnızca kur teklifi geçerli olduğu sürece —
+                  en fazla 5 dakika — kullanılabilir.
+                </strong>{" "}
+                Bitiş:{" "}
+                {new Date(currentGenerated.expiresAt * 1000).toLocaleString(
+                  "tr-TR",
+                )}
+                {generatedExpired
+                  ? " (süresi doldu)"
+                  : ` (${Math.floor(generatedSecondsLeft / 60)} dk ${generatedSecondsLeft % 60} sn kaldı)`}
+                . Bağlantı teknik olarak tekrar açılabilir — aynı borç için
+                ikinci bir ödeme yapılmasını engelleyen bir sunucu veya zincir
+                üstü kayıt yoktur.
               </p>
+
+              {generatedExpired && (
+                <p
+                  role="alert"
+                  className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-700"
+                >
+                  Bu bağlantının süresi doldu ve artık ödenemez. Kuru yenileyip
+                  yeni bir talep imzala.
+                </p>
+              )}
             </div>
           )}
 

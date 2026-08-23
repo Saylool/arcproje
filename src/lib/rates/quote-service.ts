@@ -1,4 +1,5 @@
 import {
+  MAX_RETRY_AFTER_SECONDS,
   fetchUsdcTryObservation,
   type FetchQuoteOptions,
   type ProviderFailureCode,
@@ -38,24 +39,61 @@ import { createQuoteId, readQuoteSecret, signRateQuote } from "./quote-auth";
 /** Sağlayıcı sonucunun önbellekte kalma süresi. */
 export const PROVIDER_CACHE_TTL_MS = 60 * 1000;
 
+/**
+ * NEGATİF ÖNBELLEK (soğuma).
+ *
+ * Sağlayıcı 429/5xx/zaman aşımı döndüğünde her istek yeni bir yukarı akış
+ * çağrısı üretirse Demo kotası hızla tükenir. Ardışık hatalarda üstel ama
+ * sınırlı bir soğuma uygulanır; soğuma boyunca CoinGecko HİÇ çağrılmaz.
+ */
+export const COOLDOWN_BASE_MS = 5 * 1000;
+export const COOLDOWN_MAX_MS = 120 * 1000;
+
 type CacheEntry = { observation: ProviderObservation; storedAtMs: number };
 
 let cachedObservation: CacheEntry | null = null;
 let inflight: Promise<
-  { ok: true; observation: ProviderObservation } | { ok: false; code: ProviderFailureCode }
+  | { ok: true; observation: ProviderObservation }
+  | { ok: false; code: ProviderFailureCode; retryAfterSeconds: number | null }
 > | null = null;
+let cooldownUntilMs = 0;
+let consecutiveFailures = 0;
+let lastFailureCode: ProviderFailureCode | null = null;
 
 /** Testler arasında süreç durumunu sıfırlar. */
 export function resetRateQuoteCache(): void {
   cachedObservation = null;
   inflight = null;
+  cooldownUntilMs = 0;
+  consecutiveFailures = 0;
+  lastFailureCode = null;
+}
+
+/** Yapılandırma eksikliği bir sağlayıcı arızası değildir; soğutulmaz. */
+function isCooldownWorthy(code: ProviderFailureCode): boolean {
+  return code !== "notConfigured";
+}
+
+function nextCooldownMs(retryAfterSeconds: number | null): number {
+  if (retryAfterSeconds !== null) {
+    // Sağlayıcının önerisi zaten kırpılmıştır; yine de tavanı uygulanır.
+    return Math.min(retryAfterSeconds, MAX_RETRY_AFTER_SECONDS) * 1000;
+  }
+  const exponent = Math.max(0, consecutiveFailures - 1);
+  return Math.min(COOLDOWN_BASE_MS * 2 ** exponent, COOLDOWN_MAX_MS);
 }
 
 export type ObservationSource = "cache" | "provider";
 
 export type ObservationResult =
   | { ok: true; observation: ProviderObservation; source: ObservationSource }
-  | { ok: false; code: ProviderFailureCode };
+  | {
+      ok: false;
+      code: ProviderFailureCode;
+      /** Soğuma nedeniyle sağlayıcıya hiç gidilmediyse true. */
+      cooldown: boolean;
+      retryAfterSeconds: number | null;
+    };
 
 /**
  * Önbellekli/tekilleştirilmiş gözlem. Aynı pencerede gelen ikinci istek yeni
@@ -72,6 +110,16 @@ export async function getUsdcTryObservation(
     return { ok: true, observation: cachedObservation.observation, source: "cache" };
   }
 
+  // Soğuma penceresindeyken yukarı akışa HİÇ gidilmez.
+  if (nowMs < cooldownUntilMs) {
+    return {
+      ok: false,
+      code: lastFailureCode ?? "providerUnavailable",
+      cooldown: true,
+      retryAfterSeconds: Math.max(1, Math.ceil((cooldownUntilMs - nowMs) / 1000)),
+    };
+  }
+
   if (inflight === null) {
     inflight = fetchUsdcTryObservation(options)
       .then((result) => {
@@ -80,10 +128,18 @@ export async function getUsdcTryObservation(
             observation: result.observation,
             storedAtMs: nowMs,
           };
+          consecutiveFailures = 0;
+          cooldownUntilMs = 0;
+          lastFailureCode = null;
+        } else if (isCooldownWorthy(result.code)) {
+          consecutiveFailures += 1;
+          lastFailureCode = result.code;
+          cooldownUntilMs = nowMs + nextCooldownMs(result.retryAfterSeconds);
         }
         return result;
       })
       .finally(() => {
+        // Zaman aşımından sonra da temizlenir: sonraki istek kilitlenmez.
         inflight = null;
       });
   }
@@ -91,14 +147,24 @@ export async function getUsdcTryObservation(
   const result = await inflight;
   return result.ok
     ? { ok: true, observation: result.observation, source: "provider" }
-    : { ok: false, code: result.code };
+    : {
+        ok: false,
+        code: result.code,
+        cooldown: false,
+        retryAfterSeconds: result.retryAfterSeconds,
+      };
 }
 
 export type QuoteMintFailure = ProviderFailureCode | "secretMissing" | "invalidQuote";
 
 export type QuoteMintResult =
   | { ok: true; signed: SignedRateQuote; source: ObservationSource }
-  | { ok: false; code: QuoteMintFailure };
+  | {
+      ok: false;
+      code: QuoteMintFailure;
+      cooldown: boolean;
+      retryAfterSeconds: number | null;
+    };
 
 /** "42.123456" -> { numerator: 42123456n, denominator: 1000000n } */
 export function rateTextToRational(rateText: string): {
@@ -136,18 +202,33 @@ export async function mintUsdcTryQuote(
   const env = options.env ?? process.env;
   const secret = readQuoteSecret(env);
   if (!secret.ok) {
-    return { ok: false, code: "secretMissing" };
+    return {
+      ok: false,
+      code: "secretMissing",
+      cooldown: false,
+      retryAfterSeconds: null,
+    };
   }
 
   const nowMs = options.nowMs ?? Date.now();
   const observed = await getUsdcTryObservation(nowMs, options);
   if (!observed.ok) {
-    return { ok: false, code: observed.code };
+    return {
+      ok: false,
+      code: observed.code,
+      cooldown: observed.cooldown,
+      retryAfterSeconds: observed.retryAfterSeconds,
+    };
   }
 
   const rational = rateTextToRational(observed.observation.rateText);
   if (rational === null) {
-    return { ok: false, code: "invalidRate" };
+    return {
+      ok: false,
+      code: "invalidRate",
+      cooldown: false,
+      retryAfterSeconds: null,
+    };
   }
 
   const issuedAt = Math.floor(nowMs / 1000);
@@ -167,7 +248,12 @@ export async function mintUsdcTryQuote(
   // Ürettiğimiz teklif de tükettiğimiz teklifle AYNI katı yoldan geçer.
   const validated = validateRateQuote(candidate, nowMs);
   if (!validated.ok) {
-    return { ok: false, code: "invalidQuote" };
+    return {
+      ok: false,
+      code: "invalidQuote",
+      cooldown: false,
+      retryAfterSeconds: null,
+    };
   }
 
   return {

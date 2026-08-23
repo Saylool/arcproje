@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { shortenWalletAddress, walletAddressesEqual } from "@/lib/arc/address";
@@ -23,6 +23,7 @@ import {
   describeCodecProblem,
 } from "@/lib/arc/request-codec";
 import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
+import { createSingleFlight } from "@/lib/arc/single-flight";
 import {
   describeArcSendError,
   estimateArcSend,
@@ -54,7 +55,13 @@ type VerifyState =
   | { status: "invalid"; message: string }
   | { status: "valid"; request: SignedPaymentRequest; quote: RateQuote };
 
-type FlowStatus = "idle" | "estimating" | "review" | "sending" | "done";
+type FlowStatus =
+  | "idle"
+  | "estimating"
+  | "review"
+  | "verifying"
+  | "sending"
+  | "done";
 
 const LINK_CLASS =
   "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
@@ -76,6 +83,12 @@ export function PaymentRequestPayer() {
   const [confirmed, setConfirmed] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [transaction, setTransaction] = useState<ArcSendSuccess | null>(null);
+  /*
+   * Yeniden girişe karşı EŞZAMANLI kilit. React durumu asenkron güncellendiği
+   * için iki hızlı tık, ikisi de `status === "review"` görürken submit()'i iki
+   * kez başlatabilirdi. useRef anında yazılır ve ikinci çağrı hemen döner.
+   */
+  const submitGuard = useRef(createSingleFlight());
 
   // Çöz + doğrula. Cüzdan kontrolleri ancak bu geçerse gösterilir.
   useEffect(() => {
@@ -197,7 +210,8 @@ export function PaymentRequestPayer() {
     account !== null && request !== null
       ? walletAddressesEqual(account, request.payload.debtor)
       : false;
-  const busy = status === "estimating" || status === "sending";
+  const busy =
+    status === "estimating" || status === "verifying" || status === "sending";
   const alreadyPaid = transaction !== null;
 
   const scanWallets = useCallback(async () => {
@@ -261,6 +275,12 @@ export function PaymentRequestPayer() {
     setStatus("idle");
   };
 
+  /** Yeniden denenebilir hatada incelemeye dönülür. */
+  const backToReview = (message: string) => {
+    setErrorMessage(message);
+    setStatus("review");
+  };
+
   const estimate = async () => {
     if (!canEstimate || snapshot === null || selectedWalletUuid === null) return;
     // Talebin süresi bu arada dolmuş olabilir.
@@ -298,6 +318,14 @@ export function PaymentRequestPayer() {
   };
 
   const submit = async () => {
+    /*
+     * EŞZAMANLI kilit, ilk `await`ten ÖNCE. React durumu asenkron
+     * güncellendiği için iki hızlı tık aynı `status === "review"` değerini
+     * görüp iki submit başlatabilirdi; bu kontrol ikinciyi anında keser.
+     */
+    if (!submitGuard.current.tryEnter()) {
+      return;
+    }
     if (
       status !== "review" ||
       !confirmed ||
@@ -305,70 +333,82 @@ export function PaymentRequestPayer() {
       selectedWalletUuid === null ||
       alreadyPaid
     ) {
+      submitGuard.current.release();
       return;
     }
 
-    /*
-     * İnceleme ile onay arasında zaman geçti. Bağlantı yeniden çözülür, imzası
-     * yeniden doğrulanır ve çözülen talebin incelenen talebin AYNISI olduğu
-     * talep kimliğiyle kanıtlanır. Bu kontroller React tarafındaki ilk savunma
-     * katmanıdır; gönderim sınırı aynı süreyi kendisi de ayrıca ölçer.
-     */
-    if (encoded === null) {
-      dropReview("Bağlantıda ödeme talebi bulunamadı.");
-      return;
-    }
-    const fresh = decodeSignedRequest(encoded, Date.now());
-    if (!fresh.ok) {
-      dropReview(
-        `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-      );
-      return;
-    }
-    const reverified = await verifyPaymentRequestSignature(fresh.request);
-    if (!reverified.ok) {
-      dropReview(
-        "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
-      );
-      return;
-    }
-    if (fresh.request.payload.requestId !== snapshot.requestId) {
-      dropReview(
-        "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
-      );
-      return;
-    }
-    /*
-     * Kur teklifi gönderimden HEMEN ÖNCE yeniden doğrulanır. Süresi dolmuş bir
-     * kurla kit.send'e gidilmez; gönderim sınırı ayrıca kendi ölçümünü yapar.
-     */
-    const quoteBeforeSend = await verifyQuoteWithServer(
-      extractQuoteFromPayload(fresh.request.payload),
-      fresh.request.payload.quoteTag,
-    );
-    if (!quoteBeforeSend.ok) {
-      dropReview(quoteBeforeSend.message);
-      return;
-    }
-
-    setStatus("sending");
+    // Görünür durum hemen değişir: onay düğmesi bu andan itibaren pasiftir.
+    setStatus("verifying");
     setErrorMessage(null);
-    const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
-    if (!outcome.ok) {
-      const message = describeArcSendError(outcome.code);
-      // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
-      // kurulu bir onay düğmesi ekranda bırakılmaz. Karar sınırın kendi
-      // hata koduna bakan saf fonksiyonundan gelir.
-      if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
-        dropReview(message);
+    let keepLocked = false;
+
+    try {
+      /*
+       * İnceleme ile onay arasında zaman geçti. Bağlantı yeniden çözülür,
+       * imzası yeniden doğrulanır ve çözülen talebin incelenen talebin AYNISI
+       * olduğu talep kimliğiyle kanıtlanır. Bu kontroller React tarafındaki
+       * ilk savunma katmanıdır; gönderim sınırı aynı süreyi kendisi de ölçer.
+       */
+      if (encoded === null) {
+        dropReview("Bağlantıda ödeme talebi bulunamadı.");
         return;
       }
-      setErrorMessage(message);
-      setStatus("review");
-      return;
+      const fresh = decodeSignedRequest(encoded, Date.now());
+      if (!fresh.ok) {
+        dropReview(
+          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+        );
+        return;
+      }
+      const reverified = await verifyPaymentRequestSignature(fresh.request);
+      if (!reverified.ok) {
+        dropReview(
+          "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
+        );
+        return;
+      }
+      if (fresh.request.payload.requestId !== snapshot.requestId) {
+        dropReview(
+          "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
+        );
+        return;
+      }
+      /*
+       * Kur teklifi gönderimden HEMEN ÖNCE yeniden doğrulanır. Süresi dolmuş
+       * bir kurla kit.send'e gidilmez; gönderim sınırı ayrıca kendi ölçümünü
+       * yapar.
+       */
+      const quoteBeforeSend = await verifyQuoteWithServer(
+        extractQuoteFromPayload(fresh.request.payload),
+        fresh.request.payload.quoteTag,
+      );
+      if (!quoteBeforeSend.ok) {
+        dropReview(quoteBeforeSend.message);
+        return;
+      }
+
+      setStatus("sending");
+      const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
+      if (!outcome.ok) {
+        const message = describeArcSendError(outcome.code);
+        // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
+        // kurulu bir onay düğmesi ekranda bırakılmaz.
+        if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
+          dropReview(message);
+          return;
+        }
+        backToReview(message);
+        return;
+      }
+      setTransaction(outcome.value);
+      setStatus("done");
+      // Başarıdan sonra kilit AÇILMAZ: aynı talep ikinci kez gönderilemez.
+      keepLocked = true;
+    } finally {
+      if (!keepLocked) {
+        submitGuard.current.release();
+      }
     }
-    setTransaction(outcome.value);
-    setStatus("done");
   };
 
   if (verifyState.status === "loading") {
@@ -618,9 +658,9 @@ export function PaymentRequestPayer() {
                   className="mt-0.5 accent-violet-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 />
                 <span>
-                  Yukarıdaki imzalı talebi okudum. Kurun demo kuru olduğunu ve
-                  gönderilecek tutarın Arc Testnet test USDC&apos;si olduğunu
-                  anlıyorum.
+                  Yukarıdaki imzalı talebi okudum. Kurun sunucu tarafından
+                  CoinGecko&apos;dan alınıp doğrulandığını ve gönderilecek
+                  tutarın Arc Testnet test USDC&apos;si olduğunu anlıyorum.
                 </span>
               </label>
               <button
@@ -632,6 +672,12 @@ export function PaymentRequestPayer() {
                 Cüzdanda onayla
               </button>
             </div>
+          )}
+
+          {status === "verifying" && (
+            <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs text-violet-800">
+              Talep ve kur yeniden doğrulanıyor…
+            </p>
           )}
 
           {status === "sending" && (
@@ -678,13 +724,15 @@ export function PaymentRequestPayer() {
       <p aria-live="polite" className="sr-only">
         {status === "estimating"
           ? "İşlem tahmini alınıyor."
-          : status === "sending"
-            ? "İşlem cüzdanda bekleniyor."
-            : transaction !== null
-              ? "Ödeme gönderildi."
-              : errorMessage !== null
-                ? errorMessage
-                : ""}
+          : status === "verifying"
+            ? "Talep ve kur yeniden doğrulanıyor."
+            : status === "sending"
+              ? "İşlem cüzdanda bekleniyor."
+              : transaction !== null
+                ? "Ödeme gönderildi."
+                : errorMessage !== null
+                  ? errorMessage
+                  : ""}
       </p>
 
       <p className="border-t border-slate-100 pt-4 text-[11px] leading-relaxed text-slate-400">

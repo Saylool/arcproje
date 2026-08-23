@@ -65,7 +65,7 @@ describe("yapılandırma", () => {
       env: {},
       fetchImpl: fetchImpl as never,
     });
-    expect(result).toEqual({ ok: false, code: "notConfigured" });
+    expect(result).toMatchObject({ ok: false, code: "notConfigured" });
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
@@ -125,7 +125,7 @@ describe("sağlayıcı hataları kontrollü kodlara dönüşür", () => {
         env: ENV,
         fetchImpl: responder as never,
       });
-      expect(result).toEqual({ ok: false, code: expected });
+      expect(result).toMatchObject({ ok: false, code: expected });
     });
   }
 
@@ -135,7 +135,7 @@ describe("sağlayıcı hataları kontrollü kodlara dönüşür", () => {
       env: ENV,
       fetchImpl: (async () => new Response(huge, { status: 200 })) as never,
     });
-    expect(result).toEqual({ ok: false, code: "responseTooLarge" });
+    expect(result).toMatchObject({ ok: false, code: "responseTooLarge" });
   });
 
   it("zaman aşımı ayrı kodla döner", async () => {
@@ -150,7 +150,7 @@ describe("sağlayıcı hataları kontrollü kodlara dönüşür", () => {
       fetchImpl: slowFetch as never,
       timeoutMs: 10,
     });
-    expect(result).toEqual({ ok: false, code: "timeout" });
+    expect(result).toMatchObject({ ok: false, code: "timeout" });
   });
 
   it("ağ hatası sağlayıcı erişilemez sayılır", async () => {
@@ -160,7 +160,7 @@ describe("sağlayıcı hataları kontrollü kodlara dönüşür", () => {
         throw new Error("ağ yok");
       }) as never,
     });
-    expect(result).toEqual({ ok: false, code: "providerUnavailable" });
+    expect(result).toMatchObject({ ok: false, code: "providerUnavailable" });
   });
 
   it("sağlayıcı gövdesi veya anahtar hata sonucunda görünmez", async () => {
