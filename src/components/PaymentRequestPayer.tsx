@@ -10,7 +10,12 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
-import type { SignedPaymentRequest } from "@/lib/arc/payment-request";
+import {
+  extractQuoteFromPayload,
+  type SignedPaymentRequest,
+} from "@/lib/arc/payment-request";
+import { formatQuoteRate, type RateQuote } from "@/lib/rates/quote";
+import { verifyQuoteWithServer } from "@/lib/rates/client";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import {
   REQUEST_QUERY_PARAM,
@@ -47,7 +52,7 @@ import {
 type VerifyState =
   | { status: "loading" }
   | { status: "invalid"; message: string }
-  | { status: "valid"; request: SignedPaymentRequest };
+  | { status: "valid"; request: SignedPaymentRequest; quote: RateQuote };
 
 type FlowStatus = "idle" | "estimating" | "review" | "sending" | "done";
 
@@ -112,7 +117,24 @@ export function PaymentRequestPayer() {
         });
         return;
       }
-      setVerifyState({ status: "valid", request: decoded.request });
+      /*
+       * Cüzdan imzası kurun PİYASADAN geldiğini kanıtlamaz; onu yalnızca
+       * sunucunun HMAC etiketi kanıtlar. Bu yüzden teklif ayrıca sunucuya
+       * doğrulatılır ve geçmeden hiçbir cüzdan kontrolü gösterilmez.
+       */
+      const quote = extractQuoteFromPayload(decoded.request.payload);
+      const quoteCheck = await verifyQuoteWithServer(
+        quote,
+        decoded.request.payload.quoteTag,
+      );
+      if (cancelled) {
+        return;
+      }
+      if (!quoteCheck.ok) {
+        setVerifyState({ status: "invalid", message: quoteCheck.message });
+        return;
+      }
+      setVerifyState({ status: "valid", request: decoded.request, quote });
     };
 
     void run();
@@ -165,6 +187,8 @@ export function PaymentRequestPayer() {
       requestId: request.payload.requestId,
       issuedAt: request.payload.issuedAt,
       expiresAt: request.payload.expiresAt,
+      quoteId: request.payload.quoteId,
+      quoteExpiresAt: request.payload.quoteExpiresAt,
     });
   }, [request]);
 
@@ -249,6 +273,18 @@ export function PaymentRequestPayer() {
         return;
       }
     }
+    // Sayfa açıkken süresi dolan bir kur tahmine giremez.
+    if (request === null) {
+      return;
+    }
+    const quoteBeforeEstimate = await verifyQuoteWithServer(
+      extractQuoteFromPayload(request.payload),
+      request.payload.quoteTag,
+    );
+    if (!quoteBeforeEstimate.ok) {
+      dropReview(quoteBeforeEstimate.message);
+      return;
+    }
     setStatus("estimating");
     setErrorMessage(null);
     const outcome = await estimateArcSend(selectedWalletUuid, snapshot);
@@ -300,6 +336,18 @@ export function PaymentRequestPayer() {
       dropReview(
         "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
       );
+      return;
+    }
+    /*
+     * Kur teklifi gönderimden HEMEN ÖNCE yeniden doğrulanır. Süresi dolmuş bir
+     * kurla kit.send'e gidilmez; gönderim sınırı ayrıca kendi ölçümünü yapar.
+     */
+    const quoteBeforeSend = await verifyQuoteWithServer(
+      extractQuoteFromPayload(fresh.request.payload),
+      fresh.request.payload.quoteTag,
+    );
+    if (!quoteBeforeSend.ok) {
+      dropReview(quoteBeforeSend.message);
       return;
     }
 
@@ -400,8 +448,17 @@ export function PaymentRequestPayer() {
         <Row label="Alıcı adresi" value={shortenWalletAddress(payload.recipient)} />
         <Row label="Borç (TRY)" value={formatTry(payload.tryMinor)} />
         <Row
-          label="Kur (test)"
-          value={`1 USDC = ${formatRate(payload.rateNumerator, payload.rateDenominator)} TRY`}
+          label="Kur"
+          value={`1 USDC = ${formatQuoteRate(verifyState.quote)} TRY`}
+        />
+        <Row label="Kur kaynağı" value={payload.quoteSource} />
+        <Row
+          label="Kur gözlem zamanı"
+          value={new Date(payload.quoteObservedAt * 1000).toLocaleString("tr-TR")}
+        />
+        <Row
+          label="Kur geçerliliği"
+          value={new Date(payload.quoteExpiresAt * 1000).toLocaleString("tr-TR")}
         />
         <Row
           label="Gönderilecek"
@@ -422,8 +479,13 @@ export function PaymentRequestPayer() {
         />
       </div>
       <p className="text-[11px] leading-relaxed text-slate-400">
-        Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler, kur ve ağ
-        yalnızca talebi imzalayan kişi tarafından belirlenmiştir.
+        Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler ve ağ talebi
+        imzalayan kişi tarafından belirlenmiştir.{" "}
+        <strong className="font-semibold">
+          Cüzdan imzası tek başına kurun piyasa değeri olduğunu kanıtlamaz.
+        </strong>{" "}
+        Kur, sunucu tarafından CoinGecko&apos;dan alınıp imzalanmıştır ve bu
+        sayfa açılırken sunucuya ayrıca doğrulatılmıştır.
       </p>
 
       {/* Cüzdan */}
@@ -651,17 +713,6 @@ function formatTry(minor: string): string {
   return `₺${whole.toString()},${fraction}`;
 }
 
-function formatRate(numerator: string, denominator: string): string {
-  const den = BigInt(denominator);
-  const num = BigInt(numerator);
-  if (den === BigInt(1)) {
-    return num.toString();
-  }
-  const whole = num / den;
-  const remainder = num % den;
-  const decimals = denominator.length - 1;
-  return `${whole.toString()},${remainder.toString().padStart(decimals, "0")}`;
-}
 
 /**
  * Adresin TAMAMINI inceleme ve kopyalama. Kısaltılmış gösterim baştaki ve

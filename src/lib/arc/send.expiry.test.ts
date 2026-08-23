@@ -57,7 +57,8 @@ const TX_HASH = `0x${"ef".repeat(32)}`;
 
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW / 1000);
-const LIFETIME_SECONDS = 7 * 24 * 60 * 60;
+const LIFETIME_SECONDS = 5 * 60;
+const QUOTE_ID = `0x${"5a".repeat(32)}`;
 const EXPIRES_AT = NOW_SECONDS + LIFETIME_SECONDS;
 
 /** Testlerin sürdüğü saat. Üretimde her zaman Date.now kullanılır. */
@@ -66,6 +67,14 @@ let chainCallDelayMs = 0;
 const clockNow = () => clock;
 
 function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot {
+  const merged = buildSnapshot(over);
+  return Object.freeze({
+    ...merged,
+    quoteExpiresAt: over.quoteExpiresAt ?? merged.expiresAt,
+  });
+}
+
+function buildSnapshot(over: Partial<ArcPaymentSnapshot>): ArcPaymentSnapshot {
   return Object.freeze({
     debtKey: "b->a",
     debtorParticipantId: "b",
@@ -82,6 +91,8 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     requestId: `0x${"11".repeat(32)}`,
     issuedAt: NOW_SECONDS,
     expiresAt: EXPIRES_AT,
+    quoteId: QUOTE_ID,
+    quoteExpiresAt: EXPIRES_AT,
     ...over,
   });
 }

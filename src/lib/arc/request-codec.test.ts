@@ -16,7 +16,10 @@ import {
 
 const RECIPIENT = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 const DEBTOR = "0x0000000000000000000000000000000000000aBc";
+import { buildTestQuote } from "@/lib/rates/quote-fixture";
+
 const NOW = 1_700_000_000_000;
+const RATE_40 = buildTestQuote({ nowMs: NOW, wholeRate: 40 });
 const SIGNATURE = `0x${"ab".repeat(65)}`;
 
 function payloadOf(over: Partial<PaymentRequestPayload> = {}): PaymentRequestPayload {
@@ -25,8 +28,8 @@ function payloadOf(over: Partial<PaymentRequestPayload> = {}): PaymentRequestPay
     debtor: DEBTOR,
     debtKey: "b->a",
     tryMinor: 20000,
-    rateNumerator: BigInt(40),
-    rateDenominator: BigInt(1),
+    quote: RATE_40.quote,
+    quoteTag: RATE_40.tag,
     microUsdc: BigInt(5_000_000),
     recipientLabel: "Sen",
     debtorLabel: "Ayşe",

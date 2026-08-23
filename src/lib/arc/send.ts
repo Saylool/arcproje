@@ -20,6 +20,7 @@ import {
   REQUEST_MAX_CLOCK_SKEW_MS,
   REQUEST_MAX_LIFETIME_MS,
 } from "./payment-request";
+import { QUOTE_ID_HEX_LENGTH } from "@/lib/rates/quote";
 import { withProvider, type Eip1193Provider } from "./wallet";
 
 /**
@@ -68,6 +69,9 @@ export type ArcPaymentSnapshot = Readonly<{
   /** İmzalı talepten birebir taşınan Unix saniye alanları. */
   issuedAt: number;
   expiresAt: number;
+  /** Sunucu kur teklifinin kimliği ve bitişi; süre burada da uygulanır. */
+  quoteId: string;
+  quoteExpiresAt: number;
 }>;
 
 export type ArcSendErrorCode =
@@ -85,6 +89,8 @@ export type ArcSendErrorCode =
   | "invalidRequestId"
   | "invalidRequestTime"
   | "expiredRequest"
+  | "invalidQuoteId"
+  | "expiredQuote"
   | "insufficientFunds"
   | "estimateFailed"
   | "sendFailed";
@@ -110,6 +116,9 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
     "Ödeme talebinin geçerlilik bilgisi geçersiz; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   expiredRequest:
     "Bu ödeme talebinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
+  invalidQuoteId: "Ödeme talebindeki kur teklifi kimliği geçersiz.",
+  expiredQuote:
+    "Talebin dayandığı kur teklifinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   insufficientFunds:
     "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
   estimateFailed:
@@ -137,7 +146,9 @@ export function describeArcSendError(code: ArcSendErrorCode): string {
 export function reviewStateAfterSendFailure(
   code: ArcSendErrorCode,
 ): "leaveReview" | "keepReview" {
-  return code === "expiredRequest" || code === "invalidRequestTime"
+  return code === "expiredRequest" ||
+    code === "invalidRequestTime" ||
+    code === "expiredQuote"
     ? "leaveReview"
     : "keepReview";
 }
@@ -175,6 +186,7 @@ export function amountToMicroUsdc(amount: string): bigint | null {
 const REQUEST_ID_PATTERN = new RegExp(
   `^0x[0-9a-fA-F]{${REQUEST_ID_HEX_LENGTH}}$`,
 );
+const QUOTE_ID_PATTERN = new RegExp(`^0x[0-9a-f]{${QUOTE_ID_HEX_LENGTH}}$`);
 
 /**
  * Talebin zaman geçerliliği. Ucuzdur ve gönderim yolunda birden fazla kez
@@ -195,6 +207,15 @@ export function checkSnapshotRequestTime(
     return "invalidRequestTime";
   }
 
+  // Talep, dayandığı teklifin ömrünü aşamaz.
+  const { quoteExpiresAt } = snapshot;
+  if (!Number.isSafeInteger(quoteExpiresAt) || quoteExpiresAt <= 0) {
+    return "invalidRequestTime";
+  }
+  if (expiresAt > quoteExpiresAt) {
+    return "invalidRequestTime";
+  }
+
   const nowSeconds = Math.floor(nowMs / 1000);
   const skewSeconds = Math.floor(REQUEST_MAX_CLOCK_SKEW_MS / 1000);
   if (issuedAt - skewSeconds > nowSeconds) {
@@ -202,6 +223,13 @@ export function checkSnapshotRequestTime(
   }
   if (expiresAt <= nowSeconds) {
     return "expiredRequest";
+  }
+  /*
+   * Teklifin süresi talebinkinden önce dolabilir. Sayfa açıkken süresi dolan
+   * bir kurla gönderim yapılamaz; bu kontrol React'ten bağımsızdır.
+   */
+  if (quoteExpiresAt <= nowSeconds) {
+    return "expiredQuote";
   }
   return null;
 }
@@ -273,6 +301,12 @@ export function validatePaymentSnapshot(
     !REQUEST_ID_PATTERN.test(snapshot.requestId)
   ) {
     return "invalidRequestId";
+  }
+  if (
+    typeof snapshot.quoteId !== "string" ||
+    !QUOTE_ID_PATTERN.test(snapshot.quoteId)
+  ) {
+    return "invalidQuoteId";
   }
   return checkSnapshotRequestTime(snapshot, nowMs);
 }

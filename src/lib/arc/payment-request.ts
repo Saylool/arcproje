@@ -5,6 +5,18 @@ import {
 } from "./conversion";
 import { toCanonicalLabel, validateCanonicalLabel } from "./labels";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
+import {
+  QUOTE_BASE_CURRENCY,
+  QUOTE_CURRENCY,
+  QUOTE_ID_HEX_LENGTH,
+  QUOTE_LIFETIME_MS,
+  QUOTE_MAX_CLOCK_SKEW_MS,
+  QUOTE_MAX_OBSERVATION_AGE_MS,
+  QUOTE_SOURCE,
+  RATE_QUOTE_VERSION,
+  isValidQuoteTagFormat,
+  type RateQuote,
+} from "@/lib/rates/quote";
 
 /**
  * İmzalı ödeme talebi sözleşmesi (EIP-712).
@@ -18,14 +30,25 @@ import { ACTIVE_NETWORK_PROFILE } from "./profile";
  * tutulur; BigInt asla doğrudan JSON'a yazılmaz.
  */
 
-export const PAYMENT_REQUEST_SCHEMA_VERSION = 1;
+/**
+ * Şema 2: kur artık elle girilmez, sunucunun kimliklendirdiği teklife bağlıdır.
+ * Şema 1 talepleri (elle girilen kur) bilinçli olarak reddedilir.
+ */
+export const PAYMENT_REQUEST_SCHEMA_VERSION = 2;
+export const LEGACY_MANUAL_RATE_SCHEMA_VERSION = 1;
 
 export const PAYMENT_REQUEST_DOMAIN_NAME = "Hesabi Bol Payment Request";
 export const PAYMENT_REQUEST_DOMAIN_VERSION = "1";
 
-/** Talep ömrü sınırları. */
-export const REQUEST_DEFAULT_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
-export const REQUEST_MAX_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * Talep ömrü sınırları.
+ *
+ * Talep, dayandığı piyasa teklifinden UZUN YAŞAYAMAZ. Teklif ömrü 5 dakika
+ * olduğu için varsayılan talep ömrü de odur; daha uzun bir istek verilse bile
+ * bitiş anı teklifin bitişine kırpılır.
+ */
+export const REQUEST_DEFAULT_LIFETIME_MS = QUOTE_LIFETIME_MS;
+export const REQUEST_MAX_LIFETIME_MS = QUOTE_LIFETIME_MS;
 /** Saat kaymasına karşı geçmişe tolerans. */
 export const REQUEST_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
@@ -52,6 +75,16 @@ export const PAYMENT_REQUEST_TYPES = {
     { name: "expiresAt", type: "uint64" },
     { name: "recipientLabel", type: "string" },
     { name: "debtorLabel", type: "string" },
+    // Sunucu teklifi: kurun piyasadan geldiğini kanıtlayan meta veri ve etiket.
+    { name: "quoteVersion", type: "uint16" },
+    { name: "quoteId", type: "bytes32" },
+    { name: "quoteBaseCurrency", type: "string" },
+    { name: "quoteCurrency", type: "string" },
+    { name: "quoteSource", type: "string" },
+    { name: "quoteObservedAt", type: "uint64" },
+    { name: "quoteIssuedAt", type: "uint64" },
+    { name: "quoteExpiresAt", type: "uint64" },
+    { name: "quoteTag", type: "bytes32" },
   ],
 } as const;
 
@@ -72,6 +105,17 @@ export type PaymentRequestPayload = Readonly<{
   expiresAt: number;
   recipientLabel: string;
   debtorLabel: string;
+  /** Sunucu teklifi meta verisi. rateNumerator/rateDenominator teklifin kurudur. */
+  quoteVersion: number;
+  quoteId: string;
+  quoteBaseCurrency: string;
+  quoteCurrency: string;
+  quoteSource: string;
+  quoteObservedAt: number;
+  quoteIssuedAt: number;
+  quoteExpiresAt: number;
+  /** Sunucunun HMAC kimlik etiketi (0x + 64 hex). */
+  quoteTag: string;
 }>;
 
 export type SignedPaymentRequest = Readonly<{
@@ -89,6 +133,9 @@ export type PaymentRequestProblem =
   | "unexpectedField"
   | "missingField"
   | "unsupportedSchemaVersion"
+  | "outdatedSchemaVersion"
+  | "invalidQuote"
+  | "requestOutlivesQuote"
   | "invalidRequestId"
   | "invalidChainId"
   | "invalidRecipient"
@@ -110,6 +157,12 @@ const PROBLEM_MESSAGES: Record<PaymentRequestProblem, string> = {
   unexpectedField: "Ödeme talebinde beklenmeyen alan var.",
   missingField: "Ödeme talebinde eksik alan var.",
   unsupportedSchemaVersion: "Bu ödeme talebi sürümü desteklenmiyor.",
+  outdatedSchemaVersion:
+    "Bu bağlantı, kurun elle girildiği eski bir sürümle oluşturulmuş. Artık kur sunucu tarafından doğrulanıyor; talebi oluşturan kişiden yeni bir bağlantı iste.",
+  invalidQuote:
+    "Talepteki kur teklifi geçersiz. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
+  requestOutlivesQuote:
+    "Talebin geçerlilik süresi dayandığı kur teklifinden uzun. Bu bağlantıya güvenme.",
   invalidRequestId: "Talep kimliği geçersiz.",
   invalidChainId: "Talep Arc Testnet için oluşturulmamış.",
   invalidRecipient: "Alıcı adresi geçersiz.",
@@ -136,6 +189,7 @@ export function describePaymentRequestProblem(
 
 const DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;
 const REQUEST_ID = new RegExp(`^0x[0-9a-f]{${REQUEST_ID_HEX_LENGTH}}$`, "i");
+const QUOTE_ID_PATTERN = new RegExp(`^0x[0-9a-f]{${QUOTE_ID_HEX_LENGTH}}$`);
 const SIGNATURE = /^0x[0-9a-fA-F]{130}$/;
 
 /**
@@ -167,8 +221,9 @@ export type CreatePayloadInput = {
   debtor: string;
   debtKey: string;
   tryMinor: number;
-  rateNumerator: bigint;
-  rateDenominator: bigint;
+  /** Kur ARTIK elle girilmez: sunucunun kimliklendirdiği tekliften gelir. */
+  quote: RateQuote;
+  quoteTag: string;
   microUsdc: bigint;
   recipientLabel: string;
   debtorLabel: string;
@@ -222,6 +277,14 @@ export function createPaymentRequestPayload(
     return { ok: false, problem: "invalidDebtor" };
   }
 
+  const issuedAt = Math.floor(nowMs / 1000);
+  /*
+   * Talep, teklifinden uzun yaşayamaz: istenen ömür teklifin bitişini aşarsa
+   * bitiş anı teklifin bitişine kırpılır.
+   */
+  const requestedExpiry = Math.floor((nowMs + lifetimeMs) / 1000);
+  const expiresAt = Math.min(requestedExpiry, input.quote.expiresAt);
+
   const candidate: Record<string, unknown> = {
     schemaVersion: PAYMENT_REQUEST_SCHEMA_VERSION,
     requestId: input.requestId ?? createRequestId(),
@@ -231,13 +294,23 @@ export function createPaymentRequestPayload(
     // Etiketler ve borç kimliği kanonik biçimde saklanır ve öyle imzalanır.
     debtKey: toCanonicalLabel(input.debtKey),
     tryMinor: toDecimalText(input.tryMinor),
-    rateNumerator: toDecimalText(input.rateNumerator),
-    rateDenominator: toDecimalText(input.rateDenominator),
+    // Kur doğrudan teklifin kurudur; ayrı bir kaynak yoktur.
+    rateNumerator: input.quote.rateNumerator,
+    rateDenominator: input.quote.rateDenominator,
     microUsdc: toDecimalText(input.microUsdc),
-    issuedAt: Math.floor(nowMs / 1000),
-    expiresAt: Math.floor((nowMs + lifetimeMs) / 1000),
+    issuedAt,
+    expiresAt,
     recipientLabel: toCanonicalLabel(input.recipientLabel),
     debtorLabel: toCanonicalLabel(input.debtorLabel),
+    quoteVersion: input.quote.quoteVersion,
+    quoteId: input.quote.quoteId,
+    quoteBaseCurrency: input.quote.baseCurrency,
+    quoteCurrency: input.quote.quoteCurrency,
+    quoteSource: input.quote.source,
+    quoteObservedAt: input.quote.observedAt,
+    quoteIssuedAt: input.quote.issuedAt,
+    quoteExpiresAt: input.quote.expiresAt,
+    quoteTag: input.quoteTag,
   };
 
   return validatePaymentRequestPayload(candidate, nowMs);
@@ -271,8 +344,38 @@ export function buildTypedData(payload: PaymentRequestPayload) {
       expiresAt: BigInt(payload.expiresAt),
       recipientLabel: payload.recipientLabel,
       debtorLabel: payload.debtorLabel,
+      quoteVersion: payload.quoteVersion,
+      quoteId: payload.quoteId as `0x${string}`,
+      quoteBaseCurrency: payload.quoteBaseCurrency,
+      quoteCurrency: payload.quoteCurrency,
+      quoteSource: payload.quoteSource,
+      quoteObservedAt: BigInt(payload.quoteObservedAt),
+      quoteIssuedAt: BigInt(payload.quoteIssuedAt),
+      quoteExpiresAt: BigInt(payload.quoteExpiresAt),
+      quoteTag: payload.quoteTag as `0x${string}`,
     },
   };
+}
+
+/**
+ * İmzalı gövdeden kanonik sunucu teklifini yeniden kurar.
+ *
+ * Kur alanları gövdede TEK KEZ bulunur (rateNumerator/rateDenominator) ve
+ * teklifin kuru da odur; bu yüzden kuru kurcalamak HMAC etiketini de bozar.
+ */
+export function extractQuoteFromPayload(payload: PaymentRequestPayload): RateQuote {
+  return Object.freeze({
+    quoteVersion: payload.quoteVersion,
+    quoteId: payload.quoteId,
+    baseCurrency: payload.quoteBaseCurrency,
+    quoteCurrency: payload.quoteCurrency,
+    source: payload.quoteSource,
+    rateNumerator: payload.rateNumerator,
+    rateDenominator: payload.rateDenominator,
+    observedAt: payload.quoteObservedAt,
+    issuedAt: payload.quoteIssuedAt,
+    expiresAt: payload.quoteExpiresAt,
+  });
 }
 
 export type ValidatePayloadResult =
@@ -303,6 +406,10 @@ export function validatePaymentRequestPayload(
     }
   }
 
+  if (record.schemaVersion === LEGACY_MANUAL_RATE_SCHEMA_VERSION) {
+    // Elle girilen kurlu eski bağlantılar bilinçli olarak kabul edilmez.
+    return { ok: false, problem: "outdatedSchemaVersion" };
+  }
   if (record.schemaVersion !== PAYMENT_REQUEST_SCHEMA_VERSION) {
     return { ok: false, problem: "unsupportedSchemaVersion" };
   }
@@ -339,6 +446,49 @@ export function validatePaymentRequestPayload(
     !isSafeLabel(record.debtorLabel, MAX_LABEL_LENGTH)
   ) {
     return { ok: false, problem: "invalidLabel" };
+  }
+
+  /*
+   * Sunucu teklifi alanları. Buradaki doğrulama YAPISALDIR; etiketin gerçekten
+   * sunucudan geldiği ayrıca /api/rates/verify üzerinden kanıtlanır. İstemci
+   * sırrı bilmediği için HMAC'i burada doğrulayamaz.
+   */
+  if (record.quoteVersion !== RATE_QUOTE_VERSION) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+  if (
+    typeof record.quoteId !== "string" ||
+    !QUOTE_ID_PATTERN.test(record.quoteId)
+  ) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+  if (
+    record.quoteBaseCurrency !== QUOTE_BASE_CURRENCY ||
+    record.quoteCurrency !== QUOTE_CURRENCY ||
+    record.quoteSource !== QUOTE_SOURCE
+  ) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+  if (!isValidQuoteTagFormat(record.quoteTag)) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+
+  const quoteObservedAt = record.quoteObservedAt;
+  const quoteIssuedAt = record.quoteIssuedAt;
+  const quoteExpiresAt = record.quoteExpiresAt;
+  if (
+    typeof quoteObservedAt !== "number" ||
+    typeof quoteIssuedAt !== "number" ||
+    typeof quoteExpiresAt !== "number" ||
+    !Number.isSafeInteger(quoteObservedAt) ||
+    !Number.isSafeInteger(quoteIssuedAt) ||
+    !Number.isSafeInteger(quoteExpiresAt) ||
+    quoteObservedAt <= 0 ||
+    quoteIssuedAt <= 0 ||
+    quoteExpiresAt <= quoteIssuedAt ||
+    (quoteExpiresAt - quoteIssuedAt) * 1000 > QUOTE_LIFETIME_MS
+  ) {
+    return { ok: false, problem: "invalidQuote" };
   }
 
   if (!isDecimalString(record.tryMinor) || BigInt(record.tryMinor) <= BigInt(0)) {
@@ -398,13 +548,37 @@ export function validatePaymentRequestPayload(
     return { ok: false, problem: "lifetimeTooLong" };
   }
 
+  /*
+   * Talep, dayandığı piyasa teklifinden UZUN YAŞAYAMAZ. Aksi hâlde 5 dakikalık
+   * bir kurla imzalanmış bir talep günlerce ödenebilir ve gerçek piyasa
+   * kurundan kopardı.
+   */
+  if (expiresAt > quoteExpiresAt) {
+    return { ok: false, problem: "requestOutlivesQuote" };
+  }
+
   const nowSeconds = Math.floor(nowMs / 1000);
   const skewSeconds = Math.floor(REQUEST_MAX_CLOCK_SKEW_MS / 1000);
+  const quoteSkewSeconds = Math.floor(QUOTE_MAX_CLOCK_SKEW_MS / 1000);
+  const maxObservationAgeSeconds = Math.floor(QUOTE_MAX_OBSERVATION_AGE_MS / 1000);
+
+  // Önce talebin kendi zaman penceresi: kullanıcıya en anlaşılır sinyal budur.
   if (issuedAt - skewSeconds > nowSeconds) {
     return { ok: false, problem: "notYetValid" };
   }
   if (expiresAt <= nowSeconds) {
     return { ok: false, problem: "expired" };
+  }
+
+  // Ardından teklifin tazeliği: bayat bir gözlem sessizce kabul edilmez.
+  if (quoteObservedAt - quoteSkewSeconds > nowSeconds) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+  if (nowSeconds - quoteObservedAt > maxObservationAgeSeconds) {
+    return { ok: false, problem: "invalidQuote" };
+  }
+  if (quoteIssuedAt - quoteSkewSeconds > nowSeconds) {
+    return { ok: false, problem: "invalidQuote" };
   }
 
   return {
@@ -424,6 +598,15 @@ export function validatePaymentRequestPayload(
       expiresAt,
       recipientLabel: record.recipientLabel,
       debtorLabel: record.debtorLabel,
+      quoteVersion: RATE_QUOTE_VERSION,
+      quoteId: record.quoteId,
+      quoteBaseCurrency: QUOTE_BASE_CURRENCY,
+      quoteCurrency: QUOTE_CURRENCY,
+      quoteSource: QUOTE_SOURCE,
+      quoteObservedAt,
+      quoteIssuedAt,
+      quoteExpiresAt,
+      quoteTag: record.quoteTag,
     }),
   };
 }

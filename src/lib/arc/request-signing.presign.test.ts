@@ -38,7 +38,10 @@ vi.mock("./wallet", () => ({ withProvider: withProviderMock }));
 
 const { signPaymentRequest } = await import("./request-signing");
 
+import { buildTestQuote } from "@/lib/rates/quote-fixture";
+
 const NOW = 1_700_000_000_000;
+const RATE_4000 = buildTestQuote({ nowMs: NOW, wholeRate: 4000 });
 const at = (nowMs: number) => () => nowMs;
 const ZERO_WIDTH_SPACE = String.fromCodePoint(0x200b);
 
@@ -55,8 +58,8 @@ function honestPayload(): PaymentRequestPayload {
     debtor: debtor.address,
     debtKey: "b->a",
     tryMinor: 20000,
-    rateNumerator: BigInt(4000),
-    rateDenominator: BigInt(1),
+    quote: RATE_4000.quote,
+    quoteTag: RATE_4000.tag,
     microUsdc: BigInt(50_000),
     recipientLabel: "Sen",
     debtorLabel: "Ayşe",

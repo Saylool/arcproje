@@ -27,6 +27,11 @@ cp .env.example .env.local
 | --- | --- | --- |
 | `OPENAI_API_KEY` | evet | Fiş analizi için OpenAI anahtarı. **Yalnızca sunucuda okunur.** |
 | `OPENAI_RECEIPT_MODEL` | hayır | Kullanılacak model. Varsayılan: `gpt-5.6-luna` |
+| `COINGECKO_DEMO_API_KEY` | evet | USDC/TRY kuru için CoinGecko Demo anahtarı. **Yalnızca sunucuda okunur.** |
+| `RATE_QUOTE_SECRET` | evet | Kur teklifini imzalayan HMAC sırrı. **Yalnızca sunucuda okunur.** |
+
+Bu üç değişkenin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
+paketine girmez.
 
 Anahtar tanımlı olmasa bile uygulama açılır ve fiş yükleme ekranı çalışır; yalnızca
 analiz isteği kontrollü bir "servis yapılandırılmamış" hatası döner.
@@ -54,6 +59,111 @@ npm test
 ```bash
 npm run build
 ```
+
+## Otomatik USDC/TRY kuru
+
+Kur artık elle girilmez. Sunucu kuru CoinGecko'dan alır, kanonik biçime
+indirger ve HMAC-SHA-256 ile imzalar; ödeme talebi bu **imzalı teklife**
+bağlanır.
+
+### Neden sunucu imzalıyor
+
+Talebi oluşturan kişi kendi cüzdanıyla istediği alanı imzalayabilir. Bu yüzden
+EIP-712 imzası kurun piyasadan geldiğini **kanıtlamaz** — yalnızca alanları
+kimin imzaladığını kanıtlar. Kuru sunucunun HMAC etiketi korur: etiket kurun
+kendisini de kapsadığı için, oluşturucu kuru değiştirip tutarı yeniden
+hesaplasa bile borçlunun tarayıcısında yapılan sunucu doğrulaması düşer.
+
+### CoinGecko Demo anahtarı nasıl alınır
+
+1. <https://www.coingecko.com/en/api> adresinden ücretsiz **Demo** planına
+   kaydol.
+2. Panelden bir Demo API anahtarı üret.
+3. Anahtarı `.env.local` içindeki `COINGECKO_DEMO_API_KEY` alanına yaz.
+
+Anahtar yalnızca `x-cg-demo-api-key` başlığında taşınır; sorgu dizesine
+konmaz ve istemciye hiç gönderilmez.
+
+### RATE_QUOTE_SECRET nasıl üretilir
+
+Sırrı depoya **yazmadan** yerelde üret:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+Çıktıyı `.env.local` içindeki `RATE_QUOTE_SECRET` alanına yapıştır. En az 32
+karakter olmalıdır. `.env.local` git tarafından yok sayılır; sırrı asla
+`.env.example`, test, log veya commit içine koyma.
+
+### Akış
+
+1. Ödeme talebi ekranına gelindiğinde kur **bir kez** otomatik istenir.
+2. Sunucu `GET /api/rates/usdc-try` ile taze bir teklif basar.
+3. Teklif 5 dakika geçerlidir; ekranda geri sayım gösterilir.
+4. Talep yalnızca geçerli ve süresi dolmamış bir teklifle imzalanabilir.
+5. Borçlunun sayfası teklifi `POST /api/rates/verify` ile sunucuya doğrulatır;
+   doğrulama geçmeden cüzdan, tahmin ve gönderim kontrolleri **görünmez**.
+6. Kur, tahminden hemen önce ve gönderimden hemen önce yeniden doğrulanır.
+
+### Kur biçimi ve tutar hesabı
+
+Sağlayıcı değeri sınırda **bir kez** altı ondalıklı kanonik metne çevrilir
+(ör. `42.123456`), sonra `42123456 / 1000000` rasyoneline dönüşür. Borç ve
+mikro-USDC hesabının tamamı BigInt'tir; kanonikleştirmeden sonra hiçbir yerde
+kayan nokta aritmetiği kullanılmaz. USDC tutarı her zaman 6 ondalıklı tam sayı
+mikro-USDC'dir.
+
+### Geçerlilik süreleri
+
+| Süre | Değer |
+| --- | --- |
+| Kur teklifi ömrü | 5 dakika |
+| Ödeme talebi ömrü | teklifin bitişini **aşamaz** |
+| Sağlayıcı gözlem yaşı üst sınırı | 10 dakika |
+| Sunucu önbelleği | ~60 saniye |
+
+Ödeme talebi dayandığı teklifden uzun yaşayamaz. Bu, paylaşılan bağlantının
+pratikte **5 dakika içinde** ödenmesi gerektiği anlamına gelir.
+
+### Demo plan ve önbellek sınırları
+
+CoinGecko Demo planı kredi sınırlıdır ve verisi yaklaşık 60 saniye tazeliktedir.
+Sağlayıcı sonucu sunucu belleğinde ~60 saniye önbelleklenir ve aynı penceredeki
+eşzamanlı istekler tek bir yukarı akış çağrısında birleşir; böylece her render
+veya her kullanıcı bir kredi harcamaz.
+
+Önbellek **süreç içidir**. Sunucusuz ortamda her soğuk başlangıç ve her
+eşzamanlı örnek kendi önbelleğini tutar; bu yüzden önbellek bir garanti değil,
+bir iyileştirmedir. Paylaşılan/kalıcı önbellek bu sürümün kapsamı dışındadır
+(arka uç veya veritabanı eklenmemiştir).
+
+### Hata davranışı
+
+Kur alınamaz veya doğrulanamazsa **elle girilen bir kura düşülmez** ve ödeme
+talebi oluşturulamaz. Borçlu tarafında teklif doğrulanamazsa cüzdan ve gönderim
+kontrolleri hiç gösterilmez.
+
+### Atıf
+
+Kur verisi CoinGecko'dan alınır ve arayüzde
+[Data provided by CoinGecko](https://www.coingecko.com/en/api) bağlantısıyla
+belirtilir.
+
+### Arc Testnet uyarısı
+
+Arc Testnet USDC'sinin **gerçek parasal değeri yoktur**. Gösterilen kur yalnızca
+test amaçlıdır ve hiçbir gerçek varlığı temsil etmez.
+
+### Vercel'e taşırken
+
+Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
+
+- `OPENAI_API_KEY`
+- `COINGECKO_DEMO_API_KEY`
+- `RATE_QUOTE_SECRET`
+
+Üçü de `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
 
 ## Fiş analizi nasıl çalışıyor
 

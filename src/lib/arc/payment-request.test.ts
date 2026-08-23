@@ -16,10 +16,16 @@ import {
   type PaymentRequestPayload,
 } from "./payment-request";
 
+import { buildTestQuote } from "@/lib/rates/quote-fixture";
+
 const RECIPIENT = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 const DEBTOR = "0x0000000000000000000000000000000000000aBc";
 const NOW = 1_700_000_000_000;
 const REQUEST_ID = `0x${"11".repeat(32)}`;
+
+/** Sunucu kimliklendirmeli teklifler; kur artık elle verilmiyor. */
+const RATE_40 = buildTestQuote({ nowMs: NOW, wholeRate: 40 });
+const RATE_1 = buildTestQuote({ nowMs: NOW, wholeRate: 1 });
 
 /** 20000 kuruş, 1 USDC = 40 TRY -> tam olarak 5.000.000 mikro USDC. */
 const baseInput = {
@@ -27,8 +33,8 @@ const baseInput = {
   debtor: DEBTOR,
   debtKey: "b->a",
   tryMinor: 20000,
-  rateNumerator: BigInt(40),
-  rateDenominator: BigInt(1),
+  quote: RATE_40.quote,
+  quoteTag: RATE_40.tag,
   microUsdc: BigInt(5_000_000),
   recipientLabel: "Sen",
   debtorLabel: "Ayşe",
@@ -57,15 +63,17 @@ describe("createPaymentRequestPayload", () => {
     const payload = payloadOf();
     expect(payload.tryMinor).toBe("20000");
     expect(payload.microUsdc).toBe("5000000");
-    expect(payload.rateNumerator).toBe("40");
-    expect(payload.rateDenominator).toBe("1");
+    // Kur kanonik altı ondalıktır: 40.000000 -> 40000000 / 1000000
+    expect(payload.rateNumerator).toBe("40000000");
+    expect(payload.rateDenominator).toBe("1000000");
     // JSON'a BigInt yazılmadığı kanıtlanır.
     expect(() => JSON.stringify(payload)).not.toThrow();
   });
 
   it("varsayılan olarak 7 günlük geçerlilik verir", () => {
     const payload = payloadOf();
-    expect(payload.expiresAt - payload.issuedAt).toBe(7 * 24 * 60 * 60);
+    // Talep, dayandığı teklifin ömrünü aşamaz: 5 dakika.
+    expect(payload.expiresAt - payload.issuedAt).toBe(5 * 60);
   });
 
   it("kendine transferi reddeder", () => {
@@ -74,8 +82,8 @@ describe("createPaymentRequestPayload", () => {
       debtor: RECIPIENT.toLowerCase(),
       debtKey: "b->a",
       tryMinor: 1,
-      rateNumerator: BigInt(1),
-      rateDenominator: BigInt(1),
+      quote: RATE_1.quote,
+      quoteTag: RATE_1.tag,
       microUsdc: BigInt(1),
       recipientLabel: "Sen",
       debtorLabel: "Ayşe",
@@ -90,8 +98,8 @@ describe("createPaymentRequestPayload", () => {
       debtor: DEBTOR,
       debtKey: "b->a",
       tryMinor: 100,
-      rateNumerator: BigInt(1),
-      rateDenominator: BigInt(1),
+      quote: RATE_1.quote,
+      quoteTag: RATE_1.tag,
       microUsdc: BigInt(1),
       recipientLabel: "Sen",
       debtorLabel: "Ayşe",
@@ -101,8 +109,12 @@ describe("createPaymentRequestPayload", () => {
     expect(createPaymentRequestPayload({ ...base, debtor: "yok" }).ok).toBe(false);
     expect(createPaymentRequestPayload({ ...base, tryMinor: 0 }).ok).toBe(false);
     expect(createPaymentRequestPayload({ ...base, microUsdc: BigInt(0) }).ok).toBe(false);
+    // Kur artık girdi değil; kurcalanmış bir teklif reddedilmeli.
     expect(
-      createPaymentRequestPayload({ ...base, rateNumerator: BigInt(0) }).ok,
+      createPaymentRequestPayload({
+        ...base,
+        quote: { ...RATE_1.quote, rateNumerator: "0" },
+      }).ok,
     ).toBe(false);
   });
 
@@ -112,8 +124,8 @@ describe("createPaymentRequestPayload", () => {
       debtor: DEBTOR,
       debtKey: "b->a",
       tryMinor: 100,
-      rateNumerator: BigInt(1),
-      rateDenominator: BigInt(1),
+      quote: RATE_1.quote,
+      quoteTag: RATE_1.tag,
       microUsdc: BigInt(1),
       recipientLabel: "Sen",
       debtorLabel: "Ayşe",
@@ -139,8 +151,8 @@ describe("createPaymentRequestPayload", () => {
       debtor: DEBTOR,
       debtKey: "b->a",
       tryMinor: 100,
-      rateNumerator: BigInt(1),
-      rateDenominator: BigInt(1),
+      quote: RATE_1.quote,
+      quoteTag: RATE_1.tag,
       microUsdc: BigInt(1),
       recipientLabel: `Sen${String.fromCharCode(0)}`,
       debtorLabel: "Ayşe",
@@ -155,8 +167,8 @@ describe("createPaymentRequestPayload", () => {
       debtor: DEBTOR,
       debtKey: "b->a",
       tryMinor: 100,
-      rateNumerator: BigInt(1),
-      rateDenominator: BigInt(1),
+      quote: RATE_1.quote,
+      quoteTag: RATE_1.tag,
       microUsdc: BigInt(1),
       recipientLabel: "Sen",
       debtorLabel: "Ayşe",
@@ -237,6 +249,15 @@ describe("buildTypedData", () => {
       "expiresAt",
       "recipientLabel",
       "debtorLabel",
+      "quoteVersion",
+      "quoteId",
+      "quoteBaseCurrency",
+      "quoteCurrency",
+      "quoteSource",
+      "quoteObservedAt",
+      "quoteIssuedAt",
+      "quoteExpiresAt",
+      "quoteTag",
     ]);
   });
 });
@@ -277,8 +298,19 @@ describe("validatePaymentRequestPayload", () => {
 
   it("bilinmeyen şema sürümünü reddeder", () => {
     expect(
-      validatePaymentRequestPayload({ ...payloadOf(), schemaVersion: 2 }, NOW),
+      validatePaymentRequestPayload({ ...payloadOf(), schemaVersion: 3 }, NOW),
     ).toEqual({ ok: false, problem: "unsupportedSchemaVersion" });
+  });
+
+  it("elle girilen kurlu şema 1 bağlantısını ayrı mesajla reddeder", () => {
+    const result = validatePaymentRequestPayload(
+      { ...payloadOf(), schemaVersion: 1 },
+      NOW,
+    );
+    expect(result).toEqual({ ok: false, problem: "outdatedSchemaVersion" });
+    expect(describePaymentRequestProblem("outdatedSchemaVersion")).toMatch(
+      /yeni bir bağlantı iste/,
+    );
   });
 
   it("yanlış zinciri reddeder", () => {

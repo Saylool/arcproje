@@ -68,7 +68,10 @@ const { estimateArcSend, sendArcUsdc, validatePaymentSnapshot } = await import(
   "./send"
 );
 
+import { buildTestQuote } from "@/lib/rates/quote-fixture";
+
 const NOW = 1_700_000_000_000;
+const RATE_4000 = buildTestQuote({ nowMs: NOW, wholeRate: 4000 });
 const TX_HASH = `0x${"cd".repeat(32)}`;
 
 /** Test süresince bellekte kalan geçici imzalayanlar. */
@@ -81,8 +84,8 @@ function payloadOf(over: Partial<PaymentRequestPayload> = {}): PaymentRequestPay
     debtor: debtorAccount.address,
     debtKey: "b->a",
     tryMinor: 20000,
-    rateNumerator: BigInt(4000),
-    rateDenominator: BigInt(1),
+    quote: RATE_4000.quote,
+    quoteTag: RATE_4000.tag,
     microUsdc: BigInt(50_000),
     recipientLabel: "Sen",
     debtorLabel: "Ayşe",
@@ -126,6 +129,8 @@ function snapshotFromPayload(payload: PaymentRequestPayload) {
     requestId: payload.requestId,
     issuedAt: payload.issuedAt,
     expiresAt: payload.expiresAt,
+    quoteId: payload.quoteId,
+    quoteExpiresAt: payload.quoteExpiresAt,
   });
 }
 

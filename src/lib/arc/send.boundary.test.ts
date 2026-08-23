@@ -61,7 +61,8 @@ const TX_HASH = `0x${"ab".repeat(32)}`;
 /** Belirlenimci test zamanı; üretimde her zaman geçerli zaman kullanılır. */
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW / 1000);
-const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
+const LIFETIME_SECONDS = 5 * 60;
+const QUOTE_ID = `0x${"5a".repeat(32)}`;
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 const at = (nowMs: number) => () => nowMs;
 
@@ -81,7 +82,9 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     chainId: ARC_TESTNET_CHAIN_ID,
     requestId: REQUEST_ID,
     issuedAt: NOW_SECONDS,
-    expiresAt: NOW_SECONDS + SEVEN_DAYS_SECONDS,
+    expiresAt: NOW_SECONDS + LIFETIME_SECONDS,
+    quoteId: QUOTE_ID,
+    quoteExpiresAt: NOW_SECONDS + LIFETIME_SECONDS,
     ...over,
   });
 }

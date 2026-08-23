@@ -17,10 +17,21 @@ const RECIPIENT = "0x0000000000000000000000000000000000000aBc";
 /** Belirlenimci test zamanı; üretimde her zaman geçerli zaman kullanılır. */
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW / 1000);
-const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
+/** Talep, dayandığı 5 dakikalık kur teklifinden uzun yaşayamaz. */
+const LIFETIME_SECONDS = 5 * 60;
+const QUOTE_ID = `0x${"5a".repeat(32)}`;
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 
 function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot {
+  const merged = buildSnapshot(over);
+  // Teklif bitişi verilmediyse talebin bitişini takip eder.
+  return Object.freeze({
+    ...merged,
+    quoteExpiresAt: over.quoteExpiresAt ?? merged.expiresAt,
+  });
+}
+
+function buildSnapshot(over: Partial<ArcPaymentSnapshot>): ArcPaymentSnapshot {
   return Object.freeze({
     debtKey: "b->a",
     debtorParticipantId: "b",
@@ -36,7 +47,9 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     chainId: ARC_TESTNET_CHAIN_ID,
     requestId: REQUEST_ID,
     issuedAt: NOW_SECONDS,
-    expiresAt: NOW_SECONDS + SEVEN_DAYS_SECONDS,
+    expiresAt: NOW_SECONDS + LIFETIME_SECONDS,
+    quoteId: QUOTE_ID,
+    quoteExpiresAt: NOW_SECONDS + LIFETIME_SECONDS,
     ...over,
   });
 }
@@ -306,6 +319,8 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
     // Talebin geçerlilik penceresi kapandı: aynı talep bir daha gönderilemez.
     expiredRequest: "leaveReview",
     invalidRequestTime: "leaveReview",
+    // Kur teklifinin süresi de kalıcı bir kapanmadır: yeni bağlantı gerekir.
+    expiredQuote: "leaveReview",
     // Kullanıcının düzeltip tekrar deneyebileceği durumlar.
     noProvider: "keepReview",
     rejected: "keepReview",
@@ -319,6 +334,7 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
     invalidRate: "keepReview",
     inconsistentAmount: "keepReview",
     invalidRequestId: "keepReview",
+    invalidQuoteId: "keepReview",
     insufficientFunds: "keepReview",
     estimateFailed: "keepReview",
     sendFailed: "keepReview",
@@ -352,11 +368,19 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
       .filter(([, karar]) => karar === "leaveReview")
       .map(([code]) => code)
       .sort();
-    expect(dusurenler).toEqual(["expiredRequest", "invalidRequestTime"]);
+    expect(dusurenler).toEqual([
+      "expiredQuote",
+      "expiredRequest",
+      "invalidRequestTime",
+    ]);
   });
 
   it("incelemeyi düşüren hatalar yeni bağlantı istemeyi açıkça söyler", () => {
-    for (const code of ["expiredRequest", "invalidRequestTime"] as const) {
+    for (const code of [
+      "expiredRequest",
+      "invalidRequestTime",
+      "expiredQuote",
+    ] as const) {
       const mesaj = describeArcSendError(code);
       expect(mesaj, code).toMatch(/gönderim yapılmadı/);
       expect(mesaj, code).toMatch(/yeni bir bağlantı iste/);
