@@ -110,6 +110,7 @@ describe("zaman aşımı gövde okumasını da kapsar", () => {
       env: ENV,
       timeoutMs: 20,
       fetchImpl: stalling,
+      clock: () => NOW,
     });
     expect(first).toMatchObject({ ok: false, code: "timeout" });
 
@@ -120,9 +121,11 @@ describe("zaman aşımı gövde okumasını da kapsar", () => {
       }),
       { status: 200, headers: { "content-type": "application/json" } },
     );
-    const second = await getUsdcTryObservation(NOW + 10 * 60 * 1000, {
+    const recoveredAt = NOW + 10 * 60 * 1000;
+    const second = await getUsdcTryObservation(recoveredAt, {
       env: ENV,
       fetchImpl: (async () => ok) as never,
+      clock: () => recoveredAt,
     });
     expect(second.ok).toBe(true);
   });

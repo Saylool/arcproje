@@ -26,6 +26,9 @@ const ENV = {
   RATE_QUOTE_SECRET: TEST_QUOTE_SECRET,
 };
 
+/** Yerleşim saati enjekte edilir; gerçek saate bağlı test istemiyoruz. */
+const CLOCK = { clock: () => NOW };
+
 function okResponse(rate = 42.123456) {
   return new Response(
     JSON.stringify({
@@ -45,10 +48,11 @@ beforeEach(() => {
 describe("önbellek ve tekilleştirme", () => {
   it("aynı pencerede ikinci istek sağlayıcıya gitmez", async () => {
     const fetchImpl = vi.fn(async () => okResponse());
-    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
     const second = await getUsdcTryObservation(NOW + 1000, {
       env: ENV,
       fetchImpl: fetchImpl as never,
+      ...CLOCK,
     });
 
     expect(first.ok && first.source).toBe("provider");
@@ -58,10 +62,11 @@ describe("önbellek ve tekilleştirme", () => {
 
   it("önbellek süresi dolunca yeniden çekilir", async () => {
     const fetchImpl = vi.fn(async () => okResponse());
-    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
     const after = await getUsdcTryObservation(NOW + PROVIDER_CACHE_TTL_MS, {
       env: ENV,
       fetchImpl: fetchImpl as never,
+      ...CLOCK,
     });
 
     expect(after.ok && after.source).toBe("provider");
@@ -77,9 +82,9 @@ describe("önbellek ve tekilleştirme", () => {
         }),
     );
 
-    const a = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    const b = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    const c = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    const a = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
+    const b = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
+    const c = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     resolveFetch(okResponse());
@@ -96,13 +101,14 @@ describe("önbellek ve tekilleştirme", () => {
       .mockResolvedValueOnce(new Response("{}", { status: 500 }))
       .mockResolvedValueOnce(okResponse());
 
-    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...CLOCK });
     expect(first.ok).toBe(false);
 
     // Soğuma bittikten sonra yeniden denenir ve başarı gelir.
     const after = await getUsdcTryObservation(NOW + COOLDOWN_MAX_MS, {
       env: ENV,
       fetchImpl: fetchImpl as never,
+      ...CLOCK,
     });
     expect(after.ok).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
@@ -134,6 +140,7 @@ describe("teklif basımı", () => {
       env: ENV,
       fetchImpl: (async () => okResponse()) as never,
       nowMs: NOW,
+      ...CLOCK,
     });
     expect(minted.ok).toBe(true);
     if (!minted.ok) return;
@@ -154,6 +161,7 @@ describe("teklif basımı", () => {
       env: ENV,
       fetchImpl: (async () => okResponse()) as never,
       nowMs: NOW,
+      ...CLOCK,
     };
     const first = await mintUsdcTryQuote(options);
     const second = await mintUsdcTryQuote(options);
@@ -168,6 +176,7 @@ describe("teklif basımı", () => {
       env: { COINGECKO_DEMO_API_KEY: "k" },
       fetchImpl: (async () => okResponse()) as never,
       nowMs: NOW,
+      ...CLOCK,
     });
     expect(result).toMatchObject({ ok: false, code: "secretMissing" });
   });
@@ -177,6 +186,7 @@ describe("teklif basımı", () => {
       env: ENV,
       fetchImpl: (async () => new Response("{}", { status: 502 })) as never,
       nowMs: NOW,
+      ...CLOCK,
     });
     expect(result).toMatchObject({ ok: false, code: "providerUnavailable" });
   });
@@ -186,6 +196,7 @@ describe("teklif basımı", () => {
       env: ENV,
       fetchImpl: (async () => okResponse()) as never,
       nowMs: NOW,
+      ...CLOCK,
     });
     const serialized = JSON.stringify(minted);
     expect(serialized).not.toContain(TEST_QUOTE_SECRET);

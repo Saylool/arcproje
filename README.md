@@ -166,6 +166,44 @@ soğuma** uygulanır:
 > depo/oran sınırlayıcı (ör. Redis/KV tabanlı) gerekir. Bu odaklı düzeltmede
 > böyle bir bağımlılık eklenmemiştir.
 
+### Gönderim sonucu belirsizse
+
+`kit.send` çağrıldıktan sonra ortaya çıkan her hata "gönderilemedi" demek
+değildir: işlem zincire düşmüş olabilir. Bu yüzden sonuçlar ikiye ayrılır.
+
+| Durum | Davranış |
+| --- | --- |
+| Cüzdan reddi (4001), yetersiz bakiye | Yayın öncesi kesin; yeniden denenebilir |
+| Tanınmayan istisna, geçersiz/eksik işlem hash'i | **Belirsiz**; gönderim kilidi açılmaz |
+
+Belirsiz durumda kullanıcıya önce MetaMask işlem geçmişini ve ArcScan'i kontrol
+etmesi söylenir. Ayrıca `chainId + requestId` anahtarlı, **gizli veri
+içermeyen** yerel bir işaretçi tutulur; aynı tarayıcıda kazara ikinci gönderimi
+azaltır.
+
+> Bu işaretçi **yetkili bir koruma değildir.** `localStorage` cihaz ve tarayıcı
+> başınadır: gizli sekmede, başka bir cihazda veya temizlenmiş depoda hiçbir şey
+> hatırlanmaz.
+
+Ayrıca cüzdan akışı açılmadan önce **en az 60 saniye** kalan süre aranır;
+bitişe saniyeler kala gönderim başlatılmaz.
+
+### Gerçek değerli kullanım için eksikler
+
+Bu sürüm Arc Testnet içindir. Gerçek parasal değer taşıyan bir dağıtım için
+aşağıdakiler **hâlâ gereklidir** ve bu depoda yoktur:
+
+- **Yetkili tekrar oynatma engeli** — `requestId`'nin arka uçta veya zincir
+  üstünde **atomik olarak tüketilmesi**. Tarayıcı içi işaretçi ve bağlantının
+  tek kullanımlık sayılması bunun yerine geçmez.
+- **Zincir üstü son tarih uygulaması** — teklif/talep bitişini zincirin
+  kendisinin dayatması için bir ödeme sözleşmesi veya imzalama ile yayınlamanın
+  ayrıldığı bir akış. Şu anki süre kontrolleri istemci ve sunucu tarafındadır;
+  imzalanmış bir işlem gecikmeli olarak yayınlanırsa zincir bunu engellemez.
+- **Örnekler arası kota koruması** — CoinGecko sınırları için paylaşılan bir
+  Redis/KV sayacı ya da Vercel firewall/rate limiting. Süreç içi soğuma yalnızca
+  tek örneği korur.
+
 ### Hata davranışı
 
 Kur alınamaz veya doğrulanamazsa **elle girilen bir kura düşülmez** ve ödeme

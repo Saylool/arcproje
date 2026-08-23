@@ -147,9 +147,12 @@ describe("tahminden sonra, gönderimden önce süresi dolan talep", () => {
   });
 
   it("preflight sırasında süresi dolarsa App Kit yüklenmez", async () => {
-    // Girişte geçerli; sağlayıcı sorgusu sırasında süre dolar.
-    clock = (EXPIRES_AT - 1) * 1000;
-    chainCallDelayMs = 5000;
+    /*
+     * Girişte 120 sn kalmış: 60 sn'lik güvenlik payı geçilir. Sağlayıcı
+     * sorgusu sırasında saat 130 sn ilerler ve talep sona erer.
+     */
+    clock = (EXPIRES_AT - 120) * 1000;
+    chainCallDelayMs = 130_000;
 
     const result = await sendArcUsdc("w", snapshotOf(), clockNow);
     expect(result).toEqual({ ok: false, code: "expiredRequest" });

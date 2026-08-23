@@ -24,6 +24,9 @@ const ENV = {
   RATE_QUOTE_SECRET: TEST_QUOTE_SECRET,
 };
 
+/** Yerleşim saatini testin kontrol ettiği saate bağlar. */
+const at = (ms: number) => ({ clock: () => ms });
+
 function failure(status = 500, headers: Record<string, string> = {}) {
   return new Response("{}", { status, headers });
 }
@@ -51,14 +54,11 @@ describe("negatif önbellek (soğuma)", () => {
   it("soğuma boyunca tekrarlanan istekler tek yukarı akış çağrısı yapar", async () => {
     const fetchImpl = vi.fn(async () => failure(429));
 
-    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    const first = await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
     expect(first).toMatchObject({ ok: false, cooldown: false });
 
     for (let i = 1; i <= 5; i += 1) {
-      const repeat = await getUsdcTryObservation(NOW + i * 100, {
-        env: ENV,
-        fetchImpl: fetchImpl as never,
-      });
+      const repeat = await getUsdcTryObservation(NOW + i * 100, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + i * 100) });
       expect(repeat).toMatchObject({ ok: false, cooldown: true });
     }
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -70,11 +70,8 @@ describe("negatif önbellek (soğuma)", () => {
       .mockResolvedValueOnce(failure(500))
       .mockResolvedValueOnce(success());
 
-    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    const recovered = await getUsdcTryObservation(NOW + COOLDOWN_BASE_MS, {
-      env: ENV,
-      fetchImpl: fetchImpl as never,
-    });
+    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
+    const recovered = await getUsdcTryObservation(NOW + COOLDOWN_BASE_MS, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + COOLDOWN_BASE_MS) });
     expect(recovered.ok).toBe(true);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
@@ -85,10 +82,7 @@ describe("negatif önbellek (soğuma)", () => {
     let lastRetryAfter = 0;
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      const result = await getUsdcTryObservation(clock, {
-        env: ENV,
-        fetchImpl: fetchImpl as never,
-      });
+      const result = await getUsdcTryObservation(clock, { env: ENV, fetchImpl: fetchImpl as never, ...at(clock) });
       if (!result.ok && !result.cooldown) {
         lastRetryAfter = result.retryAfterSeconds ?? 0;
       }
@@ -101,17 +95,14 @@ describe("negatif önbellek (soğuma)", () => {
 
   it("geçerli Retry-After başlığına uyulur", async () => {
     const fetchImpl = vi.fn(async () => failure(429, { "retry-after": "45" }));
-    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
 
     // 40 sn sonra hâlâ soğumada.
-    const during = await getUsdcTryObservation(NOW + 40_000, {
-      env: ENV,
-      fetchImpl: fetchImpl as never,
-    });
+    const during = await getUsdcTryObservation(NOW + 40_000, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + 40_000) });
     expect(during).toMatchObject({ ok: false, cooldown: true });
 
     // 46 sn sonra yeniden denenir.
-    await getUsdcTryObservation(NOW + 46_000, { env: ENV, fetchImpl: fetchImpl as never });
+    await getUsdcTryObservation(NOW + 46_000, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + 46_000) });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -119,29 +110,20 @@ describe("negatif önbellek (soğuma)", () => {
     const fetchImpl = vi.fn(async () =>
       failure(429, { "retry-after": "99999999" }),
     );
-    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
 
     // Tavan aşıldıktan hemen sonra yeniden denenebilmeli.
-    await getUsdcTryObservation(NOW + (MAX_RETRY_AFTER_SECONDS + 1) * 1000, {
-      env: ENV,
-      fetchImpl: fetchImpl as never,
-    });
+    await getUsdcTryObservation(NOW + (MAX_RETRY_AFTER_SECONDS + 1) * 1000, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + (MAX_RETRY_AFTER_SECONDS + 1) * 1000) });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("yapılandırma eksikliği soğuma sayılmaz", async () => {
     const fetchImpl = vi.fn();
-    const first = await getUsdcTryObservation(NOW, {
-      env: { RATE_QUOTE_SECRET: TEST_QUOTE_SECRET },
-      fetchImpl: fetchImpl as never,
-    });
+    const first = await getUsdcTryObservation(NOW, { env: { RATE_QUOTE_SECRET: TEST_QUOTE_SECRET }, fetchImpl: fetchImpl as never, ...at(NOW) });
     expect(first).toMatchObject({ ok: false, code: "notConfigured", cooldown: false });
 
     // Anahtar sonradan gelirse beklemeden çalışır.
-    const second = await getUsdcTryObservation(NOW + 1, {
-      env: ENV,
-      fetchImpl: (async () => success()) as never,
-    });
+    const second = await getUsdcTryObservation(NOW + 1, { env: ENV, fetchImpl: (async () => success()) as never, ...at(NOW + 1) });
     expect(second.ok).toBe(true);
   });
 
@@ -152,17 +134,11 @@ describe("negatif önbellek (soğuma)", () => {
       .mockResolvedValueOnce(success())
       .mockResolvedValueOnce(failure(500));
 
-    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    await getUsdcTryObservation(NOW + COOLDOWN_BASE_MS, {
-      env: ENV,
-      fetchImpl: fetchImpl as never,
-    });
+    await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
+    await getUsdcTryObservation(NOW + COOLDOWN_BASE_MS, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + COOLDOWN_BASE_MS) });
     // Başarıdan sonra ilk hata yine taban soğumasıyla başlar (birikmez).
     const afterCache = NOW + COOLDOWN_BASE_MS + 61_000;
-    const failed = await getUsdcTryObservation(afterCache, {
-      env: ENV,
-      fetchImpl: fetchImpl as never,
-    });
+    const failed = await getUsdcTryObservation(afterCache, { env: ENV, fetchImpl: fetchImpl as never, ...at(afterCache) });
     expect(failed).toMatchObject({ ok: false, cooldown: false });
     expect(failed.ok === false && failed.retryAfterSeconds).toBeNull();
   });
@@ -172,9 +148,9 @@ describe("negatif önbellek (soğuma)", () => {
     const fetchImpl = vi.fn(
       () => new Promise<Response>((resolve) => { release = resolve; }),
     );
-    const a = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    const b = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
-    const c = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never });
+    const a = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
+    const b = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
+    const c = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     release(failure(500));
     await Promise.all([a, b, c]);

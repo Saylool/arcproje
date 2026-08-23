@@ -231,10 +231,14 @@ describe("başarılı gönderim (taklit App Kit)", () => {
     expect(params.from.chain).toBe("Arc_Testnet");
   });
 
-  it("SDK geçersiz bir hash döndürürse başarı sayılmaz", async () => {
+  it("SDK geçersiz bir hash döndürürse sonuç BELİRSİZ sayılır", async () => {
+    /*
+     * kit.send çağrıldı; hash okunamadı diye "gönderilemedi" denemez —
+     * işlem zincire düşmüş olabilir.
+     */
     sendMock.mockResolvedValue({ txHash: "0xdeadbeef" });
     const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
-    expect(result).toEqual({ ok: false, code: "sendFailed" });
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
   });
 
   it("cüzdan reddi kullanıcıya uygun kodla döner", async () => {

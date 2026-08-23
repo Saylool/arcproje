@@ -9,6 +9,8 @@ import {
   QUOTE_BASE_CURRENCY,
   QUOTE_CURRENCY,
   QUOTE_LIFETIME_MS,
+  QUOTE_MAX_CLOCK_SKEW_MS,
+  QUOTE_MAX_OBSERVATION_AGE_MS,
   QUOTE_RATE_DECIMALS,
   QUOTE_RATE_DENOMINATOR,
   QUOTE_SOURCE,
@@ -69,6 +71,32 @@ export function resetRateQuoteCache(): void {
   lastFailureCode = null;
 }
 
+/**
+ * Gözlemin olumlu önbelleğe alınabilecek kadar taze olup olmadığı.
+ *
+ * Sağlayıcının bildirdiği `last_updated_at` gelecekteyse veya izin verilen
+ * yaştan eskiyse veri geçerli sayılmaz. Bu kontrol teklif doğrulamasıyla AYNI
+ * sınırları kullanır; böylece önbelleğe alınıp sonra her seferinde reddedilen
+ * bir gözlem oluşamaz.
+ */
+function isFreshObservation(
+  observation: ProviderObservation,
+  nowMs: number,
+): boolean {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const skewSeconds = Math.floor(QUOTE_MAX_CLOCK_SKEW_MS / 1000);
+  const maxAgeSeconds = Math.floor(QUOTE_MAX_OBSERVATION_AGE_MS / 1000);
+  const { observedAt } = observation;
+
+  if (!Number.isSafeInteger(observedAt) || observedAt <= 0) {
+    return false;
+  }
+  if (observedAt - skewSeconds > nowSeconds) {
+    return false;
+  }
+  return nowSeconds - observedAt <= maxAgeSeconds;
+}
+
 /** Yapılandırma eksikliği bir sağlayıcı arızası değildir; soğutulmaz. */
 function isCooldownWorthy(code: ProviderFailureCode): boolean {
   return code !== "notConfigured";
@@ -101,8 +129,9 @@ export type ObservationResult =
  */
 export async function getUsdcTryObservation(
   nowMs: number,
-  options: FetchQuoteOptions = {},
+  options: FetchQuoteOptions & ClockOptions = {},
 ): Promise<ObservationResult> {
+  const clock = options.clock ?? Date.now;
   if (
     cachedObservation !== null &&
     nowMs - cachedObservation.storedAtMs < PROVIDER_CACHE_TTL_MS
@@ -123,10 +152,30 @@ export async function getUsdcTryObservation(
   if (inflight === null) {
     inflight = fetchUsdcTryObservation(options)
       .then((result) => {
+        // Çıpa: isteğin başladığı an değil, yanıtın DÖNDÜĞÜ an.
+        const settledAtMs = clock();
+
+        if (result.ok && !isFreshObservation(result.observation, settledAtMs)) {
+          /*
+           * Bayat veya gelecekte görünen bir gözlem BAŞARI SAYILMAZ ve asla
+           * olumlu önbelleğe alınmaz: aksi hâlde 60 saniye boyunca her teklif
+           * basımı aynı geçersiz veriyle düşerdi.
+           */
+          const stale = {
+            ok: false as const,
+            code: "invalidObservation" as const,
+            retryAfterSeconds: null,
+          };
+          consecutiveFailures += 1;
+          lastFailureCode = stale.code;
+          cooldownUntilMs = settledAtMs + nextCooldownMs(null);
+          return stale;
+        }
+
         if (result.ok) {
           cachedObservation = {
             observation: result.observation,
-            storedAtMs: nowMs,
+            storedAtMs: settledAtMs,
           };
           consecutiveFailures = 0;
           cooldownUntilMs = 0;
@@ -134,7 +183,7 @@ export async function getUsdcTryObservation(
         } else if (isCooldownWorthy(result.code)) {
           consecutiveFailures += 1;
           lastFailureCode = result.code;
-          cooldownUntilMs = nowMs + nextCooldownMs(result.retryAfterSeconds);
+          cooldownUntilMs = settledAtMs + nextCooldownMs(result.retryAfterSeconds);
         }
         return result;
       })
@@ -185,7 +234,16 @@ export function rateTextToRational(rateText: string): {
   };
 }
 
-export type MintOptions = FetchQuoteOptions & {
+export type ClockOptions = {
+  /**
+   * Yerleşim (settlement) saati. Önbellek ve soğuma çıpaları, isteğin
+   * BAŞLADIĞI ana değil, sağlayıcı yanıtının DÖNDÜĞÜ ana bağlanır; aksi hâlde
+   * 5 saniye süren bir çağrıdan sonra TTL ve soğuma 5 saniye kısalırdı.
+   */
+  clock?: () => number;
+};
+
+export type MintOptions = FetchQuoteOptions & ClockOptions & {
   /** Testlerde sabit saat vermek için; üretimde geçerli zaman kullanılır. */
   nowMs?: number;
   /** Testlerde belirlenimci kimlik vermek için. */

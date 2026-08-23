@@ -93,3 +93,53 @@ describe("yayım kapısı", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("doğrulama SIRASINDA süre dolması", () => {
+  it("sunucu doğrulaması dönerken süre dolduysa yayımlanmaz", async () => {
+    /*
+     * Saat, doğrulamadan ÖNCE geçerli; sunucu yanıtı dönerken bitişi geçiyor.
+     * "Doğrulama başladığında geçerliydi" yeterli değildir.
+     */
+    const request = signedRequest();
+    let calls = 0;
+    const clock = () => {
+      calls += 1;
+      // İlk okuma geçerli, ikinci okuma (yanıt sonrası) süre dolmuş.
+      return calls === 1 ? NOW : (request.payload.expiresAt + 1) * 1000;
+    };
+    const verify = vi.fn(async () => ({ ok: true }) as const);
+
+    const result = await ensureSignedRequestPublishable(request, verify, clock);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.message).toMatch(/Kuru yenileyip talebi yeniden imzala/);
+    // Sunucuya gidildi ama bağlantı yine de üretilmedi.
+    expect(verify).toHaveBeenCalledTimes(1);
+  });
+
+  it("tam bitiş saniyesinde ikinci kontrol de reddeder", async () => {
+    const request = signedRequest();
+    let calls = 0;
+    const clock = () => {
+      calls += 1;
+      return calls === 1 ? NOW : request.payload.expiresAt * 1000;
+    };
+    const result = await ensureSignedRequestPublishable(
+      request,
+      async () => ({ ok: true }),
+      clock,
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("doğrulama boyunca geçerli kalırsa yayımlanır", async () => {
+    const request = signedRequest();
+    // İki okuma da geçerli aralıkta.
+    const result = await ensureSignedRequestPublishable(
+      request,
+      async () => ({ ok: true }),
+      () => NOW + 1000,
+    );
+    expect(result).toEqual({ ok: true });
+  });
+});

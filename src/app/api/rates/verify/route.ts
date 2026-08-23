@@ -22,6 +22,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_BODY_BYTES = 4 * 1024;
+/**
+ * Gövde akışı için toplam son teslim süresi.
+ *
+ * Boyut sınırı tek başına yetmez: istemci sınırın altında kalıp baytları
+ * saniyede bir damlatarak isteği açık tutabilir. Bu süre tüm okumayı kapsar.
+ */
+const BODY_READ_DEADLINE_MS = 5000;
 
 const NO_STORE_HEADERS = {
   "cache-control": "no-store, private, max-age=0",
@@ -31,6 +38,7 @@ type BoundedBody =
   | { status: "ok"; text: string }
   | { status: "tooLarge" }
   | { status: "invalidEncoding" }
+  | { status: "timeout" }
   | { status: "unreadable" };
 
 /**
@@ -49,9 +57,18 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
+  let timedOut = false;
+  const deadline = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel().catch(() => undefined);
+  }, BODY_READ_DEADLINE_MS);
+
   try {
     for (;;) {
       const { done, value } = await reader.read();
+      if (timedOut) {
+        return { status: "timeout" };
+      }
       if (done) break;
       if (value === undefined) continue;
       total += value.byteLength;
@@ -62,8 +79,10 @@ async function readBoundedBody(request: Request): Promise<BoundedBody> {
       chunks.push(value);
     }
   } catch {
-    return { status: "unreadable" };
+    return timedOut ? { status: "timeout" } : { status: "unreadable" };
   } finally {
+    // Zamanlayıcı her yolda temizlenir; sızdırılan timer bırakılmaz.
+    clearTimeout(deadline);
     reader.releaseLock();
   }
 
@@ -115,6 +134,13 @@ export async function POST(request: Request) {
   }
   if (bounded.status === "invalidEncoding") {
     return errorResponse(400, "INVALID_ENCODING", "İstek gövdesi geçerli UTF-8 değil.");
+  }
+  if (bounded.status === "timeout") {
+    return errorResponse(
+      408,
+      "BODY_READ_TIMEOUT",
+      "İstek gövdesi zamanında okunamadı.",
+    );
   }
   if (bounded.status === "unreadable") {
     return errorResponse(400, "INVALID_REQUEST", "İstek okunamadı.");

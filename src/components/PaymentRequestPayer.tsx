@@ -25,7 +25,13 @@ import {
 import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
 import { createSingleFlight } from "@/lib/arc/single-flight";
 import {
+  readSubmission,
+  recordSubmission,
+  type SubmissionOutcome,
+} from "@/lib/arc/submission-log";
+import {
   describeArcSendError,
+  keepsSubmissionLocked,
   estimateArcSend,
   reviewStateAfterSendFailure,
   sendArcUsdc,
@@ -89,6 +95,15 @@ export function PaymentRequestPayer() {
    * kez başlatabilirdi. useRef anında yazılır ve ikinci çağrı hemen döner.
    */
   const submitGuard = useRef(createSingleFlight());
+  /** Tahmin için AYRI kilit: çift tık iki tahmin boru hattı başlatamaz. */
+  const estimateGuard = useRef(createSingleFlight());
+  /*
+   * Bayatlık jetonu. Hesap/ağ değiştiğinde artar; devam eden bir tahminin geç
+   * dönen sonucu daha YENİ durumun üzerine yazamaz.
+   */
+  const runToken = useRef(0);
+  const [priorSubmission, setPriorSubmission] =
+    useState<SubmissionOutcome | null>(null);
 
   // Çöz + doğrula. Cüzdan kontrolleri ancak bu geçerse gösterilir.
   useEffect(() => {
@@ -164,11 +179,14 @@ export function PaymentRequestPayer() {
     }
     return subscribeToWallet(selectedWalletUuid, {
       onAccountsChanged: (accounts) => {
+        // Devam eden tahminin sonucu artık geçersizdir.
+        runToken.current += 1;
         setAccount(accounts[0] ?? null);
         setStatus("idle");
         setConfirmed(false);
       },
       onChainChanged: (next) => {
+        runToken.current += 1;
         setChainId(next);
         setStatus("idle");
         setConfirmed(false);
@@ -204,6 +222,28 @@ export function PaymentRequestPayer() {
       quoteExpiresAt: request.payload.quoteExpiresAt,
     });
   }, [request]);
+
+  /*
+   * Bu tarayıcıda bu talep için daha önce bir gönderim yapılmış mı? YETKİLİ
+   * bir kontrol değildir (cihaz başına localStorage); yalnızca aynı tarayıcıda
+   * kazara ikinci gönderimi azaltır.
+   */
+  useEffect(() => {
+    if (snapshot === null) {
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      const prior = readSubmission(snapshot.chainId, snapshot.requestId);
+      if (!cancelled && prior !== null) {
+        setPriorSubmission(prior);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [snapshot]);
 
   const onArc = isArcTestnet(chainId);
   const accountMatchesDebtor =
@@ -265,7 +305,8 @@ export function PaymentRequestPayer() {
     onArc &&
     accountMatchesDebtor &&
     !busy &&
-    !alreadyPaid;
+    !alreadyPaid &&
+    priorSubmission === null;
 
   /** İncelemeyi düşürür: onay kutusu ve gönder düğmesi ekrandan kalkar. */
   const dropReview = (message: string) => {
@@ -282,39 +323,71 @@ export function PaymentRequestPayer() {
   };
 
   const estimate = async () => {
-    if (!canEstimate || snapshot === null || selectedWalletUuid === null) return;
-    // Talebin süresi bu arada dolmuş olabilir.
-    if (encoded !== null) {
-      const fresh = decodeSignedRequest(encoded, Date.now());
-      if (!fresh.ok) {
-        dropReview(
-          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-        );
-        return;
-      }
-    }
-    // Sayfa açıkken süresi dolan bir kur tahmine giremez.
-    if (request === null) {
+    /*
+     * Tahmin için de EŞZAMANLI kilit, ilk `await`ten ÖNCE. Aksi hâlde iki
+     * hızlı tık iki tahmin boru hattı başlatır ve geç dönen sonuç, erken
+     * dönenin üzerine yazabilirdi.
+     */
+    if (!estimateGuard.current.tryEnter()) {
       return;
     }
-    const quoteBeforeEstimate = await verifyQuoteWithServer(
-      extractQuoteFromPayload(request.payload),
-      request.payload.quoteTag,
-    );
-    if (!quoteBeforeEstimate.ok) {
-      dropReview(quoteBeforeEstimate.message);
+    if (
+      !canEstimate ||
+      snapshot === null ||
+      selectedWalletUuid === null ||
+      request === null
+    ) {
+      estimateGuard.current.release();
       return;
     }
+
+    // Görünür durum hemen değişir: tahmin düğmesi bu andan itibaren pasiftir.
+    const token = (runToken.current += 1);
     setStatus("estimating");
     setErrorMessage(null);
-    const outcome = await estimateArcSend(selectedWalletUuid, snapshot);
-    if (!outcome.ok) {
-      setErrorMessage(describeArcSendError(outcome.code));
-      setStatus("idle");
-      return;
+
+    /** Hesap/ağ değiştiyse veya yeni bir çalışma başladıysa sonuç bayattır. */
+    const isStale = () => token !== runToken.current;
+
+    try {
+      // Talebin süresi bu arada dolmuş olabilir.
+      if (encoded !== null) {
+        const fresh = decodeSignedRequest(encoded, Date.now());
+        if (!fresh.ok) {
+          dropReview(
+            `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+          );
+          return;
+        }
+      }
+      // Sayfa açıkken süresi dolan bir kur tahmine giremez.
+      const quoteBeforeEstimate = await verifyQuoteWithServer(
+        extractQuoteFromPayload(request.payload),
+        request.payload.quoteTag,
+      );
+      if (isStale()) {
+        return;
+      }
+      if (!quoteBeforeEstimate.ok) {
+        dropReview(quoteBeforeEstimate.message);
+        return;
+      }
+
+      const outcome = await estimateArcSend(selectedWalletUuid, snapshot);
+      if (isStale()) {
+        // Geç dönen sonuç daha YENİ durumun üzerine yazılmaz.
+        return;
+      }
+      if (!outcome.ok) {
+        setErrorMessage(describeArcSendError(outcome.code));
+        setStatus("idle");
+        return;
+      }
+      setEstimateSummary(outcome.value.summary);
+      setStatus("review");
+    } finally {
+      estimateGuard.current.release();
     }
-    setEstimateSummary(outcome.value.summary);
-    setStatus("review");
   };
 
   const submit = async () => {
@@ -391,6 +464,18 @@ export function PaymentRequestPayer() {
       const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
       if (!outcome.ok) {
         const message = describeArcSendError(outcome.code);
+        if (keepsSubmissionLocked(outcome.code)) {
+          /*
+           * kit.send ÇAĞRILDI ve sonuç belirsiz. İşlem zincire düşmüş
+           * olabileceği için kilit AÇILMAZ; kullanıcı önce cüzdanını ve
+           * ArcScan'i kontrol etmelidir.
+           */
+          recordSubmission(snapshot.chainId, snapshot.requestId, "unknown");
+          setPriorSubmission("unknown");
+          keepLocked = true;
+          dropReview(message);
+          return;
+        }
         // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
         // kurulu bir onay düğmesi ekranda bırakılmaz.
         if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
@@ -400,6 +485,8 @@ export function PaymentRequestPayer() {
         backToReview(message);
         return;
       }
+      recordSubmission(snapshot.chainId, snapshot.requestId, "success");
+      setPriorSubmission("success");
       setTransaction(outcome.value);
       setStatus("done");
       // Başarıdan sonra kilit AÇILMAZ: aynı talep ikinci kez gönderilemez.
@@ -627,6 +714,21 @@ export function PaymentRequestPayer() {
           </div>
         )}
       </div>
+
+      {priorSubmission !== null && transaction === null && (
+        <p
+          role="alert"
+          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+        >
+          {priorSubmission === "success"
+            ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
+            : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
+          <strong className="font-semibold">
+            Bu kayıt yalnızca bu tarayıcıda tutulur; başka bir cihazdan veya
+            gizli sekmeden yapılan gönderimi bilemez.
+          </strong>
+        </p>
+      )}
 
       {/* Tahmin ve onay */}
       {!alreadyPaid && (

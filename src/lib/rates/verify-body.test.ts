@@ -130,3 +130,68 @@ describe("gövde bayt sınırı", () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe("gövde okuma son teslim süresi", () => {
+  /** Hiç veri göndermeyen, açık kalan akış. */
+  function stalledBody() {
+    return new ReadableStream<Uint8Array>({
+      start() {
+        // Kasıtlı olarak hiçbir şey enqueue edilmez ve kapatılmaz.
+      },
+      cancel() {
+        // İptal desteklenir: okuyucu cancel çağırınca akış biter.
+      },
+    });
+  }
+
+  /** Sınırın altında kalıp yavaşça damlatan akış. */
+  function tricklingBody() {
+    let sent = 0;
+    return new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        if (sent >= 4) {
+          // Daha fazla veri gelmez; akış açık kalır.
+          await new Promise(() => undefined);
+          return;
+        }
+        sent += 1;
+        controller.enqueue(new TextEncoder().encode("{}"));
+        await new Promise((resolve) => setTimeout(resolve, 30));
+      },
+      cancel() {},
+    });
+  }
+
+  it("takılan gövde son teslim süresinde kesilir", async () => {
+    const response = await POST(requestWithBody(stalledBody()));
+    expect(response.status).toBe(408);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("BODY_READ_TIMEOUT");
+  }, 15_000);
+
+  it("yavaş damlayan gövde de süresiz beklenmez", async () => {
+    const response = await POST(requestWithBody(tricklingBody()));
+    expect(response.status).toBe(408);
+  }, 15_000);
+
+  it("başarılı okumada zamanlayıcı sızdırılmaz", async () => {
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    const response = await POST(
+      requestWithBody(
+        chunkedBody(JSON.stringify({ quote: SIGNED.quote, tag: SIGNED.tag })),
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
+  });
+
+  it("boyut sınırı yolunda da zamanlayıcı temizlenir", async () => {
+    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+    const huge = JSON.stringify({ quote: "x".repeat(LIMIT + 2048) });
+    const response = await POST(requestWithBody(chunkedBody(huge)));
+    expect(response.status).toBe(413);
+    expect(clearSpy).toHaveBeenCalled();
+    clearSpy.mockRestore();
+  });
+});

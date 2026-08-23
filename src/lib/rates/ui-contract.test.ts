@@ -148,3 +148,33 @@ describe("çift gönderim koruması", () => {
     expect(payer).toContain("submitGuard.current.release()");
   });
 });
+
+describe("tahmin çift tık koruması", () => {
+  it("tahmin için ayrı kilit vardır ve ilk await'ten önce alınır", () => {
+    const body = payer.slice(payer.indexOf("const estimate = async () => {"));
+    const guardAt = body.indexOf("estimateGuard.current.tryEnter()");
+    const firstAwaitAt = body.indexOf("await ");
+    expect(guardAt).toBeGreaterThanOrEqual(0);
+    expect(guardAt).toBeLessThan(firstAwaitAt);
+  });
+
+  it("bayat sonuç daha yeni durumun üzerine yazmaz", () => {
+    expect(payer).toContain("runToken");
+    expect(payer).toContain("isStale()");
+    // Hesap ve ağ değişimi devam eden çalışmayı bayatlatır.
+    expect(payer).toContain("runToken.current += 1");
+  });
+});
+
+describe("belirsiz gönderim sonucu", () => {
+  it("kilit açılmaz ve kullanıcı cüzdan/ArcScan kontrolüne yönlendirilir", () => {
+    expect(payer).toContain("keepsSubmissionLocked");
+    expect(payer).toContain("recordSubmission");
+    expect(payer).toContain("readSubmission");
+  });
+
+  it("önceki gönderim uyarısı yetkili olmadığını söyler", () => {
+    expect(payer).toContain("yalnızca bu tarayıcıda tutulur");
+    expect(payer).toContain("başka bir cihazdan");
+  });
+});

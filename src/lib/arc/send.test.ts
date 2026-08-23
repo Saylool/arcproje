@@ -321,6 +321,10 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
     invalidRequestTime: "leaveReview",
     // Kur teklifinin süresi de kalıcı bir kapanmadır: yeni bağlantı gerekir.
     expiredQuote: "leaveReview",
+    // Süre payı yetmediğinde cüzdan akışı hiç açılmaz.
+    insufficientTimeRemaining: "leaveReview",
+    // kit.send çağrıldıktan sonra sonuç belirsizse tekrar denenmez.
+    submissionUnknown: "leaveReview",
     // Kullanıcının düzeltip tekrar deneyebileceği durumlar.
     noProvider: "keepReview",
     rejected: "keepReview",
@@ -371,7 +375,9 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
     expect(dusurenler).toEqual([
       "expiredQuote",
       "expiredRequest",
+      "insufficientTimeRemaining",
       "invalidRequestTime",
+      "submissionUnknown",
     ]);
   });
 
@@ -380,9 +386,10 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
       "expiredRequest",
       "invalidRequestTime",
       "expiredQuote",
+      "insufficientTimeRemaining",
     ] as const) {
       const mesaj = describeArcSendError(code);
-      expect(mesaj, code).toMatch(/gönderim yapılmadı/);
+      expect(mesaj, code).toMatch(/gönderim (yapılmadı|başlatılmadı)/i);
       expect(mesaj, code).toMatch(/yeni bir bağlantı iste/);
     }
   });

@@ -128,3 +128,104 @@ describe("çift tık tek boru hattı üretir", () => {
     expect(harness.send).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * Tahmin boru hattı: kilit + bayatlık jetonu.
+ *
+ * PaymentRequestPayer.estimate ile aynı denetim akışı: kilit ilk `await`ten
+ * önce alınır, jeton çalışma başında artar, geç dönen sonuç daha yeni durumun
+ * üzerine yazamaz.
+ */
+function buildEstimateHarness(options: {
+  verify: () => Promise<{ ok: boolean }>;
+  estimate: () => Promise<{ ok: boolean; summary?: string }>;
+}) {
+  const guard = createSingleFlight();
+  const token = { current: 0 };
+  const applied: string[] = [];
+  const verify = vi.fn(options.verify);
+  const estimate = vi.fn(options.estimate);
+
+  const run = async () => {
+    if (!guard.tryEnter()) {
+      return;
+    }
+    const mine = (token.current += 1);
+    const isStale = () => mine !== token.current;
+    try {
+      const verified = await verify();
+      if (isStale()) return;
+      if (!verified.ok) return;
+
+      const result = await estimate();
+      if (isStale()) return;
+      if (!result.ok) return;
+      applied.push(result.summary ?? "ok");
+    } finally {
+      guard.release();
+    }
+  };
+
+  /** Hesap/ağ değişimi: devam eden çalışmayı bayatlatır. */
+  const invalidate = () => {
+    token.current += 1;
+  };
+
+  return { run, invalidate, verify, estimate, applied };
+}
+
+describe("tahmin çift tıklaması ve bayat sonuç", () => {
+  it("çift tık ikinci tahmin boru hattını başlatmaz", async () => {
+    let resolveVerify: (value: { ok: boolean }) => void = () => undefined;
+    const harness = buildEstimateHarness({
+      verify: () =>
+        new Promise<{ ok: boolean }>((resolve) => {
+          resolveVerify = resolve;
+        }),
+      estimate: async () => ({ ok: true, summary: "0.01" }),
+    });
+
+    const first = harness.run();
+    const second = harness.run();
+    expect(harness.verify).toHaveBeenCalledTimes(1);
+    expect(harness.estimate).not.toHaveBeenCalled();
+
+    resolveVerify({ ok: true });
+    await Promise.all([first, second]);
+    expect(harness.verify).toHaveBeenCalledTimes(1);
+    expect(harness.estimate).toHaveBeenCalledTimes(1);
+    expect(harness.applied).toEqual(["0.01"]);
+  });
+
+  it("hesap değişince geç dönen tahmin uygulanmaz", async () => {
+    let resolveEstimate: (value: { ok: boolean; summary?: string }) => void =
+      () => undefined;
+    const harness = buildEstimateHarness({
+      verify: async () => ({ ok: true }),
+      estimate: () =>
+        new Promise<{ ok: boolean; summary?: string }>((resolve) => {
+          resolveEstimate = resolve;
+        }),
+    });
+
+    const pending = harness.run();
+    await Promise.resolve();
+    // Tahmin devam ederken kullanıcı hesabı değiştirdi.
+    harness.invalidate();
+    resolveEstimate({ ok: true, summary: "bayat" });
+    await pending;
+
+    expect(harness.applied).toEqual([]);
+  });
+
+  it("kilit bırakıldıktan sonra yeniden tahmin alınabilir", async () => {
+    const harness = buildEstimateHarness({
+      verify: async () => ({ ok: true }),
+      estimate: async () => ({ ok: true, summary: "0.02" }),
+    });
+    await harness.run();
+    await harness.run();
+    expect(harness.estimate).toHaveBeenCalledTimes(2);
+    expect(harness.applied).toEqual(["0.02", "0.02"]);
+  });
+});

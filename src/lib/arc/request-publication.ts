@@ -15,6 +15,9 @@ import type { RateQuote } from "@/lib/rates/quote";
  * kontrol yazılmaz: üretimde ve tüketimde kullanılan AYNI katı doğrulayıcı
  * çağrılır.
  *
+ * Doğrulama İKİ kez yapılır: sunucuya sorulmadan önce ve yanıt geldikten
+ * sonra. Aradaki gidiş-dönüş boyunca teklif sona erebilir.
+ *
  * Saat ve sunucu doğrulaması dışarıdan verilir; böylece bu kapı React'ten
  * bağımsız ve belirlenimci biçimde test edilebilir.
  */
@@ -49,6 +52,19 @@ export async function ensureSignedRequestPublishable(
   );
   if (!quoteCheck.ok) {
     return { ok: false, message: `${quoteCheck.message} ${REFRESH_HINT}` };
+  }
+
+  /*
+   * Sunucu doğrulaması bir ağ gidiş-dönüşü kadar sürer; teklif TAM O SIRADA
+   * sona ermiş olabilir. Bağlantı açığa çıkmadan önce TAZE saatle son bir kez
+   * doğrulanır: "doğrulama başladığında geçerliydi" yeterli değildir.
+   */
+  const stillValid = validatePaymentRequestPayload(request.payload, now());
+  if (!stillValid.ok) {
+    return {
+      ok: false,
+      message: `${describePaymentRequestProblem(stillValid.problem)} ${REFRESH_HINT}`,
+    };
   }
 
   return { ok: true };

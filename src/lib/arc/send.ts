@@ -91,6 +91,8 @@ export type ArcSendErrorCode =
   | "expiredRequest"
   | "invalidQuoteId"
   | "expiredQuote"
+  | "insufficientTimeRemaining"
+  | "submissionUnknown"
   | "insufficientFunds"
   | "estimateFailed"
   | "sendFailed";
@@ -119,6 +121,10 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
   invalidQuoteId: "Ödeme talebindeki kur teklifi kimliği geçersiz.",
   expiredQuote:
     "Talebin dayandığı kur teklifinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
+  insufficientTimeRemaining:
+    "Kur teklifinin bitişine çok az kaldı; işlem onaylanmadan süresi dolabilirdi. Gönderim başlatılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
+  submissionUnknown:
+    "İşlem cüzdana GÖNDERİLDİ ama sonucu doğrulanamadı. TEKRAR DENEME: aynı ödeme iki kez gidebilir. Önce MetaMask'taki işlem geçmişini ve ArcScan'i kontrol et; işlem görünmüyorsa yeni bir bağlantı iste.",
   insufficientFunds:
     "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
   estimateFailed:
@@ -148,9 +154,22 @@ export function reviewStateAfterSendFailure(
 ): "leaveReview" | "keepReview" {
   return code === "expiredRequest" ||
     code === "invalidRequestTime" ||
-    code === "expiredQuote"
+    code === "expiredQuote" ||
+    code === "insufficientTimeRemaining" ||
+    code === "submissionUnknown"
     ? "leaveReview"
     : "keepReview";
+}
+
+/**
+ * Bu hatadan sonra gönderim kilidi AÇILMAZ.
+ *
+ * `kit.send` çağrıldıktan sonra sonuç belirsizse tekrar denemek aynı ödemeyi
+ * ikinci kez gönderebilir. Kullanıcı önce cüzdanını ve explorer'ı kontrol
+ * etmelidir; yeni bir deneme ancak sayfa yenilenerek başlar.
+ */
+export function keepsSubmissionLocked(code: ArcSendErrorCode): boolean {
+  return code === "submissionUnknown";
 }
 
 export type ArcSendResult<T> =
@@ -187,6 +206,39 @@ const REQUEST_ID_PATTERN = new RegExp(
   `^0x[0-9a-fA-F]{${REQUEST_ID_HEX_LENGTH}}$`,
 );
 const QUOTE_ID_PATTERN = new RegExp(`^0x[0-9a-f]{${QUOTE_ID_HEX_LENGTH}}$`);
+
+/**
+ * Cüzdan akışı açılmadan önce gereken asgari kalan süre.
+ *
+ * Kullanıcı cüzdanda onaylarken zaman geçer. Bitişe saniyeler kala gönderim
+ * başlatılırsa işlem, süresi dolmuş bir kurla zincire düşebilir. Bu pay
+ * YALNIZCA gönderim yolunda uygulanır; tahmin almak serbesttir.
+ */
+export const SEND_MIN_REMAINING_SECONDS = 60;
+
+export function checkSendSafetyMargin(
+  snapshot: ArcPaymentSnapshot,
+  nowMs: number,
+): ArcSendErrorCode | null {
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const horizon = Math.min(snapshot.expiresAt, snapshot.quoteExpiresAt);
+  return horizon - nowSeconds < SEND_MIN_REMAINING_SECONDS
+    ? "insufficientTimeRemaining"
+    : null;
+}
+
+/**
+ * `kit.send` ÇAĞRILDIKTAN sonra ortaya çıkan belirsiz sonuç.
+ *
+ * Bu noktadan sonra işlem zincire düşmüş OLABİLİR. Hata "gönderilemedi" gibi
+ * sunulmaz; kullanıcı önce cüzdanını ve explorer'ı kontrol etmelidir.
+ */
+export class AmbiguousSubmissionError extends Error {
+  constructor() {
+    super("submission outcome unknown");
+    this.name = "AmbiguousSubmissionError";
+  }
+}
 
 /**
  * Talebin zaman geçerliliği. Ucuzdur ve gönderim yolunda birden fazla kez
@@ -379,6 +431,10 @@ function classifyError(
   error: unknown,
   fallback: ArcSendErrorCode,
 ): ArcSendErrorCode {
+  // Belirsiz gönderim, başka hiçbir sınıflandırmanın önüne geçer.
+  if (error instanceof AmbiguousSubmissionError) {
+    return "submissionUnknown";
+  }
   if (typeof error === "object" && error !== null && "code" in error) {
     if ((error as { code: unknown }).code === 4001) {
       return "rejected";
@@ -491,11 +547,44 @@ export async function sendArcUsdc(
   snapshot: ArcPaymentSnapshot,
   now: () => number = Date.now,
 ): Promise<ArcSendResult<ArcSendSuccess>> {
+  /*
+   * Cüzdan akışı açılmadan önce asgari kalan süre aranır. Bu kontrol yalnızca
+   * gönderim yolundadır; tahmin almak için gerekmez.
+   */
+  /*
+   * Pay yalnızca talep HÂLÂ GEÇERLİYKEN anlamlıdır. Süresi zaten dolmuş bir
+   * talebe "az kaldı" demek yanıltıcı olurdu; o durumda kesin hata kodu
+   * korunur ve raporlamayı runGuarded yapar.
+   */
+  if (checkSnapshotRequestTime(snapshot, now()) === null) {
+    const margin = checkSendSafetyMargin(snapshot, now());
+    if (margin !== null) {
+      return { ok: false, code: margin };
+    }
+  }
+
   return runGuarded(walletUuid, snapshot, "sendFailed", now, async ({ kit, params }) => {
-    const result = await kit.send(params);
+    let result: unknown;
+    try {
+      result = await kit.send(params);
+    } catch (error) {
+      /*
+       * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca kesin olarak yayın
+       * ÖNCESİ olduğunu bildiğimiz hatalar (kullanıcı reddi, yetersiz bakiye)
+       * yeniden denenebilir sayılır. Diğer her şey belirsizdir: işlem zincire
+       * düşmüş olabilir.
+       */
+      const classified = classifyError(error, "sendFailed");
+      if (classified === "rejected" || classified === "insufficientFunds") {
+        throw error;
+      }
+      throw new AmbiguousSubmissionError();
+    }
+
     const txHash = readString(result, "txHash");
     if (txHash === null || !isValidTransactionHash(txHash)) {
-      throw new Error("gecersiz islem hash");
+      // SDK geçerli bir hash vermedi ama işlem gönderilmiş olabilir.
+      throw new AmbiguousSubmissionError();
     }
     return {
       txHash,
