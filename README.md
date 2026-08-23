@@ -212,7 +212,12 @@ saklanır. `kit.send` çağrıldıktan sonra sınıflandırıcının kendisi ç�
 sonuç asla yeniden denenebilir `sendFailed` olmaz.
 
 Hata **grafiği** sınırlı ve döngüye dayanıklı biçimde dolaşılır; yalnızca
-beklenen bağlantılar (`cause`, `trace`, `rawError`) izlenir. Kurulu yığın
+beklenen bağlantılar (`cause`, `trace`, `rawError`, `errors`) izlenir. Bir
+bağlantı **dizi/kap** değerliyse (ör. `AggregateError.errors` ya da dizi
+değerli bir `cause`) dolaşım **eksik** işaretlenir: desteklenen tekil nesne
+şekli değildir ve içinde gizli bir ret kimliği veya işlem hash'i olabilir.
+Elemanlar yine de yalnızca hash kurtarmak için taranır; sonuç hiçbir koşulda
+yeniden denenebilir olmaz. Kurulu yığın
 gerçek cüzdan reddini `cause.trace.rawError.rawError` gibi derin bir yola
 gömebildiği için yalnızca `cause` zincirini izlemek yetmez. Buna karşılık
 **kod 4001 tek başına ret kanıtı değildir**: kurulu App Kit'te

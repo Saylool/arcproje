@@ -1319,3 +1319,257 @@ describe("kit.send belirsizliği ASLA sendFailed olmaz", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 });
+
+describe("dizi/kap bağlantılar FAIL-CLOSED", () => {
+  const REJECTION = { name: "UserRejectedRequestError", code: 4001 } as const;
+
+  /** Gerçek dizi, ama indeks erişimi fırlatıyor. */
+  function arrayWithThrowingIndex(): unknown[] {
+    const array: unknown[] = [{ txHash: TX_HASH }];
+    Object.defineProperty(array, "0", {
+      get() {
+        throw new TypeError("eleman okunamaz");
+      },
+      configurable: true,
+    });
+    return array;
+  }
+
+  /** `length` okuması fırlatan dizi proxy'si. */
+  function arrayWithThrowingLength(): unknown {
+    return new Proxy([{ txHash: TX_HASH }], {
+      get(target, key, receiver) {
+        if (key === "length") {
+          throw new TypeError("length okunamaz");
+        }
+        return Reflect.get(target, key, receiver);
+      },
+    });
+  }
+
+  function revokedArray(): unknown {
+    const { proxy, revoke } = Proxy.revocable([{ txHash: TX_HASH }], {});
+    revoke();
+    return proxy;
+  }
+
+  it("cause DİZİSİ içindeki hash bulunur ve sonuç belirsiz kalır", () => {
+    const analysis = analyzeSendException({ cause: [{ txHash: TX_HASH }] });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("trace ve rawError dizileri de EKSİK işaretlenir", () => {
+    for (const link of ["trace", "rawError"] as const) {
+      const analysis = analyzeSendException({ [link]: [{ txHash: TX_HASH }] });
+      expect(analysis.complete, link).toBe(false);
+      expect(analysis.txHash, link).toBe(TX_HASH);
+      expect(analysis.classification, link).toBe("submissionUnknown");
+    }
+  });
+
+  it("ERKEN ret + dizide saklı hash ASLA yeniden denenebilir olmaz", () => {
+    /*
+     * Bildirilen açık: ret kimliği en üstte, hash bir dizinin içinde.
+     * Diziler sessizce atlanıp `complete` true kalsaydı sonuç "rejected"
+     * olur ve zincire gitmiş olabilecek ödeme ikinci kez gönderilebilirdi.
+     */
+    const analysis = analyzeSendException({
+      ...REJECTION,
+      cause: [{ txHash: TX_HASH }],
+    });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("dizide hash OLMASA bile ret yeniden denenebilir olmaz", () => {
+    const analysis = analyzeSendException({
+      ...REJECTION,
+      cause: [{ name: "BOŞ" }],
+    });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBeNull();
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("AggregateError.errors hesaba katılır", () => {
+    const aggregate = new AggregateError(
+      [{ txHash: TX_HASH }, REJECTION],
+      "hepsi başarısız",
+    );
+    const analysis = analyzeSendException(aggregate);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("AggregateError yalnızca ret içerse de yeniden denenebilir olmaz", () => {
+    const aggregate = new AggregateError([REJECTION], "iptal");
+    const analysis = analyzeSendException(aggregate);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("sarmalanmış AggregateError de bulunur", () => {
+    const analysis = analyzeSendException({
+      name: "ONCHAIN_TRANSACTION_FAILED",
+      type: "ONCHAIN",
+      cause: { trace: { rawError: new AggregateError([{ txHash: TX_HASH }], "x") } },
+    });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBe(TX_HASH);
+  });
+
+  it("BOŞ dizi de desteklenmeyen kap sayılır", () => {
+    const analysis = analyzeSendException({ ...REJECTION, cause: [] });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("AŞIRI BÜYÜK dizi fırlatmaz ve eksik kalır", () => {
+    const huge = Array.from({ length: 5000 }, (_, index) => ({
+      name: `ALT_${index}`,
+    }));
+    const analysis = analyzeSendException({ ...REJECTION, cause: huge });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("iç içe diziler sonsuz işe yol açmaz", () => {
+    let nested: unknown = [{ name: "DERİN" }];
+    for (let index = 0; index < 40; index += 1) {
+      nested = [nested, [{ name: `KAT_${index}` }]];
+    }
+    const analysis = analyzeSendException({ cause: nested });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("KENDİNİ içeren dizi döngüye girmez", () => {
+    const cyclic: unknown[] = [{ name: "A" }];
+    cyclic.push(cyclic);
+    expect(() => analyzeSendException({ cause: cyclic })).not.toThrow();
+    expect(analyzeSendException({ cause: cyclic }).complete).toBe(false);
+  });
+
+  it("FIRLATAN dizi erişimi fırlatmaz ve eksik kalır", () => {
+    for (const container of [
+      arrayWithThrowingIndex(),
+      arrayWithThrowingLength(),
+      revokedArray(),
+    ]) {
+      const analysis = analyzeSendException({ ...REJECTION, cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+    }
+  });
+
+  it("en üstteki dizi de eksik sayılır", () => {
+    const analysis = analyzeSendException([REJECTION]);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("EKSİK dolaşımda bakiye hatası yeniden denenebilir SAYILMAZ", () => {
+    const analysis = analyzeSendException({
+      name: "BALANCE_INSUFFICIENT_TOKEN",
+      code: 9001,
+      type: "BALANCE",
+      cause: [{ name: "ALT" }],
+    });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("HİÇBİR kap biçimi rejected/insufficientFunds üretmez", () => {
+    const containers: unknown[] = [
+      [{ txHash: TX_HASH }],
+      [],
+      [REJECTION],
+      new AggregateError([REJECTION], "x").errors,
+      arrayWithThrowingIndex(),
+      arrayWithThrowingLength(),
+      revokedArray(),
+      Array.from({ length: 100 }, () => REJECTION),
+    ];
+    for (const [index, container] of containers.entries()) {
+      for (const link of ["cause", "trace", "rawError", "errors"] as const) {
+        const analysis = analyzeSendException({
+          ...REJECTION,
+          name: "BALANCE_INSUFFICIENT_TOKEN",
+          code: 9001,
+          type: "BALANCE",
+          [link]: container,
+        });
+        const label = `${link}#${index}`;
+        expect(analysis.complete, label).toBe(false);
+        expect(analysis.classification, label).not.toBe("rejected");
+        expect(analysis.classification, label).not.toBe("insufficientFunds");
+        expect(analysis.classification, label).toBe("submissionUnknown");
+      }
+    }
+  });
+
+  it("NORMAL nesne bağlantıları eskisi gibi çalışır", () => {
+    // Regresyon koruması: dizi olmayan bağlantılarda davranış değişmedi.
+    expect(analyzeSendException(REJECTION)).toEqual({
+      classification: "rejected",
+      txHash: null,
+      complete: true,
+    });
+    expect(
+      analyzeSendException({ cause: { trace: { rawError: REJECTION } } }),
+    ).toEqual({ classification: "rejected", txHash: null, complete: true });
+    expect(
+      analyzeSendException({
+        name: "BALANCE_INSUFFICIENT_TOKEN",
+        code: 9001,
+        type: "BALANCE",
+      }).classification,
+    ).toBe("insufficientFunds");
+  });
+});
+
+describe("kap içeren hatalar uçtan uca KİLİTLİ kalır", () => {
+  const REJECTION = { name: "UserRejectedRequestError", code: 4001 } as const;
+  const RETRYABLE = ["sendFailed", "rejected", "insufficientFunds"] as const;
+
+  it("dizide saklı hash uçtan uca korunur ve kilit açılmaz", async () => {
+    sendMock.mockRejectedValue({ ...REJECTION, cause: [{ txHash: TX_HASH }] });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(RETRYABLE).not.toContain(result.code);
+    expect(result.code).toBe("submissionUnknown");
+    expect(result.txHash).toBe(TX_HASH);
+    expect(result.explorerUrl).toBe(`https://testnet.arcscan.app/tx/${TX_HASH}`);
+    expect(keepsSubmissionLocked(result.code)).toBe(true);
+    expect(reviewStateAfterSendFailure(result.code)).toBe("leaveReview");
+  });
+
+  it("AggregateError uçtan uca submissionUnknown döner", async () => {
+    sendMock.mockRejectedValue(new AggregateError([REJECTION], "iptal"));
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
+    expect(keepsSubmissionLocked("submissionUnknown")).toBe(true);
+  });
+
+  it("her kap biçimi uçtan uca kilitli kalır", async () => {
+    for (const container of [
+      [{ txHash: TX_HASH }],
+      [],
+      [REJECTION],
+      Array.from({ length: 100 }, () => REJECTION),
+    ]) {
+      sendMock.mockReset();
+      sendMock.mockRejectedValue({ ...REJECTION, cause: container });
+      const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(RETRYABLE).not.toContain(result.code);
+      expect(keepsSubmissionLocked(result.code)).toBe(true);
+    }
+  });
+});

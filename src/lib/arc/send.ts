@@ -480,14 +480,26 @@ function snapshotProperties(
  * `rawError` alanında taşır ve bu iç içe geçebilir
  * (`cause.trace.rawError.rawError`). viem ise klasik `cause` zinciri kullanır.
  *
+ * `errors` standart `AggregateError` alanıdır: birden çok alt hata taşır ve
+ * gerçek ret kimliği ya da işlem hash'i orada saklanabilir. Diğerleri gibi
+ * korumalı ve TEK OKUMA ile alınır.
+ *
  * Yürüyüş YALNIZCA bu adlara bakar. Nesnenin tüm alanlarında gezinmek,
  * alakasız bir yükün içindeki `code: 4001` gibi bir değeri "kullanıcı reddi"
  * sanmaya yol açardı.
  */
-const ERROR_GRAPH_LINKS = ["cause", "trace", "rawError"] as const;
+const ERROR_GRAPH_LINKS = ["cause", "trace", "rawError", "errors"] as const;
 
-/** Ziyaret edilecek en fazla düğüm; döngü ve aşırı derinlik burada durur. */
+/** Ziyaret edilecek en fazla DÜĞÜM; döngü ve aşırı derinlik burada durur. */
 export const MAX_ERROR_GRAPH_NODES = 32;
+
+/**
+ * Dizi/kap dâhil incelenen en fazla NESNE.
+ *
+ * Diziler düğüm sayılmaz (anlık görüntüleri alınmaz), bu yüzden iç içe
+ * dizilerin işi süresiz büyütmemesi için ayrı bir tavan gerekir.
+ */
+const MAX_INSPECTED_OBJECTS = MAX_ERROR_GRAPH_NODES * 4;
 
 /** Her düğümde okunan alanlar. Başka hiçbir alana DOKUNULMAZ. */
 const INSPECTED_KEYS = [
@@ -501,6 +513,40 @@ const INSPECTED_KEYS = [
   "shortMessage",
   "message",
 ] as const;
+
+/**
+ * Kap (dizi) elemanlarını KORUMALI biçimde kuyruğa alır.
+ *
+ * `length` ve indeks erişimi fırlatabilir (proxy, durumlu erişimci); hepsi
+ * korumalı okunur ve ilk başarısızlıkta tarama bırakılır. Bu tarama YALNIZCA
+ * gizli bir işlem hash'ini kurtarmak içindir: kabın kendisi dolaşımı zaten
+ * EKSİK işaretlemiştir, dolayısıyla içeride bulunan hiçbir şey "yeniden
+ * denenebilir" bir sonuç üretemez.
+ */
+function enqueueContainerElements(container: object, queue: unknown[]): void {
+  const lengthRead = readProperty(container, "length");
+  if (
+    !lengthRead.ok ||
+    typeof lengthRead.value !== "number" ||
+    !Number.isFinite(lengthRead.value)
+  ) {
+    return;
+  }
+  const limit = Math.min(
+    Math.max(0, Math.floor(lengthRead.value)),
+    MAX_ERROR_GRAPH_NODES,
+  );
+  for (let index = 0; index < limit; index += 1) {
+    const element = readProperty(container, String(index));
+    if (!element.ok) {
+      // Fırlatan veya iptal edilmiş indeks erişimi: kalanı denenmez.
+      return;
+    }
+    if (typeof element.value === "object" && element.value !== null) {
+      queue.push(element.value);
+    }
+  }
+}
 
 /**
  * Dolaşımın sonucu: anlık görüntüler VE bütünlük bayrağı.
@@ -524,8 +570,10 @@ type ErrorGraph = {
  *
  * `complete` şu hâllerde `false` olur:
  * - düğüm bütçesi dolduğu hâlde kuyrukta iş kaldıysa;
+ * - toplam nesne tavanı aşıldıysa;
  * - bir özellik okuması fırlattıysa (getter/durumlu erişimci);
  * - `Array.isArray` fırlattıysa (iptal edilmiş proxy);
+ * - bir bağlantı DİZİ/KAP değerliyse (desteklenen tekil nesne şekli değil);
  * - başka bir inceleme hatası oluştuysa.
  */
 function collectErrorGraph(error: unknown): ErrorGraph {
@@ -533,6 +581,7 @@ function collectErrorGraph(error: unknown): ErrorGraph {
   const seen = new Set<unknown>();
   const queue: unknown[] = [error];
   let complete = true;
+  let inspected = 0;
 
   while (queue.length > 0) {
     const current = queue.shift();
@@ -544,6 +593,13 @@ function collectErrorGraph(error: unknown): ErrorGraph {
       continue;
     }
     seen.add(current);
+
+    inspected += 1;
+    if (inspected > MAX_INSPECTED_OBJECTS) {
+      // İç içe kaplar işi büyüttü: geri kalanı incelenmedi.
+      complete = false;
+      break;
+    }
 
     if (nodes.length >= MAX_ERROR_GRAPH_NODES) {
       // Bütçe doldu ve hâlâ incelenmemiş düğüm var.
@@ -558,7 +614,18 @@ function collectErrorGraph(error: unknown): ErrorGraph {
       continue;
     }
     if (arrayCheck.value) {
-      // Diziler beklenen bir bağlantı değildir.
+      /*
+       * DİZİ/KAP bağlantı. Desteklenen tekil nesne şekli DEĞİLDİR: bir
+       * `AggregateError.errors` listesi ya da dizi değerli bir `cause`
+       * içinde gerçek ret kimliği veya işlem hash'i saklı olabilir.
+       *
+       * FAIL-CLOSED: dolaşım EKSİK işaretlenir, yani sonuç hiçbir koşulda
+       * yeniden denenebilir (`rejected` / `insufficientFunds`) olamaz.
+       * Elemanlar yine de taranır — ama yalnızca gizli bir işlem hash'ini
+       * ArcScan mutabakatı için kurtarmak amacıyla.
+       */
+      complete = false;
+      enqueueContainerElements(current, queue);
       continue;
     }
 
