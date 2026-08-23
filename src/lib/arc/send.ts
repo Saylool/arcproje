@@ -276,19 +276,24 @@ const REVERTED_CATEGORIES = new Set<string>([
   "partial_reverted",
 ]);
 
+/** `BridgeStep` üzerinde incelenen alanlar. */
+const STEP_KEYS = ["state", "txHash", "errorCategory"] as const;
+
 export function classifySendResult(result: unknown): SendResultClassification {
   if (typeof result !== "object" || result === null) {
     return { kind: "unknown", txHash: null };
   }
-  const step = result as {
-    state?: unknown;
-    txHash?: unknown;
-    errorCategory?: unknown;
-  };
-  const txHash =
-    typeof step.txHash === "string" && isValidTransactionHash(step.txHash)
-      ? step.txHash
-      : null;
+  const snapshot = snapshotProperties(result, STEP_KEYS);
+  const step = snapshot.values;
+  const txHash = isValidTransactionHash(step.txHash) ? step.txHash : null;
+
+  /*
+   * Alanlardan biri okunamadıysa sonuç KANITLANAMAZ. Başarı da revert de
+   * iddia edilmez; varsa hash korunur.
+   */
+  if (!snapshot.complete) {
+    return { kind: "unknown", txHash };
+  }
 
   if (step.state === "success") {
     // Durum başarı ama hash yoksa/bozuksa sonucu doğrulayamayız.
@@ -391,6 +396,83 @@ const VIEM_TIMEOUT_HASH_PATTERN =
   /^Timed out while waiting for transaction with hash "(0x[0-9a-fA-F]{64})" to be confirmed\.$/;
 
 /**
+ * GÜVENLİ ÖZELLİK OKUMA.
+ *
+ * Cüzdan/sağlayıcı hataları fırlatan getter, durumlu erişimci veya İPTAL
+ * EDİLMİŞ proxy içerebilir. Böyle bir nesnede basit bir `error.code` bile
+ * TypeError fırlatır. `kit.send` ÇAĞRILDIKTAN sonra bu tür bir çökme
+ * "gönderilemedi" gibi raporlanırsa kullanıcı, zincire düşmüş olabilecek bir
+ * ödemeyi ikinci kez gönderebilir. Bu yüzden incelenen HER özellik buradan
+ * okunur ve hata yutulup `ok: false` olarak bildirilir.
+ */
+type PropertyRead = { ok: true; value: unknown } | { ok: false };
+
+function readProperty(target: object, key: string): PropertyRead {
+  try {
+    return { ok: true, value: (target as Record<string, unknown>)[key] };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * `Array.isArray` proxy'ye duyarlıdır: iptal edilmiş bir proxy'de TypeError
+ * fırlatır. Bu yüzden o da korumalı çağrılır.
+ */
+function safeIsArray(
+  value: object,
+): { ok: true; value: boolean } | { ok: false } {
+  try {
+    return { ok: true, value: Array.isArray(value) };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * `instanceof` de proxy'ye duyarlıdır (prototip zinciri okunur).
+ */
+type AnyConstructor = abstract new (...args: never[]) => unknown;
+
+function safeInstanceOf(value: unknown, ctor: AnyConstructor): boolean {
+  try {
+    return value instanceof ctor;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Bir nesnenin incelenen alanlarının DÜZ anlık görüntüsü.
+ *
+ * Her alan EN FAZLA BİR KEZ okunur ve prototipsiz düz bir nesnede saklanır.
+ * Böylece durumlu bir getter, hash analizi ile ret analizi ARASINDA farklı
+ * değer döndüremez: iki analiz de aynı donmuş görüntüyü okur.
+ */
+type PropertySnapshot = {
+  readonly values: Readonly<Record<string, unknown>>;
+  /** Alanların HEPSİ okunabildi mi? */
+  readonly complete: boolean;
+};
+
+function snapshotProperties(
+  target: object,
+  keys: readonly string[],
+): PropertySnapshot {
+  const values = Object.create(null) as Record<string, unknown>;
+  let complete = true;
+  for (const key of keys) {
+    const read = readProperty(target, key);
+    if (!read.ok) {
+      complete = false;
+      continue;
+    }
+    values[key] = read.value;
+  }
+  return { values, complete };
+}
+
+/**
  * Hata grafiğinde izlenen TEK bağlantı adları.
  *
  * Kurulu yığın hatayı birden çok katmanda sarmalar: `KitError` bağlamı
@@ -405,42 +487,96 @@ const VIEM_TIMEOUT_HASH_PATTERN =
 const ERROR_GRAPH_LINKS = ["cause", "trace", "rawError"] as const;
 
 /** Ziyaret edilecek en fazla düğüm; döngü ve aşırı derinlik burada durur. */
-const MAX_ERROR_GRAPH_NODES = 32;
+export const MAX_ERROR_GRAPH_NODES = 32;
+
+/** Her düğümde okunan alanlar. Başka hiçbir alana DOKUNULMAZ. */
+const INSPECTED_KEYS = [
+  ...ERROR_GRAPH_LINKS,
+  "name",
+  "type",
+  "code",
+  "errorCategory",
+  "txHash",
+  "hash",
+  "shortMessage",
+  "message",
+] as const;
 
 /**
- * Hata grafiğinin SINIRLI ve DÖNGÜYE DAYANIKLI dolaşımı.
+ * Dolaşımın sonucu: anlık görüntüler VE bütünlük bayrağı.
+ *
+ * `complete: false` iken grafiğin bir kısmı GÖRÜLMEMİŞTİR; orada bir iptal
+ * kimliği ya da işlem hash'i saklı olabilir. Bu durumda hiçbir "yeniden
+ * denenebilir" sınıflandırma yapılamaz.
+ */
+type ErrorGraph = {
+  readonly nodes: readonly Readonly<Record<string, unknown>>[];
+  readonly complete: boolean;
+};
+
+/**
+ * Hata grafiğinin SINIRLI, DÖNGÜYE DAYANIKLI ve HİÇ FIRLATMAYAN dolaşımı.
  *
  * Genişlik öncelikli; görülen nesneler kimlik (`Set`) ile işaretlenir, bu
- * yüzden `a.cause = b; b.cause = a` gibi bir döngü sonsuza gitmez. Diziler
- * atlanır: beklenen bağlantılar nesnedir.
+ * yüzden `a.cause = b; b.cause = a` gibi bir döngü sonsuza gitmez. Her düğüm
+ * düz bir anlık görüntüye çevrilir; sonraki tüm analizler yalnızca bu
+ * görüntüleri okur.
+ *
+ * `complete` şu hâllerde `false` olur:
+ * - düğüm bütçesi dolduğu hâlde kuyrukta iş kaldıysa;
+ * - bir özellik okuması fırlattıysa (getter/durumlu erişimci);
+ * - `Array.isArray` fırlattıysa (iptal edilmiş proxy);
+ * - başka bir inceleme hatası oluştuysa.
  */
-function collectErrorGraph(error: unknown): Record<string, unknown>[] {
-  const nodes: Record<string, unknown>[] = [];
+function collectErrorGraph(error: unknown): ErrorGraph {
+  const nodes: Readonly<Record<string, unknown>>[] = [];
   const seen = new Set<unknown>();
   const queue: unknown[] = [error];
+  let complete = true;
 
-  while (queue.length > 0 && nodes.length < MAX_ERROR_GRAPH_NODES) {
+  while (queue.length > 0) {
     const current = queue.shift();
-    if (
-      typeof current !== "object" ||
-      current === null ||
-      Array.isArray(current) ||
-      seen.has(current)
-    ) {
+    // `typeof` ve `Set` işlemleri tuzak çalıştırmaz; güvenlidir.
+    if (typeof current !== "object" || current === null) {
+      continue;
+    }
+    if (seen.has(current)) {
       continue;
     }
     seen.add(current);
-    const record = current as Record<string, unknown>;
-    nodes.push(record);
+
+    if (nodes.length >= MAX_ERROR_GRAPH_NODES) {
+      // Bütçe doldu ve hâlâ incelenmemiş düğüm var.
+      complete = false;
+      break;
+    }
+
+    const arrayCheck = safeIsArray(current);
+    if (!arrayCheck.ok) {
+      // İptal edilmiş proxy: bu düğümden hiçbir şey okunamaz.
+      complete = false;
+      continue;
+    }
+    if (arrayCheck.value) {
+      // Diziler beklenen bir bağlantı değildir.
+      continue;
+    }
+
+    const snapshot = snapshotProperties(current, INSPECTED_KEYS);
+    if (!snapshot.complete) {
+      complete = false;
+    }
+    nodes.push(snapshot.values);
 
     for (const link of ERROR_GRAPH_LINKS) {
-      const next = record[link];
+      const next = snapshot.values[link];
       if (typeof next === "object" && next !== null && !seen.has(next)) {
         queue.push(next);
       }
     }
   }
-  return nodes;
+
+  return { nodes, complete };
 }
 
 /** viem'in kullanıcı reddi hatasının TAM adı (`_esm/errors/rpc.js`). */
@@ -460,7 +596,7 @@ const EIP1193_USER_REJECTED_CODE = 4001;
  */
 const KIT_ERROR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 
-function isKitErrorNode(node: Record<string, unknown>): boolean {
+function isKitErrorNode(node: Readonly<Record<string, unknown>>): boolean {
   const name = node.name;
   if (typeof name === "string" && KIT_ERROR_NAME_PATTERN.test(name)) {
     return true;
@@ -477,7 +613,7 @@ function isKitErrorNode(node: Record<string, unknown>): boolean {
  * DEĞİLDİR ve `kit.send` sonrası belirsiz bir gönderimi temsil edebilir.
  * Bu yüzden 4001 yalnızca düğüm bir `KitError` DEĞİLKEN kabul edilir.
  */
-function isUserRejectionNode(node: Record<string, unknown>): boolean {
+function isUserRejectionNode(node: Readonly<Record<string, unknown>>): boolean {
   if (node.errorCategory === APP_KIT_USER_REJECTED) {
     return true;
   }
@@ -496,7 +632,9 @@ function isUserRejectionNode(node: Record<string, unknown>): boolean {
  * tutan hatanın `shortMessage`/`message` ilk satırı tam kalıpla okunur ve
  * katı hash doğrulayıcısından geçirilir.
  */
-function readViemTimeoutHash(node: Record<string, unknown>): string | null {
+function readViemTimeoutHash(
+  node: Readonly<Record<string, unknown>>,
+): string | null {
   if (node.name !== VIEM_RECEIPT_TIMEOUT_ERROR) {
     return null;
   }
@@ -524,7 +662,7 @@ function readViemTimeoutHash(node: Record<string, unknown>): string | null {
  * yapılır. Rastgele bir mesajın içinden hash ÇIKARILMAZ.
  */
 function findTxHashInGraph(
-  nodes: readonly Record<string, unknown>[],
+  nodes: readonly Readonly<Record<string, unknown>>[],
 ): string | null {
   for (const node of nodes) {
     if (isValidTransactionHash(node.txHash)) {
@@ -539,22 +677,59 @@ function findTxHashInGraph(
 }
 
 export function readErrorTxHash(error: unknown): string | null {
-  return findTxHashInGraph(collectErrorGraph(error));
+  return analyzeSendException(error).txHash;
 }
 
-export function classifySendException(error: unknown): SendExceptionClass {
+/** İstisna analizinin TAM sonucu. */
+export type SendExceptionAnalysis = {
+  classification: SendExceptionClass;
+  /** Kurtarılabilen geçerli hash; inceleme yarıda kalsa bile KORUNUR. */
+  txHash: string | null;
+  /** Grafiğin tamamı güvenle incelenebildi mi? */
+  complete: boolean;
+};
+
+/**
+ * `kit.send` istisnasının TOTAL analizi. Bu fonksiyon ASLA fırlatmaz.
+ *
+ * Sıra değişmez: önce anlık görüntü alınır, sonra HASH aranır, sonra ret
+ * kimliği. Yeniden denenebilir bir sonuç (`rejected` / `insufficientFunds`)
+ * YALNIZCA dolaşım eksiksiz tamamlandıysa VE hiç geçerli hash yoksa verilir.
+ */
+export function analyzeSendException(error: unknown): SendExceptionAnalysis {
   if (typeof error !== "object" || error === null) {
-    return "submissionUnknown";
+    return { classification: "submissionUnknown", txHash: null, complete: true };
   }
-  const graph = collectErrorGraph(error);
+
+  let graph: ErrorGraph;
+  try {
+    graph = collectErrorGraph(error);
+  } catch {
+    // Dolaşımın kendisi beklenmedik biçimde patladı: hiçbir kanıt yok.
+    return { classification: "submissionUnknown", txHash: null, complete: false };
+  }
 
   /*
    * ÖNCE hash. Grafiğin herhangi bir yerinde geçerli bir işlem hash'i varsa
    * yayın ÖNCESİ olduğu KANITLANAMAZ; iptal kimliği bulunsa bile yeniden
-   * denenebilir sayılmaz.
+   * denenebilir sayılmaz. Hash, dolaşım yarıda kalmış olsa da KORUNUR:
+   * ArcScan mutabakatının tek ipucu odur.
    */
-  if (findTxHashInGraph(graph) !== null) {
-    return "submissionUnknown";
+  const txHash = findTxHashInGraph(graph.nodes);
+  if (txHash !== null) {
+    return {
+      classification: "submissionUnknown",
+      txHash,
+      complete: graph.complete,
+    };
+  }
+
+  /*
+   * Dolaşım eksikse görülmeyen bir düğümde hash ya da başka bir kanıt
+   * olabilir. Kanıtsız hiçbir şey yeniden denenebilir sayılmaz.
+   */
+  if (!graph.complete) {
+    return { classification: "submissionUnknown", txHash: null, complete: false };
   }
 
   /*
@@ -562,8 +737,8 @@ export function classifySendException(error: unknown): SendExceptionClass {
    * dursa bile, gerçek `UserRejectedRequestError` derinlerde
    * (`cause.trace.rawError.rawError`) bulunabilir.
    */
-  if (graph.some(isUserRejectionNode)) {
-    return "rejected";
+  if (graph.nodes.some(isUserRejectionNode)) {
+    return { classification: "rejected", txHash: null, complete: true };
   }
 
   /*
@@ -571,18 +746,36 @@ export function classifySendException(error: unknown): SendExceptionClass {
    * tarafından doğrudan fırlatılır. Grafiğin derinliklerinde bulunan bir
    * bakiye izi, sarmalayan RPC/ağ arızasının yayın öncesi olduğunu kanıtlamaz.
    */
-  const top = error as Record<string, unknown>;
-  const name = top.name;
-  if (typeof name === "string") {
-    const expected = PRE_BROADCAST_BALANCE_ERRORS.get(name);
+  const top = graph.nodes[0];
+  if (top !== undefined && typeof top.name === "string") {
+    const expected = PRE_BROADCAST_BALANCE_ERRORS.get(top.name);
     if (expected !== undefined && expected === top.code) {
-      return "insufficientFunds";
+      return { classification: "insufficientFunds", txHash: null, complete: true };
     }
   }
 
   // RPC/ağ arızaları dâhil kanıtlanmamış her şey belirsizdir.
-  return "submissionUnknown";
+  return { classification: "submissionUnknown", txHash: null, complete: true };
 }
+
+export function classifySendException(error: unknown): SendExceptionClass {
+  return analyzeSendException(error).classification;
+}
+
+/**
+ * `kit.send` ÇAĞRILDIKTAN sonra üretilmesine izin verilen TEK kodlar.
+ *
+ * `rejected` ve `insufficientFunds` yalnızca eksiksiz ve hash'siz bir analiz
+ * onları KANITLADIĞINDA buraya girer. Listede olmayan her kod — özellikle
+ * sınıflandırıcının kendisi çöktüğü için düşülen `sendFailed` — yeniden
+ * denenebilir sayılamaz; aynı ödeme ikinci kez gidebilirdi.
+ */
+const POST_SEND_CODES: ReadonlySet<ArcSendErrorCode> = new Set([
+  "rejected",
+  "insufficientFunds",
+  "reverted",
+  "submissionUnknown",
+]);
 
 /** Kurulum payı tükettiğinde cüzdan akışı açılmaz. */
 export class SendMarginError extends Error {
@@ -789,28 +982,35 @@ async function buildSendParams(
   return { kit, params };
 }
 
+/** Fırlatan getter'a karşı korumalı; okunamayan alan `null` sayılır. */
 function readString(source: unknown, key: string): string | null {
-  if (typeof source === "object" && source !== null && key in source) {
-    const value = (source as Record<string, unknown>)[key];
-    if (typeof value === "string" && value.trim() !== "") {
-      return value;
-    }
+  if (typeof source !== "object" || source === null) {
+    return null;
   }
-  return null;
+  const read = readProperty(source, key);
+  if (!read.ok) {
+    return null;
+  }
+  return typeof read.value === "string" && read.value.trim() !== ""
+    ? read.value
+    : null;
 }
 
 function classifyError(
   error: unknown,
   fallback: ArcSendErrorCode,
 ): ArcSendErrorCode {
-  // Tipli sentineller her türlü metin sınıflandırmasının önüne geçer.
-  if (error instanceof AmbiguousSubmissionError) {
+  /*
+   * Tipli sentineller her türlü sınıflandırmanın önüne geçer. `instanceof`
+   * bile iptal edilmiş bir proxy'de fırlatabildiği için korumalı çağrılır.
+   */
+  if (safeInstanceOf(error, AmbiguousSubmissionError)) {
     return "submissionUnknown";
   }
-  if (error instanceof RevertedSubmissionError) {
+  if (safeInstanceOf(error, RevertedSubmissionError)) {
     return "reverted";
   }
-  if (error instanceof SendMarginError) {
+  if (safeInstanceOf(error, SendMarginError)) {
     return "insufficientTimeRemaining";
   }
   /*
@@ -936,6 +1136,8 @@ export async function sendArcUsdc(
 
   /** Revert veya belirsiz sonuçta korunan hash; ArcScan mutabakatı için. */
   let terminalHash: string | null = null;
+  /** `kit.send` çağrısına GİRİLDİ mi? Sonrasında geri dönüş yoktur. */
+  let sendAttempted = false;
 
   const outcome = await runGuarded(
     walletUuid,
@@ -954,6 +1156,8 @@ export async function sendArcUsdc(
 
       let result: unknown;
       try {
+        // Bu noktadan SONRA işlem zincire düşmüş OLABİLİR.
+        sendAttempted = true;
         result = await kit.send(params);
       } catch (error) {
         /*
@@ -963,12 +1167,20 @@ export async function sendArcUsdc(
          * eşleştirilmez. Diğer her şeyde işlem zincire düşmüş OLABİLİR ve
          * varsa hash mutabakat için KORUNUR.
          */
-        const klass = classifySendException(error);
-        if (klass === "rejected" || klass === "insufficientFunds") {
+        /*
+         * TEK analiz: hash ve sınıflandırma AYNI anlık görüntüden gelir.
+         * İki ayrı çağrı yapılsaydı durumlu bir getter ikisine farklı yanıt
+         * verebilirdi. Analiz hiçbir koşulda fırlatmaz.
+         */
+        const analysis = analyzeSendException(error);
+        terminalHash = analysis.txHash;
+        if (
+          analysis.classification === "rejected" ||
+          analysis.classification === "insufficientFunds"
+        ) {
           throw error;
         }
-        terminalHash = readErrorTxHash(error);
-        throw new AmbiguousSubmissionError(terminalHash);
+        throw new AmbiguousSubmissionError(analysis.txHash);
       }
 
       const classified = classifySendResult(result);
@@ -998,22 +1210,33 @@ export async function sendArcUsdc(
   );
 
   /*
+   * EMNİYET AĞI. `kit.send` çağrıldıysa, izin verilen kodların dışındaki her
+   * sonuç `submissionUnknown`a çekilir. Sınıflandırıcı bir fırlatan getter
+   * yüzünden çökse ve `sendFailed`e düşülse bile kullanıcıya "gönderilemedi"
+   * denmez; rezervasyon kilitli kalır.
+   */
+  const settled: ArcSendResult<ArcSendSuccess> =
+    !outcome.ok && sendAttempted && !POST_SEND_CODES.has(outcome.code)
+      ? { ok: false, code: "submissionUnknown" }
+      : outcome;
+
+  /*
    * Zincire ulaşmış OLABİLECEK her sonuçta hash dışarı taşınır: hem revert
    * hem de belirsizlik ArcScan'de kontrol edilerek çözülür.
    */
   if (
-    !outcome.ok &&
-    (outcome.code === "reverted" || outcome.code === "submissionUnknown") &&
+    !settled.ok &&
+    (settled.code === "reverted" || settled.code === "submissionUnknown") &&
     terminalHash !== null
   ) {
     return {
       ok: false,
-      code: outcome.code,
+      code: settled.code,
       txHash: terminalHash,
       explorerUrl: buildArcExplorerTxUrl(terminalHash),
     };
   }
-  return outcome;
+  return settled;
 }
 
 export { ARC_TESTNET_CHAIN_ID };

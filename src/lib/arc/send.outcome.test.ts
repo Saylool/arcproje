@@ -58,10 +58,12 @@ vi.mock("./wallet", () => ({
 const {
   sendArcUsdc,
   SEND_MIN_REMAINING_SECONDS,
+  MAX_ERROR_GRAPH_NODES,
   keepsSubmissionLocked,
   reviewStateAfterSendFailure,
   classifySendResult,
   classifySendException,
+  analyzeSendException,
   readErrorTxHash,
 } = await import("./send");
 
@@ -962,5 +964,358 @@ describe("iç içe cüzdan reddi güvenli sınıflanır", () => {
         ),
       ),
     ).toBe("submissionUnknown");
+  });
+});
+
+describe("hata incelemesi TOTAL ve fırlatmaz", () => {
+  /** Belirtilen alan okunduğunda fırlatan nesne. */
+  function withThrowingGetter(
+    key: string,
+    base: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const target: Record<string, unknown> = { ...base };
+    Object.defineProperty(target, key, {
+      get() {
+        throw new TypeError(`${key} okunamaz`);
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    return target;
+  }
+
+  /** Her okumada SIRADAKİ değeri veren durumlu erişimci. */
+  function withStatefulGetter(
+    key: string,
+    values: readonly unknown[],
+    base: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    let reads = 0;
+    const target: Record<string, unknown> = { ...base };
+    Object.defineProperty(target, key, {
+      get() {
+        const value = values[Math.min(reads, values.length - 1)];
+        reads += 1;
+        return value;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    return target;
+  }
+
+  function revokedProxy(): object {
+    const { proxy, revoke } = Proxy.revocable({ code: 4001 }, {});
+    revoke();
+    return proxy;
+  }
+
+  /** `length` adet sarmalayıcı + kuyruk = length + 1 düğüm. */
+  function causeChain(
+    length: number,
+    tail: Record<string, unknown>,
+  ): Record<string, unknown> {
+    let node: Record<string, unknown> = tail;
+    for (let index = 0; index < length; index += 1) {
+      node = { name: `KATMAN_${index}`, cause: node };
+    }
+    return node;
+  }
+
+  const INSPECTED = [
+    "cause",
+    "trace",
+    "rawError",
+    "name",
+    "code",
+    "message",
+    "txHash",
+  ] as const;
+
+  it("İNCELENEN her alanın fırlatan getter'ı yutulur", () => {
+    for (const key of INSPECTED) {
+      const hostile = withThrowingGetter(key);
+      expect(() => classifySendException(hostile), key).not.toThrow();
+      expect(classifySendException(hostile), key).toBe("submissionUnknown");
+      expect(() => readErrorTxHash(hostile), key).not.toThrow();
+      expect(readErrorTxHash(hostile), key).toBeNull();
+      expect(analyzeSendException(hostile).complete, key).toBe(false);
+    }
+  });
+
+  it("code 4001 taşısa da okunamayan alan varsa ret SAYILMAZ", () => {
+    // İnceleme eksikse görülmeyen yerde hash olabilir: kanıt yok.
+    const hostile = withThrowingGetter("name", { code: 4001 });
+    expect(classifySendException(hostile)).toBe("submissionUnknown");
+    expect(analyzeSendException(hostile).complete).toBe(false);
+
+    // Aynı nesnenin sağlam hâli gerçekten ret verir: fark yalnızca getter'dır.
+    expect(classifySendException({ code: 4001 })).toBe("rejected");
+  });
+
+  it("fırlatan bağlantı getter'ı dolaşımı EKSİK işaretler", () => {
+    for (const link of ["cause", "trace", "rawError"] as const) {
+      const hostile = withThrowingGetter(link, {
+        name: "UserRejectedRequestError",
+      });
+      // Ret kimliği görünse bile grafiğin kalanı incelenemedi.
+      expect(analyzeSendException(hostile).complete, link).toBe(false);
+      expect(classifySendException(hostile), link).toBe("submissionUnknown");
+    }
+  });
+
+  it("İPTAL EDİLMİŞ proxy fırlatmaz ve fail-closed olur", () => {
+    const revoked = revokedProxy();
+    expect(() => classifySendException(revoked)).not.toThrow();
+    expect(classifySendException(revoked)).toBe("submissionUnknown");
+    expect(readErrorTxHash(revoked)).toBeNull();
+    expect(analyzeSendException(revoked).complete).toBe(false);
+  });
+
+  it("grafiğin İÇİNDEKİ iptal edilmiş proxy de fail-closed olur", () => {
+    const wrapper = {
+      name: "ONCHAIN_TRANSACTION_FAILED",
+      type: "ONCHAIN",
+      cause: { trace: { rawError: revokedProxy() } },
+    };
+    expect(() => classifySendException(wrapper)).not.toThrow();
+    expect(analyzeSendException(wrapper).complete).toBe(false);
+    expect(classifySendException(wrapper)).toBe("submissionUnknown");
+  });
+
+  it("DURUMLU getter tek analiz içinde tek kez okunur", () => {
+    // İlk okuma 4001; ikinci okuma farklı olsaydı sınıf değişemez.
+    const stateful = withStatefulGetter("code", [4001, 9999, 9999]);
+    const analysis = analyzeSendException(stateful);
+    expect(analysis.classification).toBe("rejected");
+    expect(analysis.complete).toBe(true);
+    // Hash ve ret aynı görüntüden okunduğu için tutarlıdır.
+    expect(analysis.txHash).toBeNull();
+  });
+
+  it("durumlu txHash getter'ı hash ile sınıfı ÇELİŞTİREMEZ", () => {
+    // Hash ilk okumada var: sonuç belirsiz olmalı ve hash korunmalı.
+    const stateful = withStatefulGetter("txHash", [TX_HASH, undefined], {
+      code: 4001,
+    });
+    const analysis = analyzeSendException(stateful);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("DÖNGÜSEL grafik fırlatmaz ve tamamlanmış sayılır", () => {
+    const a: Record<string, unknown> = { name: "A" };
+    const b: Record<string, unknown> = { name: "B", cause: a };
+    a.cause = b;
+    a.rawError = b;
+    const analysis = analyzeSendException(a);
+    expect(analysis.complete).toBe(true);
+    expect(analysis.classification).toBe("submissionUnknown");
+
+    // Döngü içindeki gerçek ret yine bulunur.
+    b.trace = { name: "UserRejectedRequestError" };
+    expect(classifySendException(a)).toBe("rejected");
+  });
+
+  it("TAM sınırdaki grafik EKSİKSİZ sayılır ve ret bulunur", () => {
+    // MAX_ERROR_GRAPH_NODES - 1 sarmalayıcı + 1 kuyruk = tam sınır.
+    const atLimit = causeChain(MAX_ERROR_GRAPH_NODES - 1, {
+      name: "UserRejectedRequestError",
+    });
+    const analysis = analyzeSendException(atLimit);
+    expect(analysis.complete).toBe(true);
+    expect(analysis.classification).toBe("rejected");
+  });
+
+  it("sınırı AŞAN derin grafik EKSİK sayılır", () => {
+    const overLimit = causeChain(MAX_ERROR_GRAPH_NODES, {
+      name: "UserRejectedRequestError",
+    });
+    const analysis = analyzeSendException(overLimit);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("sınırı AŞAN geniş grafik de EKSİK sayılır", () => {
+    // Her düğüm üç bağlantıya dallanır: bütçe hızla dolar.
+    const branch = (depth: number): Record<string, unknown> =>
+      depth === 0
+        ? { name: "YAPRAK" }
+        : {
+            name: `DAL_${depth}`,
+            cause: branch(depth - 1),
+            trace: branch(depth - 1),
+            rawError: branch(depth - 1),
+          };
+    const analysis = analyzeSendException(branch(4));
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("ERKEN ret + sınırın hemen ÖTESİNDE hash: ret SAYILMAZ", () => {
+    /*
+     * Ret kimliği en üstte; geçerli hash ise bütçenin bir düğüm ötesinde.
+     * Bütünlük izlenmeseydi "yeniden denenebilir ret" denir ve zincire
+     * gitmiş olabilecek ödeme ikinci kez gönderilebilirdi.
+     */
+    const beyond = causeChain(MAX_ERROR_GRAPH_NODES - 1, { txHash: TX_HASH });
+    const graph: Record<string, unknown> = {
+      name: "UserRejectedRequestError",
+      code: 4001,
+      cause: beyond,
+    };
+    const analysis = analyzeSendException(graph);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("sınır İÇİNDEKİ hash ret kimliğini yine bastırır", () => {
+    const within = causeChain(3, { txHash: TX_HASH });
+    const analysis = analyzeSendException({
+      name: "UserRejectedRequestError",
+      code: 4001,
+      cause: within,
+    });
+    expect(analysis.complete).toBe(true);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("EKSİK dolaşımda bakiye hatası yeniden denenebilir SAYILMAZ", () => {
+    const balanceWithHostileGraph = {
+      name: "BALANCE_INSUFFICIENT_TOKEN",
+      code: 9001,
+      type: "BALANCE",
+      cause: { trace: { rawError: withThrowingGetter("code") } },
+    };
+    const analysis = analyzeSendException(balanceWithHostileGraph);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+
+    // Grafiği sağlam olan aynı bakiye hatası hâlâ yeniden denenebilir.
+    expect(
+      classifySendException({
+        name: "BALANCE_INSUFFICIENT_TOKEN",
+        code: 9001,
+        type: "BALANCE",
+      }),
+    ).toBe("insufficientFunds");
+  });
+
+  it("inceleme başarısızlığından ÖNCE bulunan hash KORUNUR", () => {
+    const graph = {
+      txHash: TX_HASH,
+      cause: withThrowingGetter("rawError"),
+    };
+    const analysis = analyzeSendException(graph);
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("BridgeStep alanı okunamıyorsa sonuç kanıtlanamaz", () => {
+    // Başarı da revert de iddia edilmez; varsa hash korunur.
+    expect(
+      classifySendResult(withThrowingGetter("state", { txHash: TX_HASH })),
+    ).toEqual({ kind: "unknown", txHash: TX_HASH });
+    expect(
+      classifySendResult(withThrowingGetter("errorCategory", { state: "error" })),
+    ).toEqual({ kind: "unknown", txHash: null });
+    expect(
+      classifySendResult(withThrowingGetter("txHash", { state: "success" })),
+    ).toEqual({ kind: "unknown", txHash: null });
+    expect(() => classifySendResult(revokedProxy())).not.toThrow();
+  });
+});
+
+describe("kit.send belirsizliği ASLA sendFailed olmaz", () => {
+  function withThrowingGetter(
+    key: string,
+    base: Record<string, unknown> = {},
+  ): Record<string, unknown> {
+    const target: Record<string, unknown> = { ...base };
+    Object.defineProperty(target, key, {
+      get() {
+        throw new TypeError(`${key} okunamaz`);
+      },
+      enumerable: true,
+      configurable: true,
+    });
+    return target;
+  }
+
+  /** Yeniden denemeye izin veren TÜM kodlar. */
+  const RETRYABLE = ["sendFailed", "rejected", "insufficientFunds"] as const;
+
+  it("fırlatan getter'lı hata uçtan uca submissionUnknown döner", async () => {
+    for (const key of ["cause", "trace", "rawError", "name", "code", "message"]) {
+      sendMock.mockReset();
+      sendMock.mockRejectedValue(withThrowingGetter(key, { code: 4001 }));
+      const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+      expect(result.ok, key).toBe(false);
+      if (result.ok) continue;
+      expect(result.code, key).toBe("submissionUnknown");
+      expect(RETRYABLE, key).not.toContain(result.code);
+      expect(keepsSubmissionLocked(result.code), key).toBe(true);
+    }
+  });
+
+  it("iptal edilmiş proxy uçtan uca submissionUnknown döner", async () => {
+    const { proxy, revoke } = Proxy.revocable({ code: 4001 }, {});
+    revoke();
+    sendMock.mockRejectedValue(proxy);
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
+  });
+
+  it("DURUMLU hata sınıflandırıcıyı çeliştirse bile sendFailed olmaz", async () => {
+    /*
+     * `code` ilk okumada 4001 (ret gibi görünür), sonraki okumada başka bir
+     * değer. İki analiz çelişir ve klasik yol `sendFailed`e düşerdi; emniyet
+     * ağı bunu `submissionUnknown`a çeker.
+     */
+    let reads = 0;
+    const stateful: Record<string, unknown> = { message: "belirsiz" };
+    Object.defineProperty(stateful, "code", {
+      get() {
+        reads += 1;
+        return reads === 1 ? 4001 : 5000;
+      },
+      enumerable: true,
+      configurable: true,
+    });
+
+    sendMock.mockRejectedValue(stateful);
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(RETRYABLE).not.toContain(result.code);
+    expect(result.code).toBe("submissionUnknown");
+    expect(keepsSubmissionLocked(result.code)).toBe(true);
+    expect(reviewStateAfterSendFailure(result.code)).toBe("leaveReview");
+  });
+
+  it("düşmanca hatada bile kurtarılan hash korunur", async () => {
+    sendMock.mockRejectedValue(
+      withThrowingGetter("name", { txHash: TX_HASH, code: 4001 }),
+    );
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+      explorerUrl: `https://testnet.arcscan.app/tx/${TX_HASH}`,
+    });
+  });
+
+  it("kit.send ÇAĞRILMADAN önceki hata sendFailed kalabilir", async () => {
+    // Emniyet ağı yalnızca kit.send'e girildikten SONRA devreye girer.
+    adapterMock.mockImplementationOnce(() => {
+      throw new Error("adaptör kurulamadı");
+    });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "sendFailed" });
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });

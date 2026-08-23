@@ -200,6 +200,17 @@ kanıtlamaz.
 Revert ve belirsizlikte işlem hash'i **kaybedilmez**: yerel kayıtta ve ekranda
 tutulur ki ArcScan'de mutabakat yapılabilsin.
 
+Hata incelemesi **hiçbir koşulda fırlatmaz**. Cüzdan/sağlayıcı hataları
+fırlatan getter, durumlu erişimci veya iptal edilmiş proxy içerebilir; böyle
+bir nesnede `error.code` ya da `Array.isArray` bile TypeError atar. Bu yüzden
+incelenen her alan korumalı okunur, **en fazla bir kez** okunup düz bir anlık
+görüntüye alınır (durumlu bir getter hash analizi ile ret analizi arasında
+değer değiştiremez) ve okunamayan bir alan dolaşımı **eksik** işaretler. Eksik
+dolaşımda ya da geçerli bir hash bulunduğunda sonuç **`submissionUnknown`**
+olur, rezervasyon **kilitli kalır**; kurtarılmış hash yine de ArcScan için
+saklanır. `kit.send` çağrıldıktan sonra sınıflandırıcının kendisi çökse bile
+sonuç asla yeniden denenebilir `sendFailed` olmaz.
+
 Hata **grafiği** sınırlı ve döngüye dayanıklı biçimde dolaşılır; yalnızca
 beklenen bağlantılar (`cause`, `trace`, `rawError`) izlenir. Kurulu yığın
 gerçek cüzdan reddini `cause.trace.rawError.rawError` gibi derin bir yola
