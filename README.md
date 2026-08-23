@@ -217,7 +217,16 @@ bağlantı **dizi/kap** değerliyse (ör. `AggregateError.errors` ya da dizi
 değerli bir `cause`) dolaşım **eksik** işaretlenir: desteklenen tekil nesne
 şekli değildir ve içinde gizli bir ret kimliği veya işlem hash'i olabilir.
 Elemanlar yine de yalnızca hash kurtarmak için taranır; sonuç hiçbir koşulda
-yeniden denenebilir olmaz. Kurulu yığın
+yeniden denenebilir olmaz.
+
+Bağlantı değerleri bir **izin listesiyle** kabul edilir: yokluk, sıradan
+kayıt/hata nesnesi (düz nesne, prototipsiz nesne veya `Error` türevi) ve
+güvenle taranan dizi. `Set`, `Map`, `WeakSet`, `WeakMap`, tipli diziler,
+`ArrayBuffer` görünümleri, özel yinelenebilirler, dizi benzeri nesneler,
+thenable'lar, fonksiyonlar ve tanınmayan kap prototipleri **desteklenmez**:
+içleri güvenle sayılamadığı için dolaşım **eksik** işaretlenir ve içlerine
+girilmez. `errors` alanı yalnızca **dizi** şeklinde taranır. Her kap türü için
+ayrı bir gezinme uygulaması eklenmez; tercih edilen davranış fail-closed'dur. Kurulu yığın
 gerçek cüzdan reddini `cause.trace.rawError.rawError` gibi derin bir yola
 gömebildiği için yalnızca `cause` zincirini izlemek yetmez. Buna karşılık
 **kod 4001 tek başına ret kanıtı değildir**: kurulu App Kit'te

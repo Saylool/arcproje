@@ -1573,3 +1573,270 @@ describe("kap içeren hatalar uçtan uca KİLİTLİ kalır", () => {
     }
   });
 });
+
+describe("desteklenmeyen kaplar FAIL-CLOSED", () => {
+  const REJECTION = { name: "UserRejectedRequestError", code: 4001 } as const;
+  const HIDDEN = { txHash: TX_HASH };
+  const RETRYABLE = ["sendFailed", "rejected", "insufficientFunds"] as const;
+
+  /** `Symbol.iterator` okunduğunda fırlatan nesne. */
+  function throwingIterator(): object {
+    const target = { txHash: TX_HASH };
+    Object.defineProperty(target, Symbol.iterator, {
+      get() {
+        throw new TypeError("iterator okunamaz");
+      },
+      configurable: true,
+    });
+    return target;
+  }
+
+  /** `getPrototypeOf` tuzağı fırlatan proxy. */
+  function throwingPrototype(): object {
+    return new Proxy(
+      { txHash: TX_HASH },
+      {
+        getPrototypeOf() {
+          throw new TypeError("prototip okunamaz");
+        },
+      },
+    );
+  }
+
+  /** Düz prototipli ama özel yinelenebilir kap. */
+  function customIterable(): object {
+    return {
+      hidden: HIDDEN,
+      [Symbol.iterator]() {
+        return [HIDDEN][Symbol.iterator]();
+      },
+    };
+  }
+
+  class CustomContainer {
+    readonly hidden = HIDDEN;
+  }
+
+  /** Adı ve içeriğiyle birlikte desteklenmeyen her kap. */
+  const UNSUPPORTED: readonly (readonly [string, unknown])[] = [
+    ["Set", new Set([HIDDEN])],
+    ["Map", new Map([["k", HIDDEN]])],
+    ["WeakSet", new WeakSet([HIDDEN])],
+    ["WeakMap", new WeakMap([[HIDDEN, 1]])],
+    ["Uint8Array", new Uint8Array([1, 2, 3])],
+    ["DataView", new DataView(new ArrayBuffer(8))],
+    ["ArrayBuffer", new ArrayBuffer(8)],
+    ["dizi-benzeri", { 0: HIDDEN, length: 1 }],
+    ["özel yinelenebilir", customIterable()],
+    ["özel sınıf", new CustomContainer()],
+    ["promise", Promise.resolve(HIDDEN)],
+    ["thenable", { then: () => undefined, hidden: HIDDEN }],
+    ["fırlatan iterator", throwingIterator()],
+    ["fırlatan prototip", throwingPrototype()],
+  ];
+
+  it("Set ve Map içindeki hash görünmez ve dolaşım EKSİK kalır", () => {
+    for (const container of [new Set([HIDDEN]), new Map([["k", HIDDEN]])]) {
+      const analysis = analyzeSendException({ cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+      // İçine GİRİLMEZ: kap gezinme uygulaması eklenmedi.
+      expect(analysis.txHash).toBeNull();
+    }
+  });
+
+  it("WeakSet ve WeakMap de desteklenmez", () => {
+    for (const container of [new WeakSet([HIDDEN]), new WeakMap([[HIDDEN, 1]])]) {
+      const analysis = analyzeSendException({ cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+    }
+  });
+
+  it("tipli diziler ve dizi benzeri nesneler desteklenmez", () => {
+    for (const container of [
+      new Uint8Array([1, 2, 3]),
+      new Float64Array(2),
+      new DataView(new ArrayBuffer(8)),
+      new ArrayBuffer(8),
+      { 0: HIDDEN, length: 1 },
+    ]) {
+      const analysis = analyzeSendException({ cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+    }
+  });
+
+  it("özel yinelenebilir ve özel kap sınıfı desteklenmez", () => {
+    for (const container of [customIterable(), new CustomContainer()]) {
+      const analysis = analyzeSendException({ cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+    }
+  });
+
+  it("DİZİ OLMAYAN errors değeri dolaşımı eksik bırakır", () => {
+    for (const value of [
+      new Set([HIDDEN]),
+      { 0: HIDDEN, length: 1 },
+      HIDDEN,
+      customIterable(),
+    ]) {
+      const analysis = analyzeSendException(
+        Object.assign(new Error("toplu"), { errors: value }),
+      );
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+      // Desteklenmeyen şekil içine GİRİLMEZ.
+      expect(analysis.txHash).toBeNull();
+    }
+  });
+
+  it("gerçek AggregateError dizisi hâlâ hash kurtarır", () => {
+    const analysis = analyzeSendException(new AggregateError([HIDDEN], "x"));
+    expect(analysis.complete).toBe(false);
+    expect(analysis.txHash).toBe(TX_HASH);
+  });
+
+  it("FIRLATAN Symbol.iterator ve prototip erişimi fırlatmaz", () => {
+    for (const container of [throwingIterator(), throwingPrototype()]) {
+      expect(() => analyzeSendException({ cause: container })).not.toThrow();
+      const analysis = analyzeSendException({ cause: container });
+      expect(analysis.complete).toBe(false);
+      expect(analysis.classification).toBe("submissionUnknown");
+    }
+  });
+
+  it("fonksiyon değerli bağlantı desteklenmez", () => {
+    const analysis = analyzeSendException({
+      ...REJECTION,
+      cause: function hidden() {
+        return HIDDEN;
+      },
+    });
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("en üstteki desteklenmeyen kap da eksik sayılır", () => {
+    for (const [label, container] of UNSUPPORTED) {
+      const analysis = analyzeSendException(container);
+      expect(analysis.complete, label).toBe(false);
+      expect(analysis.classification, label).toBe("submissionUnknown");
+    }
+  });
+
+  it("ERKEN ret + HER desteklenmeyen kap: asla yeniden denenebilir olmaz", () => {
+    for (const [label, container] of UNSUPPORTED) {
+      for (const link of ["cause", "trace", "rawError", "errors"] as const) {
+        const analysis = analyzeSendException({
+          ...REJECTION,
+          [link]: container,
+        });
+        const tag = `${label}/${link}`;
+        expect(analysis.complete, tag).toBe(false);
+        expect(analysis.classification, tag).toBe("submissionUnknown");
+      }
+    }
+  });
+
+  it("bakiye hatası + desteklenmeyen kap da yeniden denenebilir olmaz", () => {
+    for (const [label, container] of UNSUPPORTED) {
+      const analysis = analyzeSendException({
+        name: "BALANCE_INSUFFICIENT_TOKEN",
+        code: 9001,
+        type: "BALANCE",
+        cause: container,
+      });
+      expect(analysis.classification, label).not.toBe("insufficientFunds");
+      expect(analysis.classification, label).toBe("submissionUnknown");
+    }
+  });
+
+  it("İNCELEME ÖNCESİ bulunan hash desteklenmeyen kapla birlikte korunur", () => {
+    const analysis = analyzeSendException({
+      txHash: TX_HASH,
+      cause: new Set([{ name: "GİZLİ" }]),
+    });
+    expect(analysis.txHash).toBe(TX_HASH);
+    expect(analysis.complete).toBe(false);
+    expect(analysis.classification).toBe("submissionUnknown");
+  });
+
+  it("NORMAL nesne ve Error bağlantıları desteklenmeye devam eder", () => {
+    // Düz nesne zinciri.
+    expect(
+      analyzeSendException({ cause: { trace: { rawError: REJECTION } } }),
+    ).toEqual({ classification: "rejected", txHash: null, complete: true });
+
+    // Gerçek Error örneği ve Error türevi sınıf.
+    class KitLike extends Error {
+      readonly type = "ONCHAIN";
+    }
+    const kitLike = new KitLike("zincir hatası");
+    expect(
+      analyzeSendException({
+        cause: Object.assign(kitLike, { rawError: REJECTION }),
+      }),
+    ).toEqual({ classification: "rejected", txHash: null, complete: true });
+
+    // Prototipsiz kayıt.
+    const bare = Object.create(null) as Record<string, unknown>;
+    bare.name = "UserRejectedRequestError";
+    expect(analyzeSendException({ cause: bare })).toEqual({
+      classification: "rejected",
+      txHash: null,
+      complete: true,
+    });
+
+    // İlkel değerli ve boş bağlantılar bütünlüğü bozmaz.
+    expect(
+      analyzeSendException({ ...REJECTION, cause: "metin", trace: null }),
+    ).toEqual({ classification: "rejected", txHash: null, complete: true });
+  });
+
+  it("normal viem/AppKit şekilleri hâlâ hash ve ret verir", () => {
+    const viemTimeout = Object.assign(new Error("t"), {
+      name: "WaitForTransactionReceiptTimeoutError",
+      shortMessage: `Timed out while waiting for transaction with hash "${TX_HASH}" to be confirmed.`,
+    });
+    expect(analyzeSendException(viemTimeout).txHash).toBe(TX_HASH);
+
+    const kitError = Object.assign(new Error("Kit failure"), {
+      name: "ONCHAIN_TRANSACTION_FAILED",
+      code: 7001,
+      type: "ONCHAIN",
+      cause: { trace: { txHash: TX_HASH } },
+    });
+    expect(analyzeSendException(kitError).txHash).toBe(TX_HASH);
+  });
+
+  it("HİÇBİR desteklenmeyen şekil uçtan uca kilidi açmaz", async () => {
+    for (const [label, container] of UNSUPPORTED) {
+      sendMock.mockReset();
+      sendMock.mockRejectedValue({ ...REJECTION, cause: container });
+      const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+      expect(result.ok, label).toBe(false);
+      if (result.ok) continue;
+      expect(RETRYABLE, label).not.toContain(result.code);
+      expect(result.code, label).toBe("submissionUnknown");
+      expect(keepsSubmissionLocked(result.code), label).toBe(true);
+      expect(reviewStateAfterSendFailure(result.code), label).toBe("leaveReview");
+    }
+  });
+
+  it("kap yanında kurtarılan hash uçtan uca korunur", async () => {
+    sendMock.mockRejectedValue({
+      ...REJECTION,
+      txHash: TX_HASH,
+      cause: new Map([["k", { name: "GİZLİ" }]]),
+    });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+      explorerUrl: `https://testnet.arcscan.app/tx/${TX_HASH}`,
+    });
+  });
+});

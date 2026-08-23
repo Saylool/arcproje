@@ -407,9 +407,9 @@ const VIEM_TIMEOUT_HASH_PATTERN =
  */
 type PropertyRead = { ok: true; value: unknown } | { ok: false };
 
-function readProperty(target: object, key: string): PropertyRead {
+function readProperty(target: object, key: PropertyKey): PropertyRead {
   try {
-    return { ok: true, value: (target as Record<string, unknown>)[key] };
+    return { ok: true, value: (target as Record<PropertyKey, unknown>)[key] };
   } catch {
     return { ok: false };
   }
@@ -490,6 +490,9 @@ function snapshotProperties(
  */
 const ERROR_GRAPH_LINKS = ["cause", "trace", "rawError", "errors"] as const;
 
+/** Standart `AggregateError` alanı: YALNIZCA dizi şekli desteklenir. */
+const AGGREGATE_LINK = "errors";
+
 /** Ziyaret edilecek en fazla DÜĞÜM; döngü ve aşırı derinlik burada durur. */
 export const MAX_ERROR_GRAPH_NODES = 32;
 
@@ -513,6 +516,118 @@ const INSPECTED_KEYS = [
   "shortMessage",
   "message",
 ] as const;
+
+/** Prototip zincirinde bakılacak en fazla adım. */
+const MAX_PROTOTYPE_DEPTH = 8;
+
+/**
+ * Değerin prototipi SIRADAN mı?
+ *
+ * Kabul edilenler: prototipsiz nesne (`Object.create(null)`), düz nesne
+ * (`Object.prototype`) ve `Error` türevleri (`KitError`, viem `BaseError`…).
+ *
+ * `Set`, `Map`, `WeakSet`, `WeakMap`, tipli diziler/`ArrayBuffer` görünümleri,
+ * `Promise` ve özel kap sınıfları bu testten GEÇEMEZ: prototipleri ne
+ * `Object.prototype`tir ne de `Error` zincirine ulaşır. Bu bir İZİN LİSTESİDİR;
+ * her kap türü için ayrı bir uygulama eklenmez.
+ *
+ * `Object.getPrototypeOf` proxy tuzağı çalıştırır ve fırlatabilir; korumalıdır.
+ */
+function hasOrdinaryPrototype(
+  value: object,
+): { ok: true; value: boolean } | { ok: false } {
+  let current: unknown;
+  try {
+    current = Object.getPrototypeOf(value);
+  } catch {
+    return { ok: false };
+  }
+  if (current === null || current === Object.prototype) {
+    return { ok: true, value: true };
+  }
+  for (let depth = 0; depth < MAX_PROTOTYPE_DEPTH; depth += 1) {
+    if (current === Error.prototype) {
+      return { ok: true, value: true };
+    }
+    if (current === null || typeof current !== "object") {
+      break;
+    }
+    try {
+      current = Object.getPrototypeOf(current);
+    } catch {
+      return { ok: false };
+    }
+  }
+  return { ok: true, value: false };
+}
+
+/**
+ * Prototipi sıradan görünse bile KAP gibi davranan nesneler.
+ *
+ * Düz prototipli özel yinelenebilirler, dizi benzeri nesneler
+ * (`{ 0: …, length: 1 }`), thenable'lar ve `size` taşıyan koleksiyon
+ * taklitleri gizli girdi saklayabilir. Hepsi desteklenmez.
+ */
+function looksLikeContainer(
+  value: object,
+): { ok: true; value: boolean } | { ok: false } {
+  const iterator = readProperty(value, Symbol.iterator);
+  if (!iterator.ok) {
+    return { ok: false };
+  }
+  if (iterator.value !== undefined) {
+    return { ok: true, value: true };
+  }
+  for (const key of ["length", "size"] as const) {
+    const read = readProperty(value, key);
+    if (!read.ok) {
+      return { ok: false };
+    }
+    if (typeof read.value === "number") {
+      return { ok: true, value: true };
+    }
+  }
+  const thenable = readProperty(value, "then");
+  if (!thenable.ok) {
+    return { ok: false };
+  }
+  return { ok: true, value: typeof thenable.value === "function" };
+}
+
+/**
+ * Bir düğümün desteklenen şekli.
+ *
+ * - `record`: sıradan kayıt/hata nesnesi; anlık görüntüsü alınır ve
+ *   bağlantıları izlenir.
+ * - `array`: dizi; DESTEKLENEN kap olarak yalnızca hash kurtarmak için
+ *   taranır ve dolaşımı EKSİK işaretler.
+ * - `unsupported`: `Set`/`Map`/`WeakSet`/`WeakMap`/tipli dizi/yinelenebilir/
+ *   dizi benzeri/thenable/özel prototip. İçi güvenle görülemez.
+ * - `unreadable`: iptal edilmiş proxy veya fırlatan erişimci.
+ */
+type NodeShape = "record" | "array" | "unsupported" | "unreadable";
+
+function classifyNodeShape(value: object): NodeShape {
+  const arrayCheck = safeIsArray(value);
+  if (!arrayCheck.ok) {
+    return "unreadable";
+  }
+  if (arrayCheck.value) {
+    return "array";
+  }
+  const ordinary = hasOrdinaryPrototype(value);
+  if (!ordinary.ok) {
+    return "unreadable";
+  }
+  if (!ordinary.value) {
+    return "unsupported";
+  }
+  const container = looksLikeContainer(value);
+  if (!container.ok) {
+    return "unreadable";
+  }
+  return container.value ? "unsupported" : "record";
+}
 
 /**
  * Kap (dizi) elemanlarını KORUMALI biçimde kuyruğa alır.
@@ -607,13 +722,27 @@ function collectErrorGraph(error: unknown): ErrorGraph {
       break;
     }
 
-    const arrayCheck = safeIsArray(current);
-    if (!arrayCheck.ok) {
-      // İptal edilmiş proxy: bu düğümden hiçbir şey okunamaz.
+    const shape = classifyNodeShape(current);
+    if (shape === "unreadable") {
+      // İptal edilmiş proxy veya fırlatan erişimci: hiçbir şey okunamaz.
       complete = false;
       continue;
     }
-    if (arrayCheck.value) {
+    if (shape === "unsupported") {
+      /*
+       * DESTEKLENMEYEN KAP: `Set`, `Map`, `WeakSet`, `WeakMap`, tipli dizi,
+       * `ArrayBuffer` görünümü, özel yinelenebilir, dizi benzeri nesne,
+       * thenable veya tanınmayan bir kap prototipi.
+       *
+       * Girdileri güvenle sayılamaz/okunamaz; içinde gizli bir ret kimliği ya
+       * da işlem hash'i olabilir. FAIL-CLOSED: dolaşım EKSİK işaretlenir,
+       * içine GİRİLMEZ ve sonuç hiçbir koşulda yeniden denenebilir olamaz.
+       * Her kap türü için ayrı bir gezinme uygulaması EKLENMEZ.
+       */
+      complete = false;
+      continue;
+    }
+    if (shape === "array") {
       /*
        * DİZİ/KAP bağlantı. Desteklenen tekil nesne şekli DEĞİLDİR: bir
        * `AggregateError.errors` listesi ya da dizi değerli bir `cause`
@@ -637,7 +766,32 @@ function collectErrorGraph(error: unknown): ErrorGraph {
 
     for (const link of ERROR_GRAPH_LINKS) {
       const next = snapshot.values[link];
-      if (typeof next === "object" && next !== null && !seen.has(next)) {
+      if (next === null || next === undefined) {
+        // Yokluk desteklenen bir şekildir.
+        continue;
+      }
+      if (typeof next === "function") {
+        // Fonksiyon değerli bağlantı desteklenmez.
+        complete = false;
+        continue;
+      }
+      if (typeof next !== "object") {
+        // İlkel değer alt hata taşıyamaz; güvenlidir.
+        continue;
+      }
+      if (link === AGGREGATE_LINK) {
+        /*
+         * Standart `AggregateError.errors` YALNIZCA dizi şeklinde desteklenir.
+         * Başka her non-null şekil (Set, Map, yinelenebilir, düz nesne…)
+         * dolaşımı EKSİK bırakır ve içine girilmez.
+         */
+        const arrayCheck = safeIsArray(next);
+        if (!arrayCheck.ok || !arrayCheck.value) {
+          complete = false;
+          continue;
+        }
+      }
+      if (!seen.has(next)) {
         queue.push(next);
       }
     }
