@@ -20,7 +20,10 @@ import {
   REQUEST_MAX_CLOCK_SKEW_MS,
   REQUEST_MAX_LIFETIME_MS,
 } from "./payment-request";
-import { QUOTE_ID_HEX_LENGTH } from "@/lib/rates/quote";
+import {
+  QUOTE_ID_HEX_LENGTH,
+  QUOTE_MIN_SEND_MARGIN_SECONDS,
+} from "@/lib/rates/quote";
 import { withProvider, type Eip1193Provider } from "./wallet";
 
 /**
@@ -93,6 +96,7 @@ export type ArcSendErrorCode =
   | "expiredQuote"
   | "insufficientTimeRemaining"
   | "submissionUnknown"
+  | "reverted"
   | "insufficientFunds"
   | "estimateFailed"
   | "sendFailed";
@@ -125,6 +129,8 @@ const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
     "Kur teklifinin bitişine çok az kaldı; işlem onaylanmadan süresi dolabilirdi. Gönderim başlatılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
   submissionUnknown:
     "İşlem cüzdana GÖNDERİLDİ ama sonucu doğrulanamadı. TEKRAR DENEME: aynı ödeme iki kez gidebilir. Önce MetaMask'taki işlem geçmişini ve ArcScan'i kontrol et; işlem görünmüyorsa yeni bir bağlantı iste.",
+  reverted:
+    "İşlem zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı ama gas harcanmış olabilir. Aşağıdaki işlem bağlantısından ArcScan'de ayrıntıyı gör; tekrar denemeden önce MetaMask geçmişini de kontrol et.",
   insufficientFunds:
     "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
   estimateFailed:
@@ -156,7 +162,8 @@ export function reviewStateAfterSendFailure(
     code === "invalidRequestTime" ||
     code === "expiredQuote" ||
     code === "insufficientTimeRemaining" ||
-    code === "submissionUnknown"
+    code === "submissionUnknown" ||
+    code === "reverted"
     ? "leaveReview"
     : "keepReview";
 }
@@ -169,12 +176,19 @@ export function reviewStateAfterSendFailure(
  * etmelidir; yeni bir deneme ancak sayfa yenilenerek başlar.
  */
 export function keepsSubmissionLocked(code: ArcSendErrorCode): boolean {
-  return code === "submissionUnknown";
+  // Revert de kalıcıdır: işlem zincire ulaştı, körlemesine tekrar denenmez.
+  return code === "submissionUnknown" || code === "reverted";
 }
 
 export type ArcSendResult<T> =
   | { ok: true; value: T }
-  | { ok: false; code: ArcSendErrorCode };
+  | {
+      ok: false;
+      code: ArcSendErrorCode;
+      /** Revert gibi zincire ulaşmış sonuçlarda ArcScan için korunur. */
+      txHash?: string;
+      explorerUrl?: string | null;
+    };
 
 export type ArcEstimate = { summary: string | null };
 
@@ -214,7 +228,7 @@ const QUOTE_ID_PATTERN = new RegExp(`^0x[0-9a-f]{${QUOTE_ID_HEX_LENGTH}}$`);
  * başlatılırsa işlem, süresi dolmuş bir kurla zincire düşebilir. Bu pay
  * YALNIZCA gönderim yolunda uygulanır; tahmin almak serbesttir.
  */
-export const SEND_MIN_REMAINING_SECONDS = 60;
+export const SEND_MIN_REMAINING_SECONDS = QUOTE_MIN_SEND_MARGIN_SECONDS;
 
 export function checkSendSafetyMargin(
   snapshot: ArcPaymentSnapshot,
@@ -233,6 +247,110 @@ export function checkSendSafetyMargin(
  * Bu noktadan sonra işlem zincire düşmüş OLABİLİR. Hata "gönderilemedi" gibi
  * sunulmaz; kullanıcı önce cüzdanını ve explorer'ı kontrol etmelidir.
  */
+/**
+ * `kit.send` sonucunun (App Kit `BridgeStep`) yorumlanması.
+ *
+ * Kurulu SDK sözleşmesi: `state: 'pending' | 'success' | 'error' | 'noop'`,
+ * isteğe bağlı `txHash` ve makine tarafından okunabilir `errorCategory`.
+ * SDK dokümanı, makine kararları için `errorMessage` metnini eşleştirmek
+ * yerine `errorCategory` kullanılmasını söyler.
+ *
+ * BAŞARI için İKİSİ de gerekir: belgelenmiş `success` durumu VE geçerli hash.
+ * Sadece geçerli bir hash görmek yetmez; revert eden bir işlemin de hash'i
+ * vardır ve asla "ödendi" sayılmaz.
+ */
+export type SendResultClassification =
+  | { kind: "success"; txHash: string }
+  | { kind: "reverted"; txHash: string | null }
+  | { kind: "rejected" }
+  | { kind: "unknown" };
+
+/** Zincire ulaşıp başarısız olmuş sayılan hata kategorileri. */
+const REVERTED_CATEGORIES = new Set([
+  "chain_revert",
+  "reverted_onchain",
+  "partial_reverted",
+]);
+
+export function classifySendResult(result: unknown): SendResultClassification {
+  if (typeof result !== "object" || result === null) {
+    return { kind: "unknown" };
+  }
+  const step = result as {
+    state?: unknown;
+    txHash?: unknown;
+    errorCategory?: unknown;
+  };
+  const txHash =
+    typeof step.txHash === "string" && isValidTransactionHash(step.txHash)
+      ? step.txHash
+      : null;
+
+  if (step.state === "success") {
+    // Durum başarı ama hash yoksa/bozuksa sonucu doğrulayamayız.
+    return txHash === null ? { kind: "unknown" } : { kind: "success", txHash };
+  }
+
+  if (step.state === "error") {
+    if (step.errorCategory === "user_rejected") {
+      // Belgelenmiş kullanıcı reddi: yayın öncesi, yeniden denenebilir.
+      return { kind: "rejected" };
+    }
+    if (
+      typeof step.errorCategory === "string" &&
+      REVERTED_CATEGORIES.has(step.errorCategory)
+    ) {
+      return { kind: "reverted", txHash };
+    }
+    // Sınıflandırılamayan hata: işlem gitmiş olabilir.
+    return { kind: "unknown" };
+  }
+
+  // 'pending', 'noop' veya tanınmayan durum: sonuç belirsizdir.
+  return { kind: "unknown" };
+}
+
+/**
+ * `kit.send` ÇAĞRILDIKTAN sonra fırlayan istisnanın sınıflandırılması.
+ *
+ * Yalnızca güvenilir biçimde tanınan cüzdan reddi (EIP-1193 kodu 4001) yayın
+ * öncesi sayılır. Serbest metin eşleştirmesi YAPILMAZ: "insufficient
+ * confirmations" gibi bir mesaj işlemin gönderilmediğini kanıtlamaz.
+ */
+export function classifySendException(
+  error: unknown,
+): "rejected" | "submissionUnknown" {
+  if (typeof error === "object" && error !== null) {
+    const code = (error as { code?: unknown }).code;
+    if (code === 4001) {
+      return "rejected";
+    }
+    const category = (error as { errorCategory?: unknown }).errorCategory;
+    if (category === "user_rejected") {
+      return "rejected";
+    }
+  }
+  return "submissionUnknown";
+}
+
+/** Kurulum payı tükettiğinde cüzdan akışı açılmaz. */
+export class SendMarginError extends Error {
+  constructor() {
+    super("send safety margin exhausted");
+    this.name = "SendMarginError";
+  }
+}
+
+/** Zincire ulaşıp revert etmiş işlem. */
+export class RevertedSubmissionError extends Error {
+  readonly txHash: string | null;
+  constructor(txHash: string | null) {
+    super("transaction reverted on chain");
+    this.name = "RevertedSubmissionError";
+    this.txHash = txHash;
+  }
+}
+
 export class AmbiguousSubmissionError extends Error {
   constructor() {
     super("submission outcome unknown");
@@ -431,12 +549,22 @@ function classifyError(
   error: unknown,
   fallback: ArcSendErrorCode,
 ): ArcSendErrorCode {
-  // Belirsiz gönderim, başka hiçbir sınıflandırmanın önüne geçer.
+  // Tipli sentineller her türlü metin sınıflandırmasının önüne geçer.
   if (error instanceof AmbiguousSubmissionError) {
     return "submissionUnknown";
   }
-  if (typeof error === "object" && error !== null && "code" in error) {
-    if ((error as { code: unknown }).code === 4001) {
+  if (error instanceof RevertedSubmissionError) {
+    return "reverted";
+  }
+  if (error instanceof SendMarginError) {
+    return "insufficientTimeRemaining";
+  }
+  if (typeof error === "object" && error !== null) {
+    if ((error as { code?: unknown }).code === 4001) {
+      return "rejected";
+    }
+    // SDK'nın makine tarafından okunabilir sınıflandırması metinden önce gelir.
+    if ((error as { errorCategory?: unknown }).errorCategory === "user_rejected") {
       return "rejected";
     }
   }
@@ -548,10 +676,6 @@ export async function sendArcUsdc(
   now: () => number = Date.now,
 ): Promise<ArcSendResult<ArcSendSuccess>> {
   /*
-   * Cüzdan akışı açılmadan önce asgari kalan süre aranır. Bu kontrol yalnızca
-   * gönderim yolundadır; tahmin almak için gerekmez.
-   */
-  /*
    * Pay yalnızca talep HÂLÂ GEÇERLİYKEN anlamlıdır. Süresi zaten dolmuş bir
    * talebe "az kaldı" demek yanıltıcı olurdu; o durumda kesin hata kodu
    * korunur ve raporlamayı runGuarded yapar.
@@ -563,38 +687,71 @@ export async function sendArcUsdc(
     }
   }
 
-  return runGuarded(walletUuid, snapshot, "sendFailed", now, async ({ kit, params }) => {
-    let result: unknown;
-    try {
-      result = await kit.send(params);
-    } catch (error) {
-      /*
-       * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca kesin olarak yayın
-       * ÖNCESİ olduğunu bildiğimiz hatalar (kullanıcı reddi, yetersiz bakiye)
-       * yeniden denenebilir sayılır. Diğer her şey belirsizdir: işlem zincire
-       * düşmüş olabilir.
-       */
-      const classified = classifyError(error, "sendFailed");
-      if (classified === "rejected" || classified === "insufficientFunds") {
-        throw error;
-      }
-      throw new AmbiguousSubmissionError();
-    }
+  let revertedHash: string | null = null;
 
-    const txHash = readString(result, "txHash");
-    if (txHash === null || !isValidTransactionHash(txHash)) {
-      // SDK geçerli bir hash vermedi ama işlem gönderilmiş olabilir.
-      throw new AmbiguousSubmissionError();
-    }
+  const outcome = await runGuarded(
+    walletUuid,
+    snapshot,
+    "sendFailed",
+    now,
+    async ({ kit, params }) => {
+      /*
+       * SON kontrol: preflight ve App Kit kurulumu payı tüketmiş olabilir.
+       * Cüzdan istemi açıldıktan sonra doğrudan ERC-20 transferinde son tarihi
+       * zincire dayatmanın yolu yoktur; bu yüzden istem AÇILMADAN önce bakılır.
+       */
+      if (checkSendSafetyMargin(snapshot, now()) !== null) {
+        throw new SendMarginError();
+      }
+
+      let result: unknown;
+      try {
+        result = await kit.send(params);
+      } catch (error) {
+        /*
+         * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca güvenilir biçimde
+         * tanınan cüzdan reddi yayın öncesi sayılır; serbest metin
+         * eşleştirilmez. Diğer her şeyde işlem zincire düşmüş OLABİLİR.
+         */
+        if (classifySendException(error) === "rejected") {
+          throw error;
+        }
+        throw new AmbiguousSubmissionError();
+      }
+
+      const classified = classifySendResult(result);
+      if (classified.kind === "rejected") {
+        throw Object.assign(new Error("user rejected"), { code: 4001 });
+      }
+      if (classified.kind === "reverted") {
+        // Revert ASLA "ödendi" sayılmaz; hash ArcScan için korunur.
+        revertedHash = classified.txHash;
+        throw new RevertedSubmissionError(classified.txHash);
+      }
+      if (classified.kind === "unknown") {
+        throw new AmbiguousSubmissionError();
+      }
+
+      return {
+        txHash: classified.txHash,
+        // Bağlantı SDK'nın döndürdüğü URL'den değil, doğrulanmış hash'ten kurulur.
+        explorerUrl: buildArcExplorerTxUrl(classified.txHash),
+        state: readString(result, "state"),
+        snapshot,
+        completedAt: new Date().toISOString(),
+      };
+    },
+  );
+
+  if (!outcome.ok && outcome.code === "reverted" && revertedHash !== null) {
     return {
-      txHash,
-      // Bağlantı SDK'nın döndürdüğü URL'den değil, doğrulanmış hash'ten kurulur.
-      explorerUrl: buildArcExplorerTxUrl(txHash),
-      state: readString(result, "state"),
-      snapshot,
-      completedAt: new Date().toISOString(),
+      ok: false,
+      code: "reverted",
+      txHash: revertedHash,
+      explorerUrl: buildArcExplorerTxUrl(revertedHash),
     };
-  });
+  }
+  return outcome;
 }
 
 export { ARC_TESTNET_CHAIN_ID };

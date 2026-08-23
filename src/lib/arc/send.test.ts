@@ -325,6 +325,8 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
     insufficientTimeRemaining: "leaveReview",
     // kit.send çağrıldıktan sonra sonuç belirsizse tekrar denenmez.
     submissionUnknown: "leaveReview",
+    // Zincire ulaşıp revert eden işlem de körlemesine tekrar denenmez.
+    reverted: "leaveReview",
     // Kullanıcının düzeltip tekrar deneyebileceği durumlar.
     noProvider: "keepReview",
     rejected: "keepReview",
@@ -377,6 +379,7 @@ describe("gönderim hatasından sonra inceleme ekranının durumu", () => {
       "expiredRequest",
       "insufficientTimeRemaining",
       "invalidRequestTime",
+      "reverted",
       "submissionUnknown",
     ]);
   });

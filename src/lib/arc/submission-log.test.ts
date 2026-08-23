@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  clearReservation,
   readSubmission,
   recordSubmission,
+  reserveSubmission,
   submissionKey,
   type StorageLike,
 } from "./submission-log";
@@ -94,5 +96,68 @@ describe("yerel gönderim işaretçisi", () => {
       },
     };
     expect(() => recordSubmission(CHAIN, REQUEST, "success", failing)).not.toThrow();
+  });
+});
+
+describe("gönderim rezervasyonu", () => {
+  it("boş kayıtta rezervasyon alınır ve pending yazılır", () => {
+    const storage = memoryStorage();
+    expect(reserveSubmission(CHAIN, REQUEST, storage)).toEqual({ ok: true });
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBe("pending");
+  });
+
+  it("mevcut kayıt varsa rezervasyon REDDEDİLİR", () => {
+    for (const existing of ["pending", "success", "unknown"] as const) {
+      const storage = memoryStorage();
+      recordSubmission(CHAIN, REQUEST, existing, storage);
+      expect(reserveSubmission(CHAIN, REQUEST, storage), existing).toEqual({
+        ok: false,
+        existing,
+      });
+    }
+  });
+
+  it("ikinci rezervasyon denemesi kazara ikinci gönderimi engeller", () => {
+    const storage = memoryStorage();
+    expect(reserveSubmission(CHAIN, REQUEST, storage).ok).toBe(true);
+    // Başka bir sekme aynı anda denerse aynı depoyu görür.
+    expect(reserveSubmission(CHAIN, REQUEST, storage)).toEqual({
+      ok: false,
+      existing: "pending",
+    });
+  });
+
+  it("farklı talep engellenmez", () => {
+    const storage = memoryStorage();
+    reserveSubmission(CHAIN, REQUEST, storage);
+    expect(reserveSubmission(CHAIN, OTHER, storage).ok).toBe(true);
+  });
+
+  it("rezervasyon yalnızca pending kaydı için temizlenir", () => {
+    const storage = memoryStorage();
+    reserveSubmission(CHAIN, REQUEST, storage);
+    clearReservation(CHAIN, REQUEST, storage);
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBeNull();
+  });
+
+  it("başarı veya belirsizlik kaydı temizlenmez", () => {
+    for (const outcome of ["success", "unknown"] as const) {
+      const storage = memoryStorage();
+      recordSubmission(CHAIN, REQUEST, outcome, storage);
+      clearReservation(CHAIN, REQUEST, storage);
+      expect(readSubmission(CHAIN, REQUEST, storage), outcome).toBe(outcome);
+    }
+  });
+
+  it("depo yoksa rezervasyon engellemez (koruma yetkili değildir)", () => {
+    expect(reserveSubmission(CHAIN, REQUEST, null)).toEqual({ ok: true });
+    expect(() => clearReservation(CHAIN, REQUEST, null)).not.toThrow();
+  });
+
+  it("pending kaydı da gizli veri içermez", () => {
+    const storage = memoryStorage();
+    reserveSubmission(CHAIN, REQUEST, storage);
+    const parsed = JSON.parse(storage.dump() as string) as Record<string, unknown>[];
+    expect(Object.keys(parsed[0]).sort()).toEqual(["at", "key", "outcome"]);
   });
 });

@@ -231,7 +231,7 @@ describe("geçersiz zaman bilgisi", () => {
 
 describe("sonuç imzalı talebe bağlanır", () => {
   it("başarılı işlem talep kimliğini birebir korur", async () => {
-    sendMock.mockResolvedValue({ txHash: TX_HASH, state: "COMPLETE" });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
     const snapshot = snapshotOf();
 
     const result = await sendArcUsdc("w", snapshot, clockNow);
@@ -245,7 +245,7 @@ describe("sonuç imzalı talebe bağlanır", () => {
   });
 
   it("aynı borç ve tutar için iki ayrı talep birbirinden ayırt edilebilir", async () => {
-    sendMock.mockResolvedValue({ txHash: TX_HASH, state: "COMPLETE" });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
 
     const first = snapshotOf({ requestId: `0x${"aa".repeat(32)}` });
     const second = snapshotOf({ requestId: `0x${"bb".repeat(32)}` });

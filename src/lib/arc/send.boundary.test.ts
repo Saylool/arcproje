@@ -201,8 +201,8 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
 describe("başarılı gönderim (taklit App Kit)", () => {
   it("işlemi onaylanan snapshot'a bağlar ve bağlantıyı yerelde kurar", async () => {
     sendMock.mockResolvedValue({
+      state: "success",
       txHash: TX_HASH,
-      state: "COMPLETE",
       // Bağımlılığın döndürdüğü kötü niyetli URL kullanılmamalı.
       explorerUrl: "https://evil.example.com/tx/0xdeadbeef",
     });
@@ -222,7 +222,7 @@ describe("başarılı gönderim (taklit App Kit)", () => {
   });
 
   it("App Kit'e onaylanan snapshot'ın tutarı ve alıcısı gönderilir", async () => {
-    sendMock.mockResolvedValue({ txHash: TX_HASH });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
     await sendArcUsdc("w", snapshotOf(), at(NOW));
     const params = sendMock.mock.calls[0][0];
     expect(params.to).toBe(RECIPIENT);
@@ -236,7 +236,7 @@ describe("başarılı gönderim (taklit App Kit)", () => {
      * kit.send çağrıldı; hash okunamadı diye "gönderilemedi" denemez —
      * işlem zincire düşmüş olabilir.
      */
-    sendMock.mockResolvedValue({ txHash: "0xdeadbeef" });
+    sendMock.mockResolvedValue({ state: "success", txHash: "0xdeadbeef" });
     const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
     expect(result).toEqual({ ok: false, code: "submissionUnknown" });
   });

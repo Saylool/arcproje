@@ -7,8 +7,11 @@ import {
   COOLDOWN_BASE_MS,
   PROVIDER_CACHE_TTL_MS,
   getUsdcTryObservation,
+  mintUsdcTryQuote,
   resetRateQuoteCache,
 } from "./quote-service";
+import { QUOTE_LIFETIME_MS, QUOTE_MIN_SEND_MARGIN_SECONDS } from "./quote";
+import { TEST_QUOTE_SECRET as SECRET } from "./quote-fixture";
 
 /**
  * Önbellek ve soğuma çıpaları, isteğin BAŞLADIĞI ana değil sağlayıcı yanıtının
@@ -201,5 +204,103 @@ describe("gözlem tazeliği önbellekten önce doğrulanır", () => {
     });
     expect(second).toMatchObject({ ok: true, source: "cache" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("önbellek isabetinde tazelik yeniden doğrulanır", () => {
+  it("depolama TTL'i içinde bile bayatlayan kayıt ATILIR", async () => {
+    /*
+     * Gözlem, izin verilen yaşın 30 sn öncesinde. Depolama TTL'i (60 sn)
+     * dolmadan yaş sınırı aşılır: kayıt yalnızca TTL'e bakılarak dönmemeli.
+     */
+    const observedAt =
+      Math.floor(NOW / 1000) - QUOTE_MAX_OBSERVATION_AGE_MS / 1000 + 30;
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(success(observedAt))
+      .mockResolvedValueOnce(success(Math.floor((NOW + 40_000) / 1000) - 5));
+
+    const first = await getUsdcTryObservation(NOW, {
+      env: ENV,
+      fetchImpl: fetchImpl as never,
+      clock: () => NOW,
+    });
+    expect(first).toMatchObject({ ok: true, source: "provider" });
+
+    // 40 sn sonra: depolama TTL'i (60 sn) HÂLÂ geçerli ama gözlem bayatladı.
+    const later = NOW + 40_000;
+    const second = await getUsdcTryObservation(later, {
+      env: ENV,
+      fetchImpl: fetchImpl as never,
+      clock: () => later,
+    });
+    expect(second).toMatchObject({ ok: true, source: "provider" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("taze kayıt TTL içinde önbellekten döner", async () => {
+    const fetchImpl = vi.fn(async () => success());
+    await getUsdcTryObservation(NOW, {
+      env: ENV,
+      fetchImpl: fetchImpl as never,
+      clock: () => NOW,
+    });
+    const soon = NOW + 10_000;
+    const second = await getUsdcTryObservation(soon, {
+      env: ENV,
+      fetchImpl: fetchImpl as never,
+      clock: () => soon,
+    });
+    expect(second).toMatchObject({ ok: true, source: "cache" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("teklif ömrü gözlem tazeliğiyle sınırlanır", () => {
+  const MINT_ENV = { ...ENV, RATE_QUOTE_SECRET: SECRET };
+
+  it("taze gözlemde normal TTL uygulanır", async () => {
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: (async () => success()) as never,
+      nowMs: NOW,
+      clock: () => NOW,
+    });
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    expect(minted.signed.quote.expiresAt - minted.signed.quote.issuedAt).toBe(
+      QUOTE_LIFETIME_MS / 1000,
+    );
+  });
+
+  it("yaşlanmış gözlemde bitiş gözlem ufkuna kırpılır", async () => {
+    // Gözlem, izin verilen yaşın bitimine 120 sn kala.
+    const observedAt =
+      Math.floor(NOW / 1000) - QUOTE_MAX_OBSERVATION_AGE_MS / 1000 + 120;
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: (async () => success(observedAt)) as never,
+      nowMs: NOW,
+      clock: () => NOW,
+    });
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    const life = minted.signed.quote.expiresAt - minted.signed.quote.issuedAt;
+    expect(life).toBeLessThan(QUOTE_LIFETIME_MS / 1000);
+    expect(life).toBeLessThanOrEqual(120);
+  });
+
+  it("gönderim payından kısa ömürlü teklif ÜRETİLMEZ", async () => {
+    // Gözlem ufkuna yalnızca 30 sn kaldı; 60 sn'lik pay karşılanamaz.
+    const observedAt =
+      Math.floor(NOW / 1000) - QUOTE_MAX_OBSERVATION_AGE_MS / 1000 + 30;
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: (async () => success(observedAt)) as never,
+      nowMs: NOW,
+      clock: () => NOW,
+    });
+    expect(minted).toMatchObject({ ok: false, code: "invalidObservation" });
+    expect(QUOTE_MIN_SEND_MARGIN_SECONDS).toBe(60);
   });
 });

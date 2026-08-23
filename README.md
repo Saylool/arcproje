@@ -160,7 +160,8 @@ soğuma** uygulanır:
   soğutulmaz.
 - Bozuk veya bayat veri asla geçerli başarı olarak önbelleklenmez.
 
-> **Bu koruma yalnızca MVP düzeyindedir.** Soğuma ve önbellek **süreç içidir**;
+> **Bu koruma yalnızca MVP düzeyindedir ve çapraz örnek riski ÇÖZÜLMEMİŞTİR.**
+> Soğuma ve önbellek **süreç içidir**;
 > Vercel sunucusuz örnekleri arasında **paylaşılmaz**. Gerçek ölçekte, birden
 > çok örneğin toplam yukarı akış hızını sınırlayabilmek için paylaşılan bir
 > depo/oran sınırlayıcı (ör. Redis/KV tabanlı) gerekir. Bu odaklı düzeltmede
@@ -185,8 +186,39 @@ azaltır.
 > başınadır: gizli sekmede, başka bir cihazda veya temizlenmiş depoda hiçbir şey
 > hatırlanmaz.
 
-Ayrıca cüzdan akışı açılmadan önce **en az 60 saniye** kalan süre aranır;
-bitişe saniyeler kala gönderim başlatılmaz.
+Sonuç, SDK'nın belgelenmiş `BridgeStep` sözleşmesine göre yorumlanır. Başarı
+için **hem** `state: 'success'` **hem de** geçerli bir işlem hash'i gerekir;
+tek başına geçerli hash yeterli değildir. `chain_revert` / `reverted_onchain`
+gibi kategoriler **asla "ödendi" sayılmaz**, ayrı bir terminal sonuç üretir ve
+hash ArcScan bağlantısı için korunur. `pending`, `noop` veya sınıflandırılamayan
+durumlar belirsizdir.
+
+`kit.send` başladıktan sonra **serbest metin eşleştirilmez**: "insufficient
+confirmations" gibi bir mesaj işlemin gönderilmediğini kanıtlamaz. Yalnızca
+EIP-1193 kodu `4001` veya SDK'nın `errorCategory: 'user_rejected'` sınıfı yayın
+öncesi sayılır — SDK dokümanı da makine kararları için `errorCategory`
+kullanılmasını önerir.
+
+### Gönderim rezervasyonu (aynı tarayıcı)
+
+Gönderime girmeden hemen önce `chainId + requestId` kaydı **eşzamanlı olarak**
+yeniden okunur; `success`, `unknown` veya `pending` görülürse gönderim
+engellenir. Gönderim başlamadan önce `pending` rezervasyonu yazılır, diğer
+sekmeler `storage` olayı ve `BroadcastChannel` ile uyarılır ve mümkünse Web
+Locks ile aynı anda tek gönderim çalışır. Rezervasyon **yalnızca yayın öncesi
+olduğu kanıtlanmış** hatalarda serbest bırakılır; başarı, revert ve belirsiz
+sonuçta korunur.
+
+Cüzdan akışı açılmadan önce **en az 60 saniye** kalan süre aranır; bu kontrol
+preflight ve App Kit kurulumundan **sonra, `kit.send`'den hemen önce** bir kez
+daha yapılır. Teklif basımı da bu payı gözetir: paydan kısa ömürlü bir teklif
+üretilmez.
+
+> **Sınır:** doğrudan bir ERC-20 transferinde, cüzdan istemi açıldıktan sonra
+> son tarihi zincire dayatmanın yolu yoktur. Kullanıcı istemi dakikalarca açık
+> bırakıp onaylarsa işlem, süresi dolmuş bir kurla zincire düşebilir. Gerçek
+> değerli kullanım bunun için zincir üstü son tarih veya ayrık imzala-yayınla
+> mimarisi gerektirir.
 
 ### Gerçek değerli kullanım için eksikler
 
@@ -202,7 +234,12 @@ aşağıdakiler **hâlâ gereklidir** ve bu depoda yoktur:
   imzalanmış bir işlem gecikmeli olarak yayınlanırsa zincir bunu engellemez.
 - **Örnekler arası kota koruması** — CoinGecko sınırları için paylaşılan bir
   Redis/KV sayacı ya da Vercel firewall/rate limiting. Süreç içi soğuma yalnızca
-  tek örneği korur.
+  tek örneği korur; herkese açık bir Vercel dağıtımında bu risk **açık
+  kalmaktadır**.
+- **Aynı tarayıcı dışında tekrar engeli** — `localStorage` rezervasyonu, Web
+  Locks ve `BroadcastChannel` yalnızca tek tarayıcı içindir. Başka cihaz, başka
+  tarayıcı veya gizli sekme hiçbir şey bilmez; yetkili engel için arka uçta ya
+  da zincir üstünde atomik `requestId` tüketimi şarttır.
 
 ### Hata davranışı
 

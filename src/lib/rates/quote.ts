@@ -37,6 +37,14 @@ export const QUOTE_MAX_CLOCK_SKEW_MS = 60 * 1000;
  */
 export const QUOTE_MAX_OBSERVATION_AGE_MS = 10 * 60 * 1000;
 
+/**
+ * Cüzdan akışı açılmadan önce gereken asgari kalan süre.
+ *
+ * Teklif basımı da bunu gözetir: bu paydan daha kısa ömürlü bir teklif zaten
+ * kullanılamaz, üretilmesi anlamsızdır.
+ */
+export const QUOTE_MIN_SEND_MARGIN_SECONDS = 60;
+
 /** Kanonik kur her zaman altı ondalıktır: payda tam olarak 10^6. */
 export const QUOTE_RATE_DECIMALS = 6;
 export const QUOTE_RATE_DENOMINATOR = BigInt(10) ** BigInt(QUOTE_RATE_DECIMALS);

@@ -204,7 +204,7 @@ describe("App Kit sınırı — borçlu tarafı", () => {
   });
 
   it("başarılı gönderim tam olarak imzalı talebe bağlanır", async () => {
-    sendMock.mockResolvedValue({ txHash: TX_HASH, state: "COMPLETE" });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
     const payload = payloadOf();
     const snapshot = snapshotFromPayload(payload);
     const result = await sendArcUsdc("w", snapshot, at(NOW));

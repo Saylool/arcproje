@@ -25,8 +25,12 @@ import {
 import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
 import { createSingleFlight } from "@/lib/arc/single-flight";
 import {
+  clearReservation,
   readSubmission,
   recordSubmission,
+  reserveSubmission,
+  subscribeToSubmissions,
+  withSubmissionLock,
   type SubmissionOutcome,
 } from "@/lib/arc/submission-log";
 import {
@@ -72,9 +76,22 @@ type FlowStatus =
 const LINK_CLASS =
   "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
+/**
+ * Dış kabuk: sorgu parametresini okur ve talebe ÖZEL oturumu `key` ile
+ * bağlar.
+ *
+ * `key` değişince React iç bileşeni tamamen söker ve yeniden kurar. Böylece
+ * A talebine ait durum, ref, kilit ve jetonların B talebine sızması yapısal
+ * olarak imkânsızdır: geç dönen A sonuçları sökülmüş bir örneğe yazar ve
+ * hiçbir etkisi olmaz.
+ */
 export function PaymentRequestPayer() {
   const searchParams = useSearchParams();
   const encoded = searchParams.get(REQUEST_QUERY_PARAM);
+  return <RequestSession key={encoded ?? "__yok__"} encoded={encoded} />;
+}
+
+function RequestSession({ encoded }: { encoded: string | null }) {
 
   const [verifyState, setVerifyState] = useState<VerifyState>({ status: "loading" });
 
@@ -104,6 +121,8 @@ export function PaymentRequestPayer() {
   const runToken = useRef(0);
   const [priorSubmission, setPriorSubmission] =
     useState<SubmissionOutcome | null>(null);
+  /** Revert eden işlemin ArcScan bağlantısı; hash kaybolmasın. */
+  const [revertedTxUrl, setRevertedTxUrl] = useState<string | null>(null);
 
   // Çöz + doğrula. Cüzdan kontrolleri ancak bu geçerse gösterilir.
   useEffect(() => {
@@ -233,15 +252,20 @@ export function PaymentRequestPayer() {
       return;
     }
     let cancelled = false;
-    const run = async () => {
+    const sync = () => {
+      // Kayıt YOKSA da açıkça temizlenir: eski talebin izi kalmaz.
       const prior = readSubmission(snapshot.chainId, snapshot.requestId);
-      if (!cancelled && prior !== null) {
+      if (!cancelled) {
         setPriorSubmission(prior);
       }
     };
+    const run = async () => sync();
     void run();
+    // Başka bir sekmede aynı talep gönderilirse burada da kilitlenir.
+    const unsubscribe = subscribeToSubmissions(sync);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [snapshot]);
 
@@ -461,21 +485,68 @@ export function PaymentRequestPayer() {
       }
 
       setStatus("sending");
-      const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
+
+      /*
+       * Gönderime girmeden HEMEN ÖNCE eşzamanlı son kontrol ve rezervasyon.
+       * Okuma ve yazma araya `await` girmeden yapılır; başka bir sekme aynı
+       * talebi göndermeye başladıysa burada görülür ve gönderim engellenir.
+       */
+      const reservation = reserveSubmission(snapshot.chainId, snapshot.requestId);
+      if (!reservation.ok) {
+        setPriorSubmission(reservation.existing);
+        keepLocked = true;
+        dropReview(
+          reservation.existing === "pending"
+            ? "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu; MetaMask ve ArcScan'i kontrol et."
+            : reservation.existing === "success"
+              ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim kaydı var. Tekrar göndermeden önce ArcScan'de kontrol et."
+              : "Bu talep için bu tarayıcıdan sonucu doğrulanmamış bir gönderim var. Tekrar göndermeden önce MetaMask geçmişini ve ArcScan'i kontrol et.",
+        );
+        return;
+      }
+      setPriorSubmission("pending");
+
+      /*
+       * Web Locks varsa aynı tarayıcıda tek gönderim çalışır. API yoksa
+       * muhafazakâr davranılır; asıl koruma yukarıdaki rezervasyondur.
+       */
+      const guarded = await withSubmissionLock(
+        snapshot.chainId,
+        snapshot.requestId,
+        () => sendArcUsdc(selectedWalletUuid, snapshot),
+      );
+      if (!guarded.ok) {
+        keepLocked = true;
+        dropReview(
+          "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu.",
+        );
+        return;
+      }
+      const outcome = guarded.value;
       if (!outcome.ok) {
         const message = describeArcSendError(outcome.code);
         if (keepsSubmissionLocked(outcome.code)) {
           /*
-           * kit.send ÇAĞRILDI ve sonuç belirsiz. İşlem zincire düşmüş
-           * olabileceği için kilit AÇILMAZ; kullanıcı önce cüzdanını ve
+           * kit.send ÇAĞRILDI ve sonuç belirsiz veya işlem revert etti.
+           * Rezervasyon KORUNUR ve kilit AÇILMAZ; kullanıcı önce cüzdanını ve
            * ArcScan'i kontrol etmelidir.
            */
           recordSubmission(snapshot.chainId, snapshot.requestId, "unknown");
           setPriorSubmission("unknown");
+          setRevertedTxUrl(outcome.explorerUrl ?? null);
           keepLocked = true;
           dropReview(message);
           return;
         }
+
+        /*
+         * Buraya düşen hatalar yayın ÖNCESİ olduğu kanıtlanmış olanlardır
+         * (doğrulama, preflight, süre, cüzdan reddi). Rezervasyon serbest
+         * bırakılır ki kullanıcı düzeltip tekrar deneyebilsin.
+         */
+        clearReservation(snapshot.chainId, snapshot.requestId);
+        setPriorSubmission(null);
+
         // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
         // kurulu bir onay düğmesi ekranda bırakılmaz.
         if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
@@ -722,11 +793,26 @@ export function PaymentRequestPayer() {
         >
           {priorSubmission === "success"
             ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
-            : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
+            : priorSubmission === "pending"
+              ? "Bu talep için bir gönderim sürüyor (bu sekmede veya başka bir sekmede). Aynı ödemeyi iki kez göndermemek için burada beklet."
+              : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
           <strong className="font-semibold">
             Bu kayıt yalnızca bu tarayıcıda tutulur; başka bir cihazdan veya
             gizli sekmeden yapılan gönderimi bilemez.
           </strong>
+          {revertedTxUrl !== null && (
+            <>
+              {" "}
+              <a
+                href={revertedTxUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={LINK_CLASS}
+              >
+                İşlemi ArcScan&apos;de aç
+              </a>
+            </>
+          )}
         </p>
       )}
 

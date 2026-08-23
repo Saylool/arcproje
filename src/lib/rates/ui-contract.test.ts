@@ -178,3 +178,61 @@ describe("belirsiz gönderim sonucu", () => {
     expect(payer).toContain("başka bir cihazdan");
   });
 });
+
+describe("istek oturumu yalıtımı", () => {
+  it("dış kabuk oturumu encoded ile anahtarlar", () => {
+    // key değişince React iç bileşeni tamamen söker: A durumu B'ye sızamaz.
+    expect(payer).toContain("<RequestSession key={encoded ?? \"__yok__\"}");
+    expect(payer).toContain("function RequestSession({ encoded }");
+  });
+
+  it("iç bileşen sorgu parametresini kendisi okumaz", () => {
+    const session = payer.slice(payer.indexOf("function RequestSession("));
+    expect(session).not.toContain("useSearchParams()");
+  });
+
+  it("talebe özel tüm durum iç bileşende tanımlıdır", () => {
+    const session = payer.slice(payer.indexOf("function RequestSession("));
+    for (const state of [
+      "verifyState",
+      "setStatus",
+      "setConfirmed",
+      "setEstimateSummary",
+      "setTransaction",
+      "setSelectedWalletUuid",
+      "priorSubmission",
+      "submitGuard",
+      "estimateGuard",
+      "runToken",
+    ]) {
+      expect(session, state).toContain(state);
+    }
+  });
+
+  it("kayıt yoksa priorSubmission AÇIKÇA temizlenir", () => {
+    // setPriorSubmission(prior) — prior null olabilir; koşullu yazım yok.
+    expect(payer).toContain("setPriorSubmission(prior)");
+    expect(payer).not.toContain("if (!cancelled && prior !== null)");
+  });
+});
+
+describe("gönderim rezervasyonu", () => {
+  it("kit.send'den önce eşzamanlı rezervasyon alınır", () => {
+    const submitBody = payer.slice(payer.indexOf("const submit = async () => {"));
+    const reserveAt = submitBody.indexOf("reserveSubmission(");
+    const sendAt = submitBody.indexOf("sendArcUsdc(");
+    expect(reserveAt).toBeGreaterThanOrEqual(0);
+    expect(reserveAt).toBeLessThan(sendAt);
+  });
+
+  it("yalnızca yayın öncesi hatalarda rezervasyon bırakılır", () => {
+    expect(payer).toContain("clearReservation(");
+    // Kalıcı sonuçta kilit korunur, rezervasyon silinmez.
+    expect(payer).toContain("keepsSubmissionLocked(outcome.code)");
+  });
+
+  it("sekmeler arası değişiklik dinlenir ve Web Locks kullanılır", () => {
+    expect(payer).toContain("subscribeToSubmissions");
+    expect(payer).toContain("withSubmissionLock");
+  });
+});

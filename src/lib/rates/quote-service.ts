@@ -11,6 +11,7 @@ import {
   QUOTE_LIFETIME_MS,
   QUOTE_MAX_CLOCK_SKEW_MS,
   QUOTE_MAX_OBSERVATION_AGE_MS,
+  QUOTE_MIN_SEND_MARGIN_SECONDS,
   QUOTE_RATE_DECIMALS,
   QUOTE_RATE_DENOMINATOR,
   QUOTE_SOURCE,
@@ -132,11 +133,24 @@ export async function getUsdcTryObservation(
   options: FetchQuoteOptions & ClockOptions = {},
 ): Promise<ObservationResult> {
   const clock = options.clock ?? Date.now;
+  /*
+   * Önbellek isabeti TEK BAŞINA yeterli değildir. 60 saniyelik depolama TTL'i
+   * içinde bile gözlem, izin verilen yaş sınırını geçmiş olabilir; o zaman
+   * kayıt atılır ve taze veri çekilir. Aksi hâlde sınırı aşmış bir gözlem
+   * TTL boyunca "geçerli" gibi dönerdi.
+   */
   if (
     cachedObservation !== null &&
     nowMs - cachedObservation.storedAtMs < PROVIDER_CACHE_TTL_MS
   ) {
-    return { ok: true, observation: cachedObservation.observation, source: "cache" };
+    if (isFreshObservation(cachedObservation.observation, nowMs)) {
+      return {
+        ok: true,
+        observation: cachedObservation.observation,
+        source: "cache",
+      };
+    }
+    cachedObservation = null;
   }
 
   // Soğuma penceresindeyken yukarı akışa HİÇ gidilmez.
@@ -290,6 +304,27 @@ export async function mintUsdcTryQuote(
   }
 
   const issuedAt = Math.floor(nowMs / 1000);
+  /*
+   * Teklif ömrü İKİ sınırın küçüğüdür: normal TTL ve gözlemin izin verilen
+   * yaşının bittiği an. Bayat bir gözleme dayanan teklif, sırf yeni basıldı
+   * diye 5 dakika geçerli sayılamaz.
+   */
+  const observationHorizon =
+    observed.observation.observedAt + QUOTE_MAX_OBSERVATION_AGE_MS / 1000;
+  const expiresAt = Math.min(issuedAt + QUOTE_LIFETIME_MS / 1000, observationHorizon);
+
+  /*
+   * Gönderim payından kısa ömürlü bir teklif zaten kullanılamaz; üretilmez.
+   */
+  if (expiresAt - issuedAt < QUOTE_MIN_SEND_MARGIN_SECONDS) {
+    return {
+      ok: false,
+      code: "invalidObservation",
+      cooldown: false,
+      retryAfterSeconds: null,
+    };
+  }
+
   const candidate: RateQuote = {
     quoteVersion: RATE_QUOTE_VERSION,
     quoteId: options.quoteId ?? createQuoteId(),
@@ -300,7 +335,7 @@ export async function mintUsdcTryQuote(
     rateDenominator: rational.denominator,
     observedAt: observed.observation.observedAt,
     issuedAt,
-    expiresAt: issuedAt + QUOTE_LIFETIME_MS / 1000,
+    expiresAt,
   };
 
   // Ürettiğimiz teklif de tükettiğimiz teklifle AYNI katı yoldan geçer.
