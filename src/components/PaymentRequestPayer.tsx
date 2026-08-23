@@ -27,7 +27,7 @@ import { createSingleFlight } from "@/lib/arc/single-flight";
 import {
   SUBMISSION_UNAVAILABLE_MESSAGE,
   clearReservation,
-  readSubmission,
+  readSubmissionView,
   recordSubmission,
   runExclusiveSubmission,
   subscribeToSubmissions,
@@ -250,6 +250,10 @@ function RequestSession({ encoded }: { encoded: string | null }) {
    * Bu tarayıcıda bu talep için daha önce bir gönderim yapılmış mı? YETKİLİ
    * bir kontrol değildir (cihaz başına localStorage); yalnızca aynı tarayıcıda
    * kazara ikinci gönderimi azaltır.
+   *
+   * Sayfa yenilendiğinde veya bileşen yeniden kurulduğunda mutabakat için
+   * gereken işlem hash'i de DEPODAN geri yüklenir; aksi hâlde ArcScan
+   * bağlantısı yalnızca gönderimin yapıldığı sekme ömrü boyunca görünürdü.
    */
   useEffect(() => {
     if (snapshot === null) {
@@ -258,9 +262,12 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     let cancelled = false;
     const sync = () => {
       // Kayıt YOKSA da açıkça temizlenir: eski talebin izi kalmaz.
-      const prior = readSubmission(snapshot.chainId, snapshot.requestId);
+      const view = readSubmissionView(snapshot.chainId, snapshot.requestId);
+      const prior = view?.outcome ?? null;
       if (!cancelled) {
         setPriorSubmission(prior);
+        setPendingTxHash(view?.txHash ?? null);
+        setPendingTxUrl(view?.explorerUrl ?? null);
       }
     };
     const run = async () => sync();
@@ -534,9 +541,18 @@ function RequestSession({ encoded }: { encoded: string | null }) {
            * Rezervasyon KORUNUR ve kilit AÇILMAZ; kullanıcı önce cüzdanını ve
            * ArcScan'i kontrol etmelidir.
            */
-          recordSubmission(snapshot.chainId, snapshot.requestId, "unknown");
-          setPriorSubmission("unknown");
-          // Hash hem revert hem belirsizlikte korunur: ArcScan mutabakatı.
+          /*
+           * Revert ve belirsizlik AYRI kaydedilir: revert zincire ulaşıp
+           * başarısız oldu, belirsizlikte sonuç hiç bilinmiyor. İkisi de
+           * "ödendi" DEĞİLDİR ve ikisi de gönderimi kilitli tutar.
+           */
+          const persisted: SubmissionOutcome =
+            outcome.code === "reverted" ? "reverted" : "unknown";
+          // Hash hem revert hem belirsizlikte KALICI olarak saklanır.
+          recordSubmission(snapshot.chainId, snapshot.requestId, persisted, {
+            txHash: outcome.txHash ?? null,
+          });
+          setPriorSubmission(persisted);
           setPendingTxHash(outcome.txHash ?? null);
           setPendingTxUrl(outcome.explorerUrl ?? null);
           keepLocked = true;
@@ -551,6 +567,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
          */
         clearReservation(snapshot.chainId, snapshot.requestId);
         setPriorSubmission(null);
+        setPendingTxHash(null);
+        setPendingTxUrl(null);
 
         // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
         // kurulu bir onay düğmesi ekranda bırakılmaz.
@@ -561,8 +579,13 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         backToReview(message);
         return;
       }
-      recordSubmission(snapshot.chainId, snapshot.requestId, "success");
+      // Başarı hash'i de saklanır: yenilemeden sonra ArcScan bağlantısı kalır.
+      recordSubmission(snapshot.chainId, snapshot.requestId, "success", {
+        txHash: outcome.value.txHash,
+      });
       setPriorSubmission("success");
+      setPendingTxHash(outcome.value.txHash);
+      setPendingTxUrl(outcome.value.explorerUrl);
       setTransaction(outcome.value);
       setStatus("done");
       // Başarıdan sonra kilit AÇILMAZ: aynı talep ikinci kez gönderilemez.
@@ -800,7 +823,9 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
             : priorSubmission === "pending"
               ? "Bu talep için bir gönderim sürüyor (bu sekmede veya başka bir sekmede). Aynı ödemeyi iki kez göndermemek için burada beklet."
-              : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
+              : priorSubmission === "reverted"
+                ? "Bu talep için yapılan gönderim zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı; tekrar denemeden önce ArcScan'de ve MetaMask geçmişinde kontrol et."
+                : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış: ödeme yapılmış da olabilir, yapılmamış da. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
           <strong className="font-semibold">
             Bu kayıt yalnızca bu tarayıcıda tutulur; başka bir cihazdan veya
             gizli sekmeden yapılan gönderimi bilemez.

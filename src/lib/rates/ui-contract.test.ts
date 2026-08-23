@@ -257,6 +257,37 @@ describe("gönderim rezervasyonu", () => {
   });
 });
 
+describe("mutabakat kaydı yenilemeden sonra da durur", () => {
+  it("durum ve hash DEPODAN geri yüklenir", () => {
+    // Yalnızca bellekteki durum değil, kalıcı kayıt okunur.
+    expect(payer).toContain("readSubmissionView(");
+    expect(payer).toContain("view?.outcome ?? null");
+    expect(payer).toContain("setPendingTxHash(view?.txHash ?? null)");
+    expect(payer).toContain("setPendingTxUrl(view?.explorerUrl ?? null)");
+  });
+
+  it("terminal ve belirsiz sonuçlarda hash KALICI olarak yazılır", () => {
+    expect(payer).toContain("txHash: outcome.txHash ?? null");
+    expect(payer).toContain("txHash: outcome.value.txHash");
+  });
+
+  it("revert, belirsizlikten AYRI kaydedilir", () => {
+    expect(payer).toContain('outcome.code === "reverted" ? "reverted" : "unknown"');
+    // Revert için ayrı, "ödeme yapılmadı" diyen bir metin vardır.
+    expect(payer).toContain('priorSubmission === "reverted"');
+    expect(payer).toMatch(/revert\)\. Ödeme yapılmadı/);
+  });
+
+  it("belirsizlik başarı ya da başarısızlık İDDİA ETMEZ", () => {
+    expect(payer).toContain("ödeme yapılmış da olabilir, yapılmamış da");
+  });
+
+  it("kayıt varken tahmin ve gönderim düğmesi kapalı kalır", () => {
+    // priorSubmission null değilse canEstimate false olur; gönderim başlamaz.
+    expect(payer).toContain("priorSubmission === null");
+  });
+});
+
 describe("çapraz örnek kota sınırı belgelenir", () => {
   it("README süreç içi korumanın Vercel'de yetmediğini söyler", () => {
     expect(readme).toMatch(/süreç içi/i);

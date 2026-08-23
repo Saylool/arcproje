@@ -364,28 +364,92 @@ const PRE_BROADCAST_BALANCE_ERRORS = new Map<string, number>([
 ]);
 
 /**
- * Hata nesnesinin taşıdığı geçerli işlem hash'i.
+ * Kurulu viem'in onay bekleme zaman aşımı hatasının TAM adı.
  *
- * SDK, revert eden işlemin hash'ini `cause.trace.txHash` altına koyar; bazı
- * hatalar doğrudan `txHash` da taşır. İkisi de aranır.
+ * `viem` 2.55.19 (`_esm/errors/transaction.js`):
+ *
+ *   export class WaitForTransactionReceiptTimeoutError extends BaseError {
+ *     constructor({ hash }) {
+ *       super(`Timed out while waiting for transaction with hash "${hash}"
+ *              to be confirmed.`, { name: 'WaitForTransactionReceiptTimeoutError' })
+ *     }
+ *   }
+ *
+ * Hash TİPLİ BİR ALANDA TUTULMAZ; yalnızca cümlenin içinde geçer. Kurulu
+ * `@circle-fin/adapter-viem-v2` bu çağrıyı sarmalamaz (`waitForTransaction`
+ * doğrudan `publicClient.waitForTransactionReceipt` çağırır), yani hata ham
+ * hâliyle `kit.send` dışına çıkar. Bu hash olmadan işlem ArcScan'de
+ * bulunamaz; bu yüzden metin YALNIZCA bu ada birebir uyan hata için ve
+ * YALNIZCA tam cümle kalıbıyla okunur.
  */
-export function readErrorTxHash(error: unknown): string | null {
-  if (typeof error !== "object" || error === null) {
+const VIEM_RECEIPT_TIMEOUT_ERROR = "WaitForTransactionReceiptTimeoutError";
+
+/** Kalıp cümlenin TAMAMINA çapalıdır; genel mesaj taraması yapılmaz. */
+const VIEM_TIMEOUT_HASH_PATTERN =
+  /^Timed out while waiting for transaction with hash "(0x[0-9a-fA-F]{64})" to be confirmed\.$/;
+
+/** `cause` zincirinde bakılacak en fazla düğüm. */
+const MAX_ERROR_CAUSE_DEPTH = 8;
+
+/**
+ * Zaman aşımı hatasından hash kurtarma.
+ *
+ * Önce ileride eklenebilecek TİPLİ alan denenir; yoksa yalnızca adı birebir
+ * tutan hatanın `shortMessage`/`message` ilk satırı tam kalıpla okunur ve
+ * katı hash doğrulayıcısından geçirilir.
+ */
+function readViemTimeoutHash(node: Record<string, unknown>): string | null {
+  if (node.name !== VIEM_RECEIPT_TIMEOUT_ERROR) {
     return null;
   }
-  const direct = (error as { txHash?: unknown }).txHash;
-  if (typeof direct === "string" && isValidTransactionHash(direct)) {
-    return direct;
+  if (isValidTransactionHash(node.hash)) {
+    return node.hash;
   }
-  const cause = (error as { cause?: unknown }).cause;
-  if (typeof cause === "object" && cause !== null) {
-    const trace = (cause as { trace?: unknown }).trace;
+  for (const field of [node.shortMessage, node.message]) {
+    if (typeof field !== "string") {
+      continue;
+    }
+    const match = VIEM_TIMEOUT_HASH_PATTERN.exec(field.split("\n")[0].trim());
+    if (match !== null && isValidTransactionHash(match[1])) {
+      return match[1];
+    }
+  }
+  return null;
+}
+
+/**
+ * Hata nesnesinin taşıdığı geçerli işlem hash'i.
+ *
+ * `cause` zinciri sınırlı derinlikte yürünür; her düğümde önce TİPLİ alanlar
+ * (`txHash`, App Kit'in `trace.txHash`'i) denenir, sonra yalnızca ADI birebir
+ * tutan viem zaman aşımı hatası için tam kalıplı metin okuması yapılır.
+ * Rastgele bir mesajın içinden hash ÇIKARILMAZ.
+ */
+export function readErrorTxHash(error: unknown): string | null {
+  let node: unknown = error;
+  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth += 1) {
+    if (typeof node !== "object" || node === null) {
+      return null;
+    }
+    const record = node as Record<string, unknown>;
+
+    if (isValidTransactionHash(record.txHash)) {
+      return record.txHash;
+    }
+    const trace = record.trace;
     if (typeof trace === "object" && trace !== null) {
-      const nested = (trace as { txHash?: unknown }).txHash;
-      if (typeof nested === "string" && isValidTransactionHash(nested)) {
+      const nested = (trace as Record<string, unknown>).txHash;
+      if (isValidTransactionHash(nested)) {
         return nested;
       }
     }
+
+    const fromTimeout = readViemTimeoutHash(record);
+    if (fromTimeout !== null) {
+      return fromTimeout;
+    }
+
+    node = record.cause;
   }
   return null;
 }

@@ -67,6 +67,7 @@ const {
 const DEBTOR = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 const RECIPIENT = "0x0000000000000000000000000000000000000aBc";
 const TX_HASH = `0x${"ab".repeat(32)}`;
+const OTHER_TX_HASH = `0x${"cd".repeat(32)}`;
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW / 1000);
 const at = (ms: number) => () => ms;
@@ -593,5 +594,131 @@ describe("son güvenlik payı kit.send'den HEMEN ÖNCE ölçülür", () => {
     const result = await sendArcUsdc("w", snapshotOf(), () => NOW + clockOffsetMs);
     expect(result.ok).toBe(true);
     expect(sendMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("viem onay zaman aşımında hash KURTARILIR", () => {
+  /**
+   * Kurulu viem 2.55.19 bu hatayı hash'i yalnızca cümlede taşıyarak kurar ve
+   * `@circle-fin/adapter-viem-v2` onu sarmalamaz. Aşağıdaki gövde kurulu
+   * sürümün ürettiğinin birebir aynısıdır.
+   */
+  function viemTimeoutError(hash: string) {
+    const shortMessage = `Timed out while waiting for transaction with hash "${hash}" to be confirmed.`;
+    return Object.assign(new Error(`${shortMessage}\n\nVersion: viem@2.55.19`), {
+      name: "WaitForTransactionReceiptTimeoutError",
+      shortMessage,
+      details: undefined,
+      version: "viem@2.55.19",
+    });
+  }
+
+  it("bilinen zaman aşımı hatasından hash okunur", () => {
+    expect(readErrorTxHash(viemTimeoutError(TX_HASH))).toBe(TX_HASH);
+  });
+
+  it("sonuç yine de submissionUnknown kalır ve hash korunur", async () => {
+    // Onay alınamadı: işlem zincire düşmüş de olabilir, düşmemiş de.
+    sendMock.mockRejectedValue(viemTimeoutError(TX_HASH));
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("submissionUnknown");
+    expect(result.txHash).toBe(TX_HASH);
+    expect(result.explorerUrl).toBe(`https://testnet.arcscan.app/tx/${TX_HASH}`);
+    expect(keepsSubmissionLocked("submissionUnknown")).toBe(true);
+  });
+
+  it("BOZUK hash içeren zaman aşımı mesajından hash çıkarılmaz", () => {
+    for (const bad of ["0xdead", `0x${"ab".repeat(31)}`, "not-a-hash", ""]) {
+      expect(readErrorTxHash(viemTimeoutError(bad)), bad).toBeNull();
+    }
+  });
+
+  it("bozuk hash'te sonuç yine submissionUnknown, hash YOK", async () => {
+    sendMock.mockRejectedValue(viemTimeoutError("0xdead"));
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
+  });
+
+  it("ALAKASIZ hata mesajındaki hash ASLA çıkarılmaz", () => {
+    // Genel metin taraması yapılsaydı bunlardan hash okunurdu.
+    for (const other of [
+      new Error(`transaction ${TX_HASH} failed somewhere`),
+      Object.assign(new Error(`hash "${TX_HASH}"`), { name: "RpcRequestError" }),
+      Object.assign(
+        new Error(
+          `Timed out while waiting for transaction with hash "${TX_HASH}" to be confirmed.`,
+        ),
+        { name: "SomeOtherTimeoutError" },
+      ),
+      { message: `with hash "${TX_HASH}" to be confirmed.` },
+    ]) {
+      expect(readErrorTxHash(other), String(other)).toBeNull();
+    }
+  });
+
+  it("mesajın ortasına gömülü kalıp kabul edilmez", () => {
+    // Kalıp cümlenin TAMAMINA çapalıdır; öneki olan satır eşleşmez.
+    const shortMessage = `Wrapped: Timed out while waiting for transaction with hash "${TX_HASH}" to be confirmed.`;
+    expect(
+      readErrorTxHash(
+        Object.assign(new Error(shortMessage), {
+          name: "WaitForTransactionReceiptTimeoutError",
+          shortMessage,
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("SARMALANMIŞ (nested cause) zaman aşımı hatasından da okunur", () => {
+    const inner = viemTimeoutError(TX_HASH);
+    const wrapped = Object.assign(new Error("Send failed"), {
+      name: "ONCHAIN_TRANSACTION_FAILED",
+      code: 8002,
+      cause: inner,
+    });
+    expect(readErrorTxHash(wrapped)).toBe(TX_HASH);
+
+    // İki kat sarmalama da çözülür.
+    const outer = Object.assign(new Error("Kit failure"), { cause: wrapped });
+    expect(readErrorTxHash(outer)).toBe(TX_HASH);
+  });
+
+  it("sarmalanmış zaman aşımı uçtan uca hash'i korur", async () => {
+    sendMock.mockRejectedValue(
+      Object.assign(new Error("Send failed"), {
+        name: "ONCHAIN_TRANSACTION_FAILED",
+        code: 8002,
+        cause: viemTimeoutError(TX_HASH),
+      }),
+    );
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+  });
+
+  it("tipli alan varsa metinden ÖNCE o kullanılır", () => {
+    // İleride viem hash'i tipli alanda verirse metin ayrıştırmasına düşülmez.
+    const shortMessage = `Timed out while waiting for transaction with hash "${TX_HASH}" to be confirmed.`;
+    expect(
+      readErrorTxHash(
+        Object.assign(new Error(shortMessage), {
+          name: "WaitForTransactionReceiptTimeoutError",
+          shortMessage,
+          hash: OTHER_TX_HASH,
+        }),
+      ),
+    ).toBe(OTHER_TX_HASH);
+  });
+
+  it("döngüsel cause zinciri sonsuz dönmez", () => {
+    const a: Record<string, unknown> = { name: "A" };
+    const b: Record<string, unknown> = { name: "B", cause: a };
+    a.cause = b;
+    expect(readErrorTxHash(a)).toBeNull();
   });
 });

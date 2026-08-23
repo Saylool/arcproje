@@ -193,19 +193,38 @@ kanıtlamaz.
 | `state: "error"` + geçerli hash + kategori **yok** | **Revert** (kurulu SDK'nın onaylanmış makbuz şekli); asla "ödendi" değil |
 | `chain_revert`, `reverted_onchain`, `partial_reverted` | **Revert**; hash korunur |
 | `pending`, `noop`, tanınmayan durum veya kategori | **Belirsiz**; gönderim kilidi açılmaz, hash korunur |
+| viem `WaitForTransactionReceiptTimeoutError` | **Belirsiz**; hash mesajdan kurtarılır ve korunur |
 | Herhangi bir hata **hash taşıyorsa** | Yayın öncesi sayılmaz; **belirsiz** |
 
 Revert ve belirsizlikte işlem hash'i **kaybedilmez**: yerel kayıtta ve ekranda
 tutulur ki ArcScan'de mutabakat yapılabilsin.
+
+Kurulu `viem` (2.55.19) onay bekleme zaman aşımında hash'i **tipli bir alanda
+tutmaz**, yalnızca hata cümlesinin içinde geçirir; kurulu adaptör de bu çağrıyı
+sarmalamaz. Hash olmadan işlem ArcScan'de bulunamayacağı için bu tek durumda
+metin okunur — ama **yalnızca** hata adı birebir tutuyorsa, **tam cümle
+kalıbıyla** ve katı hash doğrulayıcısıyla. Rastgele bir mesajın içinden hash
+**çıkarılmaz**. Sonuç yine de **belirsizdir**: onay alınamamıştır.
 
 Belirsiz durumda kullanıcıya önce MetaMask işlem geçmişini ve ArcScan'i kontrol
 etmesi söylenir. Ayrıca `chainId + requestId` anahtarlı, **gizli veri
 içermeyen** yerel bir işaretçi tutulur; aynı tarayıcıda kazara ikinci gönderimi
 azaltır.
 
+Kayıt **talep başına ayrı bir `localStorage` anahtarındadır** (`v2` şeması).
+Tek bir ortak dizi kullanılsaydı, farklı talepler eşzamanlı yazdığında "oku,
+diziyi değiştir, yaz" adımları birbirinin kaydını silebilirdi. Yazılan kayıt
+geri okunur ve `chainId`, `requestId`, sonuç, sahip jetonu, zaman damgası ve
+varsa işlem hash'i **birebir** doğrulanır; doğrulanamazsa gönderime
+**geçilmez**. Sonuç `pending` / `success` / `reverted` / `unknown` olarak ayrı
+ayrı saklanır ve geçerli bir işlem hash'i de kalıcıdır: sayfa yenilense bile
+ArcScan mutabakat bağlantısı görünmeye devam eder. Bozuk hash **asla yazılmaz**;
+depoda bozulmuş bir hash sonucu düşürmez, yalnızca bağlantı gösterilmez.
+
 > Bu işaretçi **yetkili bir koruma değildir.** `localStorage` cihaz ve tarayıcı
 > başınadır: gizli sekmede, başka bir cihazda veya temizlenmiş depoda hiçbir şey
-> hatırlanmaz.
+> hatırlanmaz. `unknown` kaydı ödemenin yapıldığını da yapılmadığını da
+> **söylemez**; yalnızca sonucun doğrulanamadığını söyler.
 
 Sonuç, SDK'nın belgelenmiş `BridgeStep` sözleşmesine göre yorumlanır. Başarı
 için **hem** `state: 'success'` **hem de** geçerli bir işlem hash'i gerekir;
