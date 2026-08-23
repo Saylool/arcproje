@@ -57,7 +57,10 @@ const { signPaymentRequest, verifyPaymentRequestSignature } = await import(
 );
 
 const DEBTOR = "0x0000000000000000000000000000000000000aBc";
+import { buildTestQuote } from "@/lib/rates/quote-fixture";
+
 const NOW = 1_700_000_000_000;
+const RATE_40 = buildTestQuote({ nowMs: NOW, wholeRate: 40 });
 /** Belirlenimci zaman kaynağı; üretimde her zaman geçerli zaman kullanılır. */
 const at = (nowMs: number) => () => nowMs;
 
@@ -74,8 +77,8 @@ function payloadFor(
     debtor: DEBTOR,
     debtKey: "b->a",
     tryMinor: 20000,
-    rateNumerator: BigInt(40),
-    rateDenominator: BigInt(1),
+    quote: RATE_40.quote,
+    quoteTag: RATE_40.tag,
     microUsdc: BigInt(5_000_000),
     recipientLabel: "Sen",
     debtorLabel: "Ayşe",

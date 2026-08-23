@@ -61,7 +61,8 @@ const TX_HASH = `0x${"ab".repeat(32)}`;
 /** Belirlenimci test zamanı; üretimde her zaman geçerli zaman kullanılır. */
 const NOW = 1_700_000_000_000;
 const NOW_SECONDS = Math.floor(NOW / 1000);
-const SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60;
+const LIFETIME_SECONDS = 5 * 60;
+const QUOTE_ID = `0x${"5a".repeat(32)}`;
 const REQUEST_ID = `0x${"11".repeat(32)}`;
 const at = (nowMs: number) => () => nowMs;
 
@@ -81,7 +82,9 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     chainId: ARC_TESTNET_CHAIN_ID,
     requestId: REQUEST_ID,
     issuedAt: NOW_SECONDS,
-    expiresAt: NOW_SECONDS + SEVEN_DAYS_SECONDS,
+    expiresAt: NOW_SECONDS + LIFETIME_SECONDS,
+    quoteId: QUOTE_ID,
+    quoteExpiresAt: NOW_SECONDS + LIFETIME_SECONDS,
     ...over,
   });
 }
@@ -198,8 +201,8 @@ describe("App Kit hiç çağrılmayan durumlar", () => {
 describe("başarılı gönderim (taklit App Kit)", () => {
   it("işlemi onaylanan snapshot'a bağlar ve bağlantıyı yerelde kurar", async () => {
     sendMock.mockResolvedValue({
+      state: "success",
       txHash: TX_HASH,
-      state: "COMPLETE",
       // Bağımlılığın döndürdüğü kötü niyetli URL kullanılmamalı.
       explorerUrl: "https://evil.example.com/tx/0xdeadbeef",
     });
@@ -219,7 +222,7 @@ describe("başarılı gönderim (taklit App Kit)", () => {
   });
 
   it("App Kit'e onaylanan snapshot'ın tutarı ve alıcısı gönderilir", async () => {
-    sendMock.mockResolvedValue({ txHash: TX_HASH });
+    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
     await sendArcUsdc("w", snapshotOf(), at(NOW));
     const params = sendMock.mock.calls[0][0];
     expect(params.to).toBe(RECIPIENT);
@@ -228,10 +231,14 @@ describe("başarılı gönderim (taklit App Kit)", () => {
     expect(params.from.chain).toBe("Arc_Testnet");
   });
 
-  it("SDK geçersiz bir hash döndürürse başarı sayılmaz", async () => {
-    sendMock.mockResolvedValue({ txHash: "0xdeadbeef" });
+  it("SDK geçersiz bir hash döndürürse sonuç BELİRSİZ sayılır", async () => {
+    /*
+     * kit.send çağrıldı; hash okunamadı diye "gönderilemedi" denemez —
+     * işlem zincire düşmüş olabilir.
+     */
+    sendMock.mockResolvedValue({ state: "success", txHash: "0xdeadbeef" });
     const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
-    expect(result).toEqual({ ok: false, code: "sendFailed" });
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
   });
 
   it("cüzdan reddi kullanıcıya uygun kodla döner", async () => {

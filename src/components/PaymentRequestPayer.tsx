@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import { shortenWalletAddress, walletAddressesEqual } from "@/lib/arc/address";
@@ -10,7 +10,12 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
-import type { SignedPaymentRequest } from "@/lib/arc/payment-request";
+import {
+  extractQuoteFromPayload,
+  type SignedPaymentRequest,
+} from "@/lib/arc/payment-request";
+import { formatQuoteRate, type RateQuote } from "@/lib/rates/quote";
+import { verifyQuoteWithServer } from "@/lib/rates/client";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import {
   REQUEST_QUERY_PARAM,
@@ -18,8 +23,19 @@ import {
   describeCodecProblem,
 } from "@/lib/arc/request-codec";
 import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
+import { createSingleFlight } from "@/lib/arc/single-flight";
+import {
+  SUBMISSION_UNAVAILABLE_MESSAGE,
+  clearReservation,
+  readSubmissionView,
+  recordSubmission,
+  runExclusiveSubmission,
+  subscribeToSubmissions,
+  type SubmissionOutcome,
+} from "@/lib/arc/submission-log";
 import {
   describeArcSendError,
+  keepsSubmissionLocked,
   estimateArcSend,
   reviewStateAfterSendFailure,
   sendArcUsdc,
@@ -47,16 +63,35 @@ import {
 type VerifyState =
   | { status: "loading" }
   | { status: "invalid"; message: string }
-  | { status: "valid"; request: SignedPaymentRequest };
+  | { status: "valid"; request: SignedPaymentRequest; quote: RateQuote };
 
-type FlowStatus = "idle" | "estimating" | "review" | "sending" | "done";
+type FlowStatus =
+  | "idle"
+  | "estimating"
+  | "review"
+  | "verifying"
+  | "sending"
+  | "done";
 
 const LINK_CLASS =
   "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
 
+/**
+ * Dış kabuk: sorgu parametresini okur ve talebe ÖZEL oturumu `key` ile
+ * bağlar.
+ *
+ * `key` değişince React iç bileşeni tamamen söker ve yeniden kurar. Böylece
+ * A talebine ait durum, ref, kilit ve jetonların B talebine sızması yapısal
+ * olarak imkânsızdır: geç dönen A sonuçları sökülmüş bir örneğe yazar ve
+ * hiçbir etkisi olmaz.
+ */
 export function PaymentRequestPayer() {
   const searchParams = useSearchParams();
   const encoded = searchParams.get(REQUEST_QUERY_PARAM);
+  return <RequestSession key={encoded ?? "__yok__"} encoded={encoded} />;
+}
+
+function RequestSession({ encoded }: { encoded: string | null }) {
 
   const [verifyState, setVerifyState] = useState<VerifyState>({ status: "loading" });
 
@@ -71,6 +106,27 @@ export function PaymentRequestPayer() {
   const [confirmed, setConfirmed] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [transaction, setTransaction] = useState<ArcSendSuccess | null>(null);
+  /*
+   * Yeniden girişe karşı EŞZAMANLI kilit. React durumu asenkron güncellendiği
+   * için iki hızlı tık, ikisi de `status === "review"` görürken submit()'i iki
+   * kez başlatabilirdi. useRef anında yazılır ve ikinci çağrı hemen döner.
+   */
+  const submitGuard = useRef(createSingleFlight());
+  /** Tahmin için AYRI kilit: çift tık iki tahmin boru hattı başlatamaz. */
+  const estimateGuard = useRef(createSingleFlight());
+  /*
+   * Bayatlık jetonu. Hesap/ağ değiştiğinde artar; devam eden bir tahminin geç
+   * dönen sonucu daha YENİ durumun üzerine yazamaz.
+   */
+  const runToken = useRef(0);
+  const [priorSubmission, setPriorSubmission] =
+    useState<SubmissionOutcome | null>(null);
+  /*
+   * Zincire ulaşmış OLABİLECEK işlemin hash'i ve ArcScan bağlantısı.
+   * Revert ve belirsiz sonucun İKİSİNDE de tutulur: mutabakatın tek ipucu.
+   */
+  const [pendingTxHash, setPendingTxHash] = useState<string | null>(null);
+  const [pendingTxUrl, setPendingTxUrl] = useState<string | null>(null);
 
   // Çöz + doğrula. Cüzdan kontrolleri ancak bu geçerse gösterilir.
   useEffect(() => {
@@ -112,7 +168,24 @@ export function PaymentRequestPayer() {
         });
         return;
       }
-      setVerifyState({ status: "valid", request: decoded.request });
+      /*
+       * Cüzdan imzası kurun PİYASADAN geldiğini kanıtlamaz; onu yalnızca
+       * sunucunun HMAC etiketi kanıtlar. Bu yüzden teklif ayrıca sunucuya
+       * doğrulatılır ve geçmeden hiçbir cüzdan kontrolü gösterilmez.
+       */
+      const quote = extractQuoteFromPayload(decoded.request.payload);
+      const quoteCheck = await verifyQuoteWithServer(
+        quote,
+        decoded.request.payload.quoteTag,
+      );
+      if (cancelled) {
+        return;
+      }
+      if (!quoteCheck.ok) {
+        setVerifyState({ status: "invalid", message: quoteCheck.message });
+        return;
+      }
+      setVerifyState({ status: "valid", request: decoded.request, quote });
     };
 
     void run();
@@ -129,11 +202,14 @@ export function PaymentRequestPayer() {
     }
     return subscribeToWallet(selectedWalletUuid, {
       onAccountsChanged: (accounts) => {
+        // Devam eden tahminin sonucu artık geçersizdir.
+        runToken.current += 1;
         setAccount(accounts[0] ?? null);
         setStatus("idle");
         setConfirmed(false);
       },
       onChainChanged: (next) => {
+        runToken.current += 1;
         setChainId(next);
         setStatus("idle");
         setConfirmed(false);
@@ -165,15 +241,52 @@ export function PaymentRequestPayer() {
       requestId: request.payload.requestId,
       issuedAt: request.payload.issuedAt,
       expiresAt: request.payload.expiresAt,
+      quoteId: request.payload.quoteId,
+      quoteExpiresAt: request.payload.quoteExpiresAt,
     });
   }, [request]);
+
+  /*
+   * Bu tarayıcıda bu talep için daha önce bir gönderim yapılmış mı? YETKİLİ
+   * bir kontrol değildir (cihaz başına localStorage); yalnızca aynı tarayıcıda
+   * kazara ikinci gönderimi azaltır.
+   *
+   * Sayfa yenilendiğinde veya bileşen yeniden kurulduğunda mutabakat için
+   * gereken işlem hash'i de DEPODAN geri yüklenir; aksi hâlde ArcScan
+   * bağlantısı yalnızca gönderimin yapıldığı sekme ömrü boyunca görünürdü.
+   */
+  useEffect(() => {
+    if (snapshot === null) {
+      return;
+    }
+    let cancelled = false;
+    const sync = () => {
+      // Kayıt YOKSA da açıkça temizlenir: eski talebin izi kalmaz.
+      const view = readSubmissionView(snapshot.chainId, snapshot.requestId);
+      const prior = view?.outcome ?? null;
+      if (!cancelled) {
+        setPriorSubmission(prior);
+        setPendingTxHash(view?.txHash ?? null);
+        setPendingTxUrl(view?.explorerUrl ?? null);
+      }
+    };
+    const run = async () => sync();
+    void run();
+    // Başka bir sekmede aynı talep gönderilirse burada da kilitlenir.
+    const unsubscribe = subscribeToSubmissions(sync);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [snapshot]);
 
   const onArc = isArcTestnet(chainId);
   const accountMatchesDebtor =
     account !== null && request !== null
       ? walletAddressesEqual(account, request.payload.debtor)
       : false;
-  const busy = status === "estimating" || status === "sending";
+  const busy =
+    status === "estimating" || status === "verifying" || status === "sending";
   const alreadyPaid = transaction !== null;
 
   const scanWallets = useCallback(async () => {
@@ -227,7 +340,8 @@ export function PaymentRequestPayer() {
     onArc &&
     accountMatchesDebtor &&
     !busy &&
-    !alreadyPaid;
+    !alreadyPaid &&
+    priorSubmission === null;
 
   /** İncelemeyi düşürür: onay kutusu ve gönder düğmesi ekrandan kalkar. */
   const dropReview = (message: string) => {
@@ -237,31 +351,89 @@ export function PaymentRequestPayer() {
     setStatus("idle");
   };
 
-  const estimate = async () => {
-    if (!canEstimate || snapshot === null || selectedWalletUuid === null) return;
-    // Talebin süresi bu arada dolmuş olabilir.
-    if (encoded !== null) {
-      const fresh = decodeSignedRequest(encoded, Date.now());
-      if (!fresh.ok) {
-        dropReview(
-          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-        );
-        return;
-      }
-    }
-    setStatus("estimating");
-    setErrorMessage(null);
-    const outcome = await estimateArcSend(selectedWalletUuid, snapshot);
-    if (!outcome.ok) {
-      setErrorMessage(describeArcSendError(outcome.code));
-      setStatus("idle");
-      return;
-    }
-    setEstimateSummary(outcome.value.summary);
+  /** Yeniden denenebilir hatada incelemeye dönülür. */
+  const backToReview = (message: string) => {
+    setErrorMessage(message);
     setStatus("review");
   };
 
+  const estimate = async () => {
+    /*
+     * Tahmin için de EŞZAMANLI kilit, ilk `await`ten ÖNCE. Aksi hâlde iki
+     * hızlı tık iki tahmin boru hattı başlatır ve geç dönen sonuç, erken
+     * dönenin üzerine yazabilirdi.
+     */
+    if (!estimateGuard.current.tryEnter()) {
+      return;
+    }
+    if (
+      !canEstimate ||
+      snapshot === null ||
+      selectedWalletUuid === null ||
+      request === null
+    ) {
+      estimateGuard.current.release();
+      return;
+    }
+
+    // Görünür durum hemen değişir: tahmin düğmesi bu andan itibaren pasiftir.
+    const token = (runToken.current += 1);
+    setStatus("estimating");
+    setErrorMessage(null);
+
+    /** Hesap/ağ değiştiyse veya yeni bir çalışma başladıysa sonuç bayattır. */
+    const isStale = () => token !== runToken.current;
+
+    try {
+      // Talebin süresi bu arada dolmuş olabilir.
+      if (encoded !== null) {
+        const fresh = decodeSignedRequest(encoded, Date.now());
+        if (!fresh.ok) {
+          dropReview(
+            `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+          );
+          return;
+        }
+      }
+      // Sayfa açıkken süresi dolan bir kur tahmine giremez.
+      const quoteBeforeEstimate = await verifyQuoteWithServer(
+        extractQuoteFromPayload(request.payload),
+        request.payload.quoteTag,
+      );
+      if (isStale()) {
+        return;
+      }
+      if (!quoteBeforeEstimate.ok) {
+        dropReview(quoteBeforeEstimate.message);
+        return;
+      }
+
+      const outcome = await estimateArcSend(selectedWalletUuid, snapshot);
+      if (isStale()) {
+        // Geç dönen sonuç daha YENİ durumun üzerine yazılmaz.
+        return;
+      }
+      if (!outcome.ok) {
+        setErrorMessage(describeArcSendError(outcome.code));
+        setStatus("idle");
+        return;
+      }
+      setEstimateSummary(outcome.value.summary);
+      setStatus("review");
+    } finally {
+      estimateGuard.current.release();
+    }
+  };
+
   const submit = async () => {
+    /*
+     * EŞZAMANLI kilit, ilk `await`ten ÖNCE. React durumu asenkron
+     * güncellendiği için iki hızlı tık aynı `status === "review"` değerini
+     * görüp iki submit başlatabilirdi; bu kontrol ikinciyi anında keser.
+     */
+    if (!submitGuard.current.tryEnter()) {
+      return;
+    }
     if (
       status !== "review" ||
       !confirmed ||
@@ -269,58 +441,160 @@ export function PaymentRequestPayer() {
       selectedWalletUuid === null ||
       alreadyPaid
     ) {
+      submitGuard.current.release();
       return;
     }
 
-    /*
-     * İnceleme ile onay arasında zaman geçti. Bağlantı yeniden çözülür, imzası
-     * yeniden doğrulanır ve çözülen talebin incelenen talebin AYNISI olduğu
-     * talep kimliğiyle kanıtlanır. Bu kontroller React tarafındaki ilk savunma
-     * katmanıdır; gönderim sınırı aynı süreyi kendisi de ayrıca ölçer.
-     */
-    if (encoded === null) {
-      dropReview("Bağlantıda ödeme talebi bulunamadı.");
-      return;
-    }
-    const fresh = decodeSignedRequest(encoded, Date.now());
-    if (!fresh.ok) {
-      dropReview(
-        `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-      );
-      return;
-    }
-    const reverified = await verifyPaymentRequestSignature(fresh.request);
-    if (!reverified.ok) {
-      dropReview(
-        "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
-      );
-      return;
-    }
-    if (fresh.request.payload.requestId !== snapshot.requestId) {
-      dropReview(
-        "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
-      );
-      return;
-    }
-
-    setStatus("sending");
+    // Görünür durum hemen değişir: onay düğmesi bu andan itibaren pasiftir.
+    setStatus("verifying");
     setErrorMessage(null);
-    const outcome = await sendArcUsdc(selectedWalletUuid, snapshot);
-    if (!outcome.ok) {
-      const message = describeArcSendError(outcome.code);
-      // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
-      // kurulu bir onay düğmesi ekranda bırakılmaz. Karar sınırın kendi
-      // hata koduna bakan saf fonksiyonundan gelir.
-      if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
-        dropReview(message);
+    let keepLocked = false;
+
+    try {
+      /*
+       * İnceleme ile onay arasında zaman geçti. Bağlantı yeniden çözülür,
+       * imzası yeniden doğrulanır ve çözülen talebin incelenen talebin AYNISI
+       * olduğu talep kimliğiyle kanıtlanır. Bu kontroller React tarafındaki
+       * ilk savunma katmanıdır; gönderim sınırı aynı süreyi kendisi de ölçer.
+       */
+      if (encoded === null) {
+        dropReview("Bağlantıda ödeme talebi bulunamadı.");
         return;
       }
-      setErrorMessage(message);
-      setStatus("review");
-      return;
+      const fresh = decodeSignedRequest(encoded, Date.now());
+      if (!fresh.ok) {
+        dropReview(
+          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
+        );
+        return;
+      }
+      const reverified = await verifyPaymentRequestSignature(fresh.request);
+      if (!reverified.ok) {
+        dropReview(
+          "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
+        );
+        return;
+      }
+      if (fresh.request.payload.requestId !== snapshot.requestId) {
+        dropReview(
+          "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
+        );
+        return;
+      }
+      /*
+       * Kur teklifi gönderimden HEMEN ÖNCE yeniden doğrulanır. Süresi dolmuş
+       * bir kurla kit.send'e gidilmez; gönderim sınırı ayrıca kendi ölçümünü
+       * yapar.
+       */
+      const quoteBeforeSend = await verifyQuoteWithServer(
+        extractQuoteFromPayload(fresh.request.payload),
+        fresh.request.payload.quoteTag,
+      );
+      if (!quoteBeforeSend.ok) {
+        dropReview(quoteBeforeSend.message);
+        return;
+      }
+
+      setStatus("sending");
+
+      /*
+       * Rezervasyon ve `kit.send` TEK BİR exclusive Web Lock içinde çalışır.
+       * `localStorage` tek başına atomik değildir: iki sekme aynı anda okuyup
+       * aynı anda yazabilir. Kilit yoksa, kilit doluysa veya rezervasyon
+       * yazılamıyorsa gönderim HİÇ başlatılmaz (fail-closed).
+       */
+      const guarded = await runExclusiveSubmission(
+        snapshot.chainId,
+        snapshot.requestId,
+        () => sendArcUsdc(selectedWalletUuid, snapshot),
+      );
+      if (!guarded.ok) {
+        keepLocked = true;
+        if (guarded.reason === "unavailable") {
+          // Tarayıcı güvenli gönderimi sağlayamıyor: hiçbir şey gönderilmedi.
+          dropReview(SUBMISSION_UNAVAILABLE_MESSAGE);
+          return;
+        }
+        if (guarded.reason === "busy") {
+          dropReview(
+            "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu; MetaMask ve ArcScan'i kontrol et.",
+          );
+          return;
+        }
+        setPriorSubmission(guarded.existing);
+        dropReview(
+          guarded.existing === "pending"
+            ? "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu; MetaMask ve ArcScan'i kontrol et."
+            : guarded.existing === "success"
+              ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim kaydı var. Tekrar göndermeden önce ArcScan'de kontrol et."
+              : "Bu talep için bu tarayıcıdan sonucu doğrulanmamış bir gönderim var. Tekrar göndermeden önce MetaMask geçmişini ve ArcScan'i kontrol et.",
+        );
+        return;
+      }
+      setPriorSubmission("pending");
+      const outcome = guarded.value;
+      if (!outcome.ok) {
+        const message = describeArcSendError(outcome.code);
+        if (keepsSubmissionLocked(outcome.code)) {
+          /*
+           * kit.send ÇAĞRILDI ve sonuç belirsiz veya işlem revert etti.
+           * Rezervasyon KORUNUR ve kilit AÇILMAZ; kullanıcı önce cüzdanını ve
+           * ArcScan'i kontrol etmelidir.
+           */
+          /*
+           * Revert ve belirsizlik AYRI kaydedilir: revert zincire ulaşıp
+           * başarısız oldu, belirsizlikte sonuç hiç bilinmiyor. İkisi de
+           * "ödendi" DEĞİLDİR ve ikisi de gönderimi kilitli tutar.
+           */
+          const persisted: SubmissionOutcome =
+            outcome.code === "reverted" ? "reverted" : "unknown";
+          // Hash hem revert hem belirsizlikte KALICI olarak saklanır.
+          recordSubmission(snapshot.chainId, snapshot.requestId, persisted, {
+            txHash: outcome.txHash ?? null,
+          });
+          setPriorSubmission(persisted);
+          setPendingTxHash(outcome.txHash ?? null);
+          setPendingTxUrl(outcome.explorerUrl ?? null);
+          keepLocked = true;
+          dropReview(message);
+          return;
+        }
+
+        /*
+         * Buraya düşen hatalar yayın ÖNCESİ olduğu kanıtlanmış olanlardır
+         * (doğrulama, preflight, süre, cüzdan reddi). Rezervasyon serbest
+         * bırakılır ki kullanıcı düzeltip tekrar deneyebilsin.
+         */
+        clearReservation(snapshot.chainId, snapshot.requestId);
+        setPriorSubmission(null);
+        setPendingTxHash(null);
+        setPendingTxUrl(null);
+
+        // Geçerlilik penceresi kapandıysa aynı talep bir daha gönderilemez:
+        // kurulu bir onay düğmesi ekranda bırakılmaz.
+        if (reviewStateAfterSendFailure(outcome.code) === "leaveReview") {
+          dropReview(message);
+          return;
+        }
+        backToReview(message);
+        return;
+      }
+      // Başarı hash'i de saklanır: yenilemeden sonra ArcScan bağlantısı kalır.
+      recordSubmission(snapshot.chainId, snapshot.requestId, "success", {
+        txHash: outcome.value.txHash,
+      });
+      setPriorSubmission("success");
+      setPendingTxHash(outcome.value.txHash);
+      setPendingTxUrl(outcome.value.explorerUrl);
+      setTransaction(outcome.value);
+      setStatus("done");
+      // Başarıdan sonra kilit AÇILMAZ: aynı talep ikinci kez gönderilemez.
+      keepLocked = true;
+    } finally {
+      if (!keepLocked) {
+        submitGuard.current.release();
+      }
     }
-    setTransaction(outcome.value);
-    setStatus("done");
   };
 
   if (verifyState.status === "loading") {
@@ -400,8 +674,17 @@ export function PaymentRequestPayer() {
         <Row label="Alıcı adresi" value={shortenWalletAddress(payload.recipient)} />
         <Row label="Borç (TRY)" value={formatTry(payload.tryMinor)} />
         <Row
-          label="Kur (test)"
-          value={`1 USDC = ${formatRate(payload.rateNumerator, payload.rateDenominator)} TRY`}
+          label="Kur"
+          value={`1 USDC = ${formatQuoteRate(verifyState.quote)} TRY`}
+        />
+        <Row label="Kur kaynağı" value={payload.quoteSource} />
+        <Row
+          label="Kur gözlem zamanı"
+          value={new Date(payload.quoteObservedAt * 1000).toLocaleString("tr-TR")}
+        />
+        <Row
+          label="Kur geçerliliği"
+          value={new Date(payload.quoteExpiresAt * 1000).toLocaleString("tr-TR")}
         />
         <Row
           label="Gönderilecek"
@@ -422,8 +705,13 @@ export function PaymentRequestPayer() {
         />
       </div>
       <p className="text-[11px] leading-relaxed text-slate-400">
-        Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler, kur ve ağ
-        yalnızca talebi imzalayan kişi tarafından belirlenmiştir.
+        Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler ve ağ talebi
+        imzalayan kişi tarafından belirlenmiştir.{" "}
+        <strong className="font-semibold">
+          Cüzdan imzası tek başına kurun piyasa değeri olduğunu kanıtlamaz.
+        </strong>{" "}
+        Kur, sunucu tarafından CoinGecko&apos;dan alınıp imzalanmıştır ve bu
+        sayfa açılırken sunucuya ayrıca doğrulatılmıştır.
       </p>
 
       {/* Cüzdan */}
@@ -526,6 +814,46 @@ export function PaymentRequestPayer() {
         )}
       </div>
 
+      {priorSubmission !== null && transaction === null && (
+        <p
+          role="alert"
+          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+        >
+          {priorSubmission === "success"
+            ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
+            : priorSubmission === "pending"
+              ? "Bu talep için bir gönderim sürüyor (bu sekmede veya başka bir sekmede). Aynı ödemeyi iki kez göndermemek için burada beklet."
+              : priorSubmission === "reverted"
+                ? "Bu talep için yapılan gönderim zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı; tekrar denemeden önce ArcScan'de ve MetaMask geçmişinde kontrol et."
+                : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış: ödeme yapılmış da olabilir, yapılmamış da. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
+          <strong className="font-semibold">
+            Bu kayıt yalnızca bu tarayıcıda tutulur; başka bir cihazdan veya
+            gizli sekmeden yapılan gönderimi bilemez.
+          </strong>
+          {pendingTxHash !== null && (
+            <>
+              {" "}
+              <span className="block pt-1 break-all font-mono text-[11px]">
+                {pendingTxHash}
+              </span>
+            </>
+          )}
+          {pendingTxUrl !== null && (
+            <>
+              {" "}
+              <a
+                href={pendingTxUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={LINK_CLASS}
+              >
+                İşlemi ArcScan&apos;de aç
+              </a>
+            </>
+          )}
+        </p>
+      )}
+
       {/* Tahmin ve onay */}
       {!alreadyPaid && (
         <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
@@ -556,9 +884,9 @@ export function PaymentRequestPayer() {
                   className="mt-0.5 accent-violet-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 />
                 <span>
-                  Yukarıdaki imzalı talebi okudum. Kurun demo kuru olduğunu ve
-                  gönderilecek tutarın Arc Testnet test USDC&apos;si olduğunu
-                  anlıyorum.
+                  Yukarıdaki imzalı talebi okudum. Kurun sunucu tarafından
+                  CoinGecko&apos;dan alınıp doğrulandığını ve gönderilecek
+                  tutarın Arc Testnet test USDC&apos;si olduğunu anlıyorum.
                 </span>
               </label>
               <button
@@ -570,6 +898,12 @@ export function PaymentRequestPayer() {
                 Cüzdanda onayla
               </button>
             </div>
+          )}
+
+          {status === "verifying" && (
+            <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs text-violet-800">
+              Talep ve kur yeniden doğrulanıyor…
+            </p>
           )}
 
           {status === "sending" && (
@@ -616,13 +950,15 @@ export function PaymentRequestPayer() {
       <p aria-live="polite" className="sr-only">
         {status === "estimating"
           ? "İşlem tahmini alınıyor."
-          : status === "sending"
-            ? "İşlem cüzdanda bekleniyor."
-            : transaction !== null
-              ? "Ödeme gönderildi."
-              : errorMessage !== null
-                ? errorMessage
-                : ""}
+          : status === "verifying"
+            ? "Talep ve kur yeniden doğrulanıyor."
+            : status === "sending"
+              ? "İşlem cüzdanda bekleniyor."
+              : transaction !== null
+                ? "Ödeme gönderildi."
+                : errorMessage !== null
+                  ? errorMessage
+                  : ""}
       </p>
 
       <p className="border-t border-slate-100 pt-4 text-[11px] leading-relaxed text-slate-400">
@@ -651,17 +987,6 @@ function formatTry(minor: string): string {
   return `₺${whole.toString()},${fraction}`;
 }
 
-function formatRate(numerator: string, denominator: string): string {
-  const den = BigInt(denominator);
-  const num = BigInt(numerator);
-  if (den === BigInt(1)) {
-    return num.toString();
-  }
-  const whole = num / den;
-  const remainder = num % den;
-  const decimals = denominator.length - 1;
-  return `${whole.toString()},${remainder.toString().padStart(decimals, "0")}`;
-}
 
 /**
  * Adresin TAMAMINI inceleme ve kopyalama. Kısaltılmış gösterim baştaki ve

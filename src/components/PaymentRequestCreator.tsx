@@ -8,10 +8,15 @@ import type { Receipt } from "@/lib/receipt/schema";
 import { normalizeWalletAddress, shortenWalletAddress } from "@/lib/arc/address";
 import {
   convertTryMinorToMicroUsdc,
-  describeRateFailure,
   formatMicroUsdcForDisplay,
-  parseRate,
 } from "@/lib/arc/conversion";
+import { fetchQuoteFromServer, verifyQuoteWithServer } from "@/lib/rates/client";
+import {
+  QUOTE_SOURCE,
+  formatQuoteRate,
+  parseQuoteRate,
+  type SignedRateQuote,
+} from "@/lib/rates/quote";
 import {
   ARC_TESTNET_DOCS_URL,
   ARC_TESTNET_FAUCET_URL,
@@ -23,6 +28,7 @@ import {
   createPaymentRequestPayload,
   describePaymentRequestProblem,
 } from "@/lib/arc/payment-request";
+import { ensureSignedRequestPublishable } from "@/lib/arc/request-publication";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { buildShareUrl, encodeSignedRequest } from "@/lib/arc/request-codec";
 import {
@@ -63,7 +69,17 @@ type GeneratedRequest = {
   url: string;
   /** Üretildiği andaki girdi imzası; girdi değişirse bağlantı geçersiz sayılır. */
   inputsKey: string;
+  /** İmzalı talebin GERÇEK bitiş anı (Unix saniye). */
+  expiresAt: number;
 };
+
+type QuoteState =
+  | { status: "loading" }
+  | { status: "ready"; signed: SignedRateQuote }
+  | { status: "error"; message: string };
+
+/** CoinGecko atıf bağlantısı — sağlayıcı görünür biçimde belirtilir. */
+const COINGECKO_ATTRIBUTION_URL = "https://www.coingecko.com/en/api";
 
 const LINK_CLASS =
   "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
@@ -74,10 +90,12 @@ export function PaymentRequestCreator({
   result,
   onBack,
 }: Props) {
-  const rateInputId = useId();
+  const quoteHeadingId = useId();
 
   const [debtorAddresses, setDebtorAddresses] = useState<Record<string, string>>({});
-  const [rateInput, setRateInput] = useState("");
+  const [quoteState, setQuoteState] = useState<QuoteState>({ status: "loading" });
+  /** Geri sayım ve süre dolumu için saniyelik saat. */
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [selectedDebtIndex, setSelectedDebtIndex] = useState<number | null>(null);
 
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
@@ -99,7 +117,25 @@ export function PaymentRequestCreator({
   );
 
   const isTry = receipt.currency === "TRY";
-  const parsedRate = useMemo(() => parseRate(rateInput), [rateInput]);
+  const signedQuote = quoteState.status === "ready" ? quoteState.signed : null;
+  const nowSeconds = Math.floor(nowMs / 1000);
+  const quoteExpired =
+    signedQuote !== null && nowSeconds >= signedQuote.quote.expiresAt;
+  const quoteSecondsLeft =
+    signedQuote === null
+      ? 0
+      : Math.max(0, signedQuote.quote.expiresAt - nowSeconds);
+  /** Kur artık elle girilmez; kanonik rasyonel değer tekliften okunur. */
+  const parsedRate = useMemo(() => {
+    if (signedQuote === null) {
+      return null;
+    }
+    const parsed = parseQuoteRate(
+      signedQuote.quote.rateNumerator,
+      signedQuote.quote.rateDenominator,
+    );
+    return parsed.ok ? parsed.rate : null;
+  }, [signedQuote]);
   const selectedDebt =
     selectedDebtIndex === null ? null : (result.debts[selectedDebtIndex] ?? null);
 
@@ -112,10 +148,10 @@ export function PaymentRequestCreator({
   const debtorAddress = normalizeWalletAddress(debtorRaw);
 
   const conversion = useMemo(() => {
-    if (selectedDebt === null || !parsedRate.ok) {
+    if (selectedDebt === null || parsedRate === null) {
       return null;
     }
-    return convertTryMinorToMicroUsdc(selectedDebt.amountMinor, parsedRate.rate);
+    return convertTryMinorToMicroUsdc(selectedDebt.amountMinor, parsedRate);
   }, [selectedDebt, parsedRate]);
 
   const onArc = isArcTestnet(chainId);
@@ -124,7 +160,7 @@ export function PaymentRequestCreator({
   const inputsKey = [
     (recipientAddress ?? "").toLowerCase(),
     (debtorAddress ?? "").toLowerCase(),
-    rateInput.trim(),
+    signedQuote?.quote.quoteId ?? "",
     selectedDebt === null ? "" : debtIdentityKey(selectedDebt),
     selectedDebt === null ? "" : String(selectedDebt.amountMinor),
     String(chainId ?? ""),
@@ -138,6 +174,14 @@ export function PaymentRequestCreator({
             entry.debtKey === debtIdentityKey(selectedDebt) &&
             entry.inputsKey === inputsKey,
         ) ?? null);
+
+  const generatedSecondsLeft =
+    currentGenerated === null
+      ? 0
+      : Math.max(0, currentGenerated.expiresAt - nowSeconds);
+  /** Süresi dolan bağlantı kullanılabilir gibi sunulmaz. */
+  const generatedExpired =
+    currentGenerated !== null && generatedSecondsLeft === 0;
 
   const qrSvg = useMemo(
     () => (currentGenerated === null ? null : renderSVG(currentGenerated.url)),
@@ -153,6 +197,45 @@ export function PaymentRequestCreator({
       onChainChanged: (next) => setChainId(next),
     });
   }, [selectedWalletUuid]);
+
+  /**
+   * Kur, bu ekrana gelindiğinde BİR KEZ istenir; her render'da değil.
+   * Yenileme yalnızca kullanıcının açık isteğiyle olur.
+   */
+  const loadQuote = useCallback(async () => {
+    setQuoteState({ status: "loading" });
+    const result = await fetchQuoteFromServer();
+    setQuoteState(
+      result.ok
+        ? { status: "ready", signed: result.signed }
+        : { status: "error", message: result.message },
+    );
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const result = await fetchQuoteFromServer();
+      if (cancelled) {
+        return;
+      }
+      setQuoteState(
+        result.ok
+          ? { status: "ready", signed: result.signed }
+          : { status: "error", message: result.message },
+      );
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** Geri sayım ve süre dolumu için saniyelik saat. */
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const scanWallets = async () => {
     const found = await discoverWallets();
@@ -200,7 +283,9 @@ export function PaymentRequestCreator({
     isTry &&
     !signing &&
     selectedDebt !== null &&
-    parsedRate.ok &&
+    signedQuote !== null &&
+    !quoteExpired &&
+    parsedRate !== null &&
     conversion !== null &&
     conversion.ok &&
     recipientAddress !== null &&
@@ -217,7 +302,8 @@ export function PaymentRequestCreator({
       selectedWalletUuid === null ||
       conversion === null ||
       !conversion.ok ||
-      !parsedRate.ok
+      signedQuote === null ||
+      quoteExpired
     ) {
       return;
     }
@@ -227,8 +313,10 @@ export function PaymentRequestCreator({
       debtor: debtorAddress,
       debtKey: debtIdentityKey(selectedDebt),
       tryMinor: selectedDebt.amountMinor,
-      rateNumerator: parsedRate.rate.numerator,
-      rateDenominator: parsedRate.rate.denominator,
+      // Kur ve teklif meta verisi YALNIZCA sunucu teklifinden gelir;
+      // düzenlenebilir istemci durumu bu alanların yerine geçemez.
+      quote: signedQuote.quote,
+      quoteTag: signedQuote.tag,
       microUsdc: conversion.microUsdc,
       // İsimler kanonik biçime (NFC) indirgenip kod noktası sınırında kesilir;
       // katı doğrulama yine createPaymentRequestPayload içinde yapılır.
@@ -249,6 +337,11 @@ export function PaymentRequestCreator({
     setSigning(true);
     setErrorMessage(null);
     setCopied(false);
+    // Önceki denemeden kalan bağlantı, yeni deneme sırasında gösterilmemeli.
+    const debtKeyForRun = debtIdentityKey(selectedDebt);
+    setGenerated((current) =>
+      current.filter((entry) => entry.debtKey !== debtKeyForRun),
+    );
     const signed = await signPaymentRequest(selectedWalletUuid, built.payload);
     setSigning(false);
 
@@ -257,12 +350,31 @@ export function PaymentRequestCreator({
       return;
     }
 
+    /*
+     * Kullanıcı cüzdanda onaylarken teklifin süresi dolmuş olabilir. Bağlantı
+     * ÜRETİLMEDEN önce imzalanan gövde ve teklifi güncel saatle yeniden
+     * doğrulanır; aynı katı doğrulayıcılar kullanılır, ayrı bir kısmi kontrol
+     * yazılmaz. Sunucu doğrulaması da URL açığa çıkmadan yapılır.
+     */
+    const publishable = await ensureSignedRequestPublishable(
+      signed.request,
+      verifyQuoteWithServer,
+    );
+    if (!publishable.ok) {
+      setErrorMessage(publishable.message);
+      return;
+    }
+
     const encoded = encodeSignedRequest(signed.request);
     const url = buildShareUrl(window.location.origin, encoded);
-    const debtKey = debtIdentityKey(selectedDebt);
     setGenerated((current) => [
-      ...current.filter((entry) => entry.debtKey !== debtKey),
-      { debtKey, url, inputsKey },
+      ...current.filter((entry) => entry.debtKey !== debtKeyForRun),
+      {
+        debtKey: debtKeyForRun,
+        url,
+        inputsKey,
+        expiresAt: signed.request.payload.expiresAt,
+      },
     ]);
   };
 
@@ -424,41 +536,100 @@ export function PaymentRequestCreator({
             )}
           </div>
 
-          {/* 2 — Kur */}
-          <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              2 · Kur (elle girilir)
+          {/* 2 — Kur (sunucudan otomatik) */}
+          <div
+            className="flex flex-col gap-2 border-t border-slate-100 pt-4"
+            aria-labelledby={quoteHeadingId}
+          >
+            <h3
+              id={quoteHeadingId}
+              className="text-xs font-semibold uppercase tracking-wide text-slate-400"
+            >
+              2 · Kur (otomatik)
             </h3>
-            <label htmlFor={rateInputId} className="text-xs text-slate-600">
-              1 USDC kaç TRY?
-            </label>
-            <input
-              id={rateInputId}
-              type="text"
-              inputMode="decimal"
-              value={rateInput}
-              placeholder="örn. 34,25"
-              disabled={signing}
-              onChange={(event) => {
-                setRateInput(event.target.value);
-                setCopied(false);
-              }}
-              aria-invalid={rateInput.trim() !== "" && !parsedRate.ok ? true : undefined}
-              className={`w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:opacity-60 sm:w-48 ${
-                rateInput.trim() !== "" && !parsedRate.ok
-                  ? "border-red-300 bg-red-50/50"
-                  : "border-slate-200 focus:border-violet-300"
-              }`}
-            />
-            {rateInput.trim() !== "" && !parsedRate.ok && (
-              <p className="text-[11px] leading-snug text-red-600">
-                {describeRateFailure(parsedRate.reason)}
-              </p>
+
+            {quoteState.status === "loading" && (
+              <p className="text-xs text-slate-500">Kur alınıyor…</p>
             )}
-            <p className="rounded-2xl bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
-              Bu kur <strong className="font-semibold">senin elle girdiğin demo
-              kurudur.</strong> Uygulama canlı kur çekmez ve kur imzalı talebe
-              yazılır.
+
+            {quoteState.status === "error" && (
+              <div className="flex flex-col items-start gap-2">
+                <p
+                  role="alert"
+                  className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+                >
+                  {quoteState.message}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void loadQuote()}
+                  className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                >
+                  Kuru yeniden dene
+                </button>
+              </div>
+            )}
+
+            {signedQuote !== null && (
+              <div className="flex flex-col gap-2">
+                <dl className="flex flex-col gap-1 rounded-2xl border border-slate-200 p-3 text-xs">
+                  <Row
+                    label="Kur"
+                    value={`1 USDC = ${formatQuoteRate(signedQuote.quote)} TRY`}
+                    strong
+                  />
+                  <Row
+                    label="Güncelleme"
+                    value={new Date(
+                      signedQuote.quote.observedAt * 1000,
+                    ).toLocaleString("tr-TR")}
+                  />
+                  <Row
+                    label="Geçerlilik"
+                    value={
+                      quoteExpired
+                        ? "süresi doldu"
+                        : `${Math.floor(quoteSecondsLeft / 60)} dk ${quoteSecondsLeft % 60} sn`
+                    }
+                  />
+                </dl>
+
+                {quoteExpired ? (
+                  <p
+                    role="alert"
+                    className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900"
+                  >
+                    Kur teklifinin süresi doldu. Talep oluşturmak için kuru
+                    yenile.
+                  </p>
+                ) : (
+                  <p className="text-[11px] leading-relaxed text-slate-500">
+                    Kur sunucuda alınır ve sunucu tarafından imzalanır; ödeme
+                    talebine bu imzalı teklif yazılır. Borçlunun tarayıcısı kuru
+                    ayrıca sunucuya doğrulatır.
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => void loadQuote()}
+                  disabled={signing}
+                  className="self-start rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Kuru yenile
+                </button>
+              </div>
+            )}
+
+            <p className="text-[11px] leading-relaxed text-slate-400">
+              <a
+                href={COINGECKO_ATTRIBUTION_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={LINK_CLASS}
+              >
+                Data provided by CoinGecko
+              </a>
             </p>
           </div>
 
@@ -543,7 +714,15 @@ export function PaymentRequestCreator({
               </h3>
               <dl className="flex flex-col gap-1 rounded-2xl border border-slate-200 p-3 text-xs">
                 <Row label="Borç (TRY)" value={formatMinorForDisplay(selectedDebt.amountMinor, receipt.currency)} />
-                <Row label="Kur (test)" value={`1 USDC = ${rateInput} TRY`} />
+                <Row
+                  label="Kur"
+                  value={
+                    signedQuote === null
+                      ? "—"
+                      : `1 USDC = ${formatQuoteRate(signedQuote.quote)} TRY`
+                  }
+                />
+                <Row label="Kur kaynağı" value={QUOTE_SOURCE} />
                 <Row
                   label="İstenecek tutar"
                   value={`${formatMicroUsdcForDisplay(conversion.microUsdc)} USDC`}
@@ -609,6 +788,7 @@ export function PaymentRequestCreator({
                 <button
                   type="button"
                   onClick={copyLink}
+                  disabled={generatedExpired}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 >
                   {copied ? "Kopyalandı" : "Talep bağlantısını kopyala"}
@@ -616,6 +796,7 @@ export function PaymentRequestCreator({
                 <button
                   type="button"
                   onClick={shareLink}
+                  disabled={generatedExpired}
                   className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
                 >
                   Paylaş
@@ -624,11 +805,32 @@ export function PaymentRequestCreator({
 
               <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
                 Bu bağlantı kişi adlarını, cüzdan adreslerini ve ödeme tutarını
-                içerir; yalnızca ilgili borçluyla paylaş. Bağlantı 7 gün
-                geçerlidir. Bağlantı teknik olarak tekrar açılabilir — aynı borç
-                için ikinci bir ödeme yapılmasını engelleyen bir sunucu veya
-                zincir üstü kayıt yoktur.
+                içerir; yalnızca ilgili borçluyla paylaş.{" "}
+                <strong className="font-semibold">
+                  Bağlantı yalnızca kur teklifi geçerli olduğu sürece —
+                  en fazla 5 dakika — kullanılabilir.
+                </strong>{" "}
+                Bitiş:{" "}
+                {new Date(currentGenerated.expiresAt * 1000).toLocaleString(
+                  "tr-TR",
+                )}
+                {generatedExpired
+                  ? " (süresi doldu)"
+                  : ` (${Math.floor(generatedSecondsLeft / 60)} dk ${generatedSecondsLeft % 60} sn kaldı)`}
+                . Bağlantı teknik olarak tekrar açılabilir — aynı borç için
+                ikinci bir ödeme yapılmasını engelleyen bir sunucu veya zincir
+                üstü kayıt yoktur.
               </p>
+
+              {generatedExpired && (
+                <p
+                  role="alert"
+                  className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-700"
+                >
+                  Bu bağlantının süresi doldu ve artık ödenemez. Kuru yenileyip
+                  yeni bir talep imzala.
+                </p>
+              )}
             </div>
           )}
 
