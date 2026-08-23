@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
+  SUBMISSION_UNAVAILABLE_MESSAGE,
   clearReservation,
   readSubmission,
   recordSubmission,
-  reserveSubmission,
+  runExclusiveSubmission,
   submissionKey,
+  type LockManagerLike,
   type StorageLike,
 } from "./submission-log";
 
@@ -18,6 +20,31 @@ function memoryStorage(): StorageLike & { dump: () => string | null } {
       value = v;
     },
     dump: () => value,
+  };
+}
+
+/**
+ * Web Locks taklidi.
+ *
+ * `ifAvailable: true` sözleşmesi: kilit BAŞKASINDAYSA geri çağırma `null` ile
+ * HEMEN çalışır. Tek bir yönetici tüm sekmeleri temsil eder (aynı köken).
+ */
+function fakeLocks(): LockManagerLike & { held: Set<string> } {
+  const held = new Set<string>();
+  return {
+    held,
+    request: async (name, options, callback) => {
+      if (held.has(name)) {
+        await callback(null);
+        return;
+      }
+      held.add(name);
+      try {
+        await callback({ name, mode: options.mode ?? "exclusive" });
+      } finally {
+        held.delete(name);
+      }
+    },
   };
 }
 
@@ -77,6 +104,7 @@ describe("yerel gönderim işaretçisi", () => {
 
   it("depo yoksa sessizce çalışır", () => {
     expect(() => recordSubmission(CHAIN, REQUEST, "success", null)).not.toThrow();
+    expect(recordSubmission(CHAIN, REQUEST, "success", null)).toBe(false);
     expect(readSubmission(CHAIN, REQUEST, null)).toBeNull();
   });
 
@@ -88,7 +116,7 @@ describe("yerel gönderim işaretçisi", () => {
     expect(readSubmission(CHAIN, REQUEST, broken)).toBeNull();
   });
 
-  it("yazma hatası atmaz", () => {
+  it("yazma hatası atmaz ama BAŞARI SAYILMAZ", () => {
     const failing: StorageLike = {
       getItem: () => null,
       setItem: () => {
@@ -96,46 +124,18 @@ describe("yerel gönderim işaretçisi", () => {
       },
     };
     expect(() => recordSubmission(CHAIN, REQUEST, "success", failing)).not.toThrow();
-  });
-});
-
-describe("gönderim rezervasyonu", () => {
-  it("boş kayıtta rezervasyon alınır ve pending yazılır", () => {
-    const storage = memoryStorage();
-    expect(reserveSubmission(CHAIN, REQUEST, storage)).toEqual({ ok: true });
-    expect(readSubmission(CHAIN, REQUEST, storage)).toBe("pending");
+    expect(recordSubmission(CHAIN, REQUEST, "success", failing)).toBe(false);
   });
 
-  it("mevcut kayıt varsa rezervasyon REDDEDİLİR", () => {
-    for (const existing of ["pending", "success", "unknown"] as const) {
-      const storage = memoryStorage();
-      recordSubmission(CHAIN, REQUEST, existing, storage);
-      expect(reserveSubmission(CHAIN, REQUEST, storage), existing).toEqual({
-        ok: false,
-        existing,
-      });
-    }
-  });
-
-  it("ikinci rezervasyon denemesi kazara ikinci gönderimi engeller", () => {
-    const storage = memoryStorage();
-    expect(reserveSubmission(CHAIN, REQUEST, storage).ok).toBe(true);
-    // Başka bir sekme aynı anda denerse aynı depoyu görür.
-    expect(reserveSubmission(CHAIN, REQUEST, storage)).toEqual({
-      ok: false,
-      existing: "pending",
-    });
-  });
-
-  it("farklı talep engellenmez", () => {
-    const storage = memoryStorage();
-    reserveSubmission(CHAIN, REQUEST, storage);
-    expect(reserveSubmission(CHAIN, OTHER, storage).ok).toBe(true);
+  it("sessizce yok sayılan yazma da başarısız sayılır", () => {
+    // `setItem` hata atmıyor ama içerik kalıcı olmuyor (bazı gizli modlar).
+    const silent: StorageLike = { getItem: () => null, setItem: () => undefined };
+    expect(recordSubmission(CHAIN, REQUEST, "success", silent)).toBe(false);
   });
 
   it("rezervasyon yalnızca pending kaydı için temizlenir", () => {
     const storage = memoryStorage();
-    reserveSubmission(CHAIN, REQUEST, storage);
+    recordSubmission(CHAIN, REQUEST, "pending", storage);
     clearReservation(CHAIN, REQUEST, storage);
     expect(readSubmission(CHAIN, REQUEST, storage)).toBeNull();
   });
@@ -149,15 +149,299 @@ describe("gönderim rezervasyonu", () => {
     }
   });
 
-  it("depo yoksa rezervasyon engellemez (koruma yetkili değildir)", () => {
-    expect(reserveSubmission(CHAIN, REQUEST, null)).toEqual({ ok: true });
+  it("depo yoksa temizleme atmaz", () => {
     expect(() => clearReservation(CHAIN, REQUEST, null)).not.toThrow();
   });
+});
 
-  it("pending kaydı da gizli veri içermez", () => {
+describe("atomik gönderim kilidi", () => {
+  it("kilit alınırsa rezervasyon yazılır ve iş çalışır", async () => {
     const storage = memoryStorage();
-    reserveSubmission(CHAIN, REQUEST, storage);
+    const locks = fakeLocks();
+    const send = vi.fn(async () => "gönderildi");
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks,
+      nowMs: 1_700_000_000_000,
+    });
+
+    expect(result).toEqual({ ok: true, value: "gönderildi" });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBe("pending");
+    // Kilit iş bitince bırakılır.
+    expect(locks.held.size).toBe(0);
+  });
+
+  it("pending kaydı da gizli veri içermez", async () => {
+    const storage = memoryStorage();
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => 1, {
+      storage,
+      locks: fakeLocks(),
+    });
     const parsed = JSON.parse(storage.dump() as string) as Record<string, unknown>[];
     expect(Object.keys(parsed[0]).sort()).toEqual(["at", "key", "outcome"]);
+  });
+
+  it("EŞZAMANLI iki sekmede en fazla BİR kit.send olur", async () => {
+    // Tek depo + tek kilit yöneticisi = aynı tarayıcıdaki iki sekme.
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    const send = vi.fn(
+      async () => new Promise((resolve) => setTimeout(() => resolve("tx"), 5)),
+    );
+
+    const [first, second] = await Promise.all([
+      runExclusiveSubmission(CHAIN, REQUEST, send, { storage, locks }),
+      runExclusiveSubmission(CHAIN, REQUEST, send, { storage, locks }),
+    ]);
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const results = [first, second];
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: "busy" }]);
+  });
+
+  it("ÜÇ sekme yarışsa bile tek gönderim olur", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    const send = vi.fn(
+      async () => new Promise((resolve) => setTimeout(() => resolve("tx"), 5)),
+    );
+
+    const results = await Promise.all(
+      [0, 1, 2].map(() =>
+        runExclusiveSubmission(CHAIN, REQUEST, send, { storage, locks }),
+      ),
+    );
+
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(results.filter((r) => r.ok)).toHaveLength(1);
+  });
+
+  it("kilit BAŞKA sekmedeyse gönderim yapılmaz", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    // Başka bir sekme kilidi tutuyor.
+    locks.held.add(`hesabi-bol.send.${submissionKey(CHAIN, REQUEST)}`);
+    const send = vi.fn(async () => "tx");
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "busy" });
+    expect(send).not.toHaveBeenCalled();
+    // Kilit alınamadığı için rezervasyon da yazılmaz.
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBeNull();
+  });
+
+  it("Web Locks YOKSA fail-closed: gönderim yapılmaz", async () => {
+    const storage = memoryStorage();
+    const send = vi.fn(async () => "tx");
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks: null,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(send).not.toHaveBeenCalled();
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBeNull();
+  });
+
+  it("kilit isteği hata atarsa fail-closed olur", async () => {
+    const storage = memoryStorage();
+    const send = vi.fn(async () => "tx");
+    const throwing: LockManagerLike = {
+      request: async () => {
+        // Güvenli olmayan bağlamda Web Locks erişimi hata atabilir.
+        throw new Error("SecurityError");
+      },
+    };
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks: throwing,
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("DEPO yoksa fail-closed: gönderim yapılmaz", async () => {
+    const send = vi.fn(async () => "tx");
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage: null,
+      locks: fakeLocks(),
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rezervasyon YAZILAMAZSA gönderime geçilmez", async () => {
+    const send = vi.fn(async () => "tx");
+    const failing: StorageLike = {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error("kota dolu");
+      },
+    };
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage: failing,
+      locks: fakeLocks(),
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("SESSİZCE yutulan yazma hatasından sonra da gönderim yapılmaz", async () => {
+    const send = vi.fn(async () => "tx");
+    // `setItem` hata atmaz ama kalıcı olmaz: kilit gibi güvenilemez.
+    const silent: StorageLike = { getItem: () => null, setItem: () => undefined };
+
+    const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage: silent,
+      locks: fakeLocks(),
+    });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("var olan her kayıt gönderimi engeller", async () => {
+    for (const existing of ["pending", "success", "unknown"] as const) {
+      const storage = memoryStorage();
+      recordSubmission(CHAIN, REQUEST, existing, storage);
+      const send = vi.fn(async () => "tx");
+
+      const result = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+        storage,
+        locks: fakeLocks(),
+      });
+
+      expect(result, existing).toEqual({ ok: false, reason: "recorded", existing });
+      expect(send, existing).not.toHaveBeenCalled();
+    }
+  });
+
+  it("farklı talep engellenmez", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => 1, { storage, locks });
+    const send = vi.fn(async () => 2);
+    const result = await runExclusiveSubmission(CHAIN, OTHER, send, {
+      storage,
+      locks,
+    });
+    expect(result).toEqual({ ok: true, value: 2 });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("iş fırlatırsa hata aktarılır ve rezervasyon KORUNUR", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+
+    await expect(
+      runExclusiveSubmission(
+        CHAIN,
+        REQUEST,
+        async () => {
+          throw new Error("kit.send patladı");
+        },
+        { storage, locks },
+      ),
+    ).rejects.toThrow("kit.send patladı");
+
+    // Yayın olmuş OLABİLİR: kayıt silinmez, ikinci deneme engellenir.
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBe("pending");
+    expect(locks.held.size).toBe(0);
+  });
+
+  it("başarı sonrası kayıt success'e yükseltilir ve tekrar engellenir", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => "tx", {
+      storage,
+      locks,
+    });
+    recordSubmission(CHAIN, REQUEST, "success", storage);
+
+    const send = vi.fn(async () => "tx2");
+    const again = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks,
+    });
+    expect(again).toEqual({ ok: false, reason: "recorded", existing: "success" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("belirsiz sonuçtan sonra tekrar denenemez", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => "tx", {
+      storage,
+      locks,
+    });
+    recordSubmission(CHAIN, REQUEST, "unknown", storage);
+
+    const send = vi.fn(async () => "tx2");
+    const again = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks,
+    });
+    expect(again).toEqual({ ok: false, reason: "recorded", existing: "unknown" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("revert sonrası kayıt korunduğu için tekrar denenemez", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+    // Revert de kalıcıdır: rezervasyon "unknown" olarak korunur.
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => "revert", {
+      storage,
+      locks,
+    });
+    recordSubmission(CHAIN, REQUEST, "unknown", storage);
+
+    const send = vi.fn(async () => "tx2");
+    expect(
+      await runExclusiveSubmission(CHAIN, REQUEST, send, { storage, locks }),
+    ).toEqual({ ok: false, reason: "recorded", existing: "unknown" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("yayın ÖNCESİ ret sonrası rezervasyon bırakılır ve yeniden denenebilir", async () => {
+    const storage = memoryStorage();
+    const locks = fakeLocks();
+
+    await runExclusiveSubmission(CHAIN, REQUEST, async () => "rejected", {
+      storage,
+      locks,
+    });
+    // Cüzdan reddi kanıtlanmış yayın öncesi hatadır: kayıt silinir.
+    clearReservation(CHAIN, REQUEST, storage);
+    expect(readSubmission(CHAIN, REQUEST, storage)).toBeNull();
+
+    const send = vi.fn(async () => "tx2");
+    const retry = await runExclusiveSubmission(CHAIN, REQUEST, send, {
+      storage,
+      locks,
+    });
+    expect(retry).toEqual({ ok: true, value: "tx2" });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("tarayıcı güvenlik uyarısı", () => {
+  it("Türkçedir ve gönderimin YAPILMADIĞINI söyler", () => {
+    expect(SUBMISSION_UNAVAILABLE_MESSAGE).toMatch(/Web Locks/);
+    expect(SUBMISSION_UNAVAILABLE_MESSAGE).toMatch(/BAŞLATILMADI/);
+    expect(SUBMISSION_UNAVAILABLE_MESSAGE).toMatch(/iki kez/);
   });
 });

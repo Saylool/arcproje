@@ -185,7 +185,10 @@ export type ArcSendResult<T> =
   | {
       ok: false;
       code: ArcSendErrorCode;
-      /** Revert gibi zincire ulaşmış sonuçlarda ArcScan için korunur. */
+      /**
+       * Revert VEYA belirsiz sonuçta ArcScan mutabakatı için korunur.
+       * `kit.send` bir hash döndürdüyse kaybedilmez.
+       */
       txHash?: string;
       explorerUrl?: string | null;
     };
@@ -263,10 +266,11 @@ export type SendResultClassification =
   | { kind: "success"; txHash: string }
   | { kind: "reverted"; txHash: string | null }
   | { kind: "rejected" }
-  | { kind: "unknown" };
+  /** Sonuç kanıtlanamadı; hash varsa ArcScan mutabakatı için KORUNUR. */
+  | { kind: "unknown"; txHash: string | null };
 
-/** Zincire ulaşıp başarısız olmuş sayılan hata kategorileri. */
-const REVERTED_CATEGORIES = new Set([
+/** Zincire ulaşıp başarısız olmuş sayılan BELGELENMİŞ hata kategorileri. */
+const REVERTED_CATEGORIES = new Set<string>([
   "chain_revert",
   "reverted_onchain",
   "partial_reverted",
@@ -274,7 +278,7 @@ const REVERTED_CATEGORIES = new Set([
 
 export function classifySendResult(result: unknown): SendResultClassification {
   if (typeof result !== "object" || result === null) {
-    return { kind: "unknown" };
+    return { kind: "unknown", txHash: null };
   }
   const step = result as {
     state?: unknown;
@@ -288,46 +292,127 @@ export function classifySendResult(result: unknown): SendResultClassification {
 
   if (step.state === "success") {
     // Durum başarı ama hash yoksa/bozuksa sonucu doğrulayamayız.
-    return txHash === null ? { kind: "unknown" } : { kind: "success", txHash };
+    return txHash === null
+      ? { kind: "unknown", txHash: null }
+      : { kind: "success", txHash };
   }
 
   if (step.state === "error") {
-    if (step.errorCategory === "user_rejected") {
-      // Belgelenmiş kullanıcı reddi: yayın öncesi, yeniden denenebilir.
-      return { kind: "rejected" };
+    const category = step.errorCategory;
+    /*
+     * Kullanıcı reddi YALNIZCA hiç geçerli hash yokken yayın öncesi sayılır.
+     * Hash varsa bir işlem zincire gitmiştir; "reddedildi" deyip tekrar
+     * denemeye izin vermek aynı ödemeyi ikinci kez gönderebilirdi.
+     */
+    if (category === "user_rejected") {
+      return txHash === null
+        ? { kind: "rejected" }
+        : { kind: "unknown", txHash };
     }
-    if (
-      typeof step.errorCategory === "string" &&
-      REVERTED_CATEGORIES.has(step.errorCategory)
-    ) {
+    if (typeof category === "string" && REVERTED_CATEGORIES.has(category)) {
       return { kind: "reverted", txHash };
     }
-    // Sınıflandırılamayan hata: işlem gitmiş olabilir.
-    return { kind: "unknown" };
+    /*
+     * KURULU SDK'nın (@circle-fin/app-kit 1.12.1) aynı zincir `send` yolu
+     * makbuzu bekler ve durumu doğrudan makbuzdan türetir:
+     *   state: receipt.status === 'success' ? 'success' : 'error'
+     * Bu yolda `errorCategory` HİÇ set edilmez. Dolayısıyla "error + geçerli
+     * hash + kategori yok", ONAYLANMIŞ bir revert makbuzudur: işlem zincire
+     * ulaştı ve başarısız oldu. Ödendi sayılmaz; belirsiz de değildir.
+     */
+    if (txHash !== null && category === undefined) {
+      return { kind: "reverted", txHash };
+    }
+    // Kalan kategoriler yayın öncesi olduğunu KANITLAMAZ; hash korunur.
+    return { kind: "unknown", txHash };
   }
 
-  // 'pending', 'noop' veya tanınmayan durum: sonuç belirsizdir.
-  return { kind: "unknown" };
+  // 'pending', 'noop' veya tanınmayan durum: belirsiz, hash korunur.
+  return { kind: "unknown", txHash };
 }
 
 /**
  * `kit.send` ÇAĞRILDIKTAN sonra fırlayan istisnanın sınıflandırılması.
  *
- * Yalnızca güvenilir biçimde tanınan cüzdan reddi (EIP-1193 kodu 4001) yayın
- * öncesi sayılır. Serbest metin eşleştirmesi YAPILMAZ: "insufficient
- * confirmations" gibi bir mesaj işlemin gönderilmediğini kanıtlamaz.
+ * Yayın ÖNCESİ sayılmanın İKİ koşulu vardır:
+ * 1. Hata geçerli bir işlem hash'i TAŞIMAMALIDIR. Hash varsa bir şey zincire
+ *    gitmiştir ve hiçbir "yeniden denenebilir" sınıf uygulanmaz.
+ * 2. Sinyal BELGELENMİŞ ve YAPISAL olmalıdır: EIP-1193 kodu 4001, App Kit
+ *    `errorCategory: "user_rejected"` ya da kurulu SDK'nın bakiye
+ *    `KitError` ad+kod çifti (9001/9002/9003).
+ *
+ * Serbest metin eşleştirmesi YAPILMAZ: "insufficient confirmations" gibi bir
+ * mesaj işlemin gönderilmediğini kanıtlamaz. Kalan her şey belirsizdir.
  */
-export function classifySendException(
-  error: unknown,
-): "rejected" | "submissionUnknown" {
-  if (typeof error === "object" && error !== null) {
-    const code = (error as { code?: unknown }).code;
-    if (code === 4001) {
-      return "rejected";
+export type SendExceptionClass =
+  | "rejected"
+  | "insufficientFunds"
+  | "submissionUnknown";
+
+/**
+ * Kurulu SDK'nın YAYIN ÖNCESİ, yapısal bakiye hataları (ad + sayısal kod).
+ *
+ * `@circle-fin/app-kit` 1.12.1'de bu `KitError`'lar `prepareSend` içindeki
+ * bakiye doğrulamasından gelir; `execute()` henüz çağrılmamıştır, yani hiçbir
+ * işlem yayınlanmamıştır. Ad ve kod BİRLİKTE eşleşmelidir; mesaj metnine
+ * asla bakılmaz.
+ */
+const PRE_BROADCAST_BALANCE_ERRORS = new Map<string, number>([
+  ["BALANCE_INSUFFICIENT_TOKEN", 9001],
+  ["BALANCE_INSUFFICIENT_GAS", 9002],
+  ["BALANCE_INSUFFICIENT_ALLOWANCE", 9003],
+]);
+
+/**
+ * Hata nesnesinin taşıdığı geçerli işlem hash'i.
+ *
+ * SDK, revert eden işlemin hash'ini `cause.trace.txHash` altına koyar; bazı
+ * hatalar doğrudan `txHash` da taşır. İkisi de aranır.
+ */
+export function readErrorTxHash(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+  const direct = (error as { txHash?: unknown }).txHash;
+  if (typeof direct === "string" && isValidTransactionHash(direct)) {
+    return direct;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  if (typeof cause === "object" && cause !== null) {
+    const trace = (cause as { trace?: unknown }).trace;
+    if (typeof trace === "object" && trace !== null) {
+      const nested = (trace as { txHash?: unknown }).txHash;
+      if (typeof nested === "string" && isValidTransactionHash(nested)) {
+        return nested;
+      }
     }
-    const category = (error as { errorCategory?: unknown }).errorCategory;
-    if (category === "user_rejected") {
-      return "rejected";
+  }
+  return null;
+}
+
+export function classifySendException(error: unknown): SendExceptionClass {
+  if (typeof error !== "object" || error === null) {
+    return "submissionUnknown";
+  }
+  /*
+   * Hata bir işlem hash'i taşıyorsa yayın ÖNCESİ olduğu KANITLANAMAZ.
+   * Bu durumda hiçbir "yeniden denenebilir" sınıflandırma uygulanmaz.
+   */
+  if (readErrorTxHash(error) !== null) {
+    return "submissionUnknown";
+  }
+  const code = (error as { code?: unknown }).code;
+  if (code === 4001) {
+    return "rejected";
+  }
+  if ((error as { errorCategory?: unknown }).errorCategory === "user_rejected") {
+    return "rejected";
+  }
+  const name = (error as { name?: unknown }).name;
+  if (typeof name === "string") {
+    const expected = PRE_BROADCAST_BALANCE_ERRORS.get(name);
+    if (expected !== undefined && expected === code) {
+      return "insufficientFunds";
     }
   }
   return "submissionUnknown";
@@ -352,9 +437,12 @@ export class RevertedSubmissionError extends Error {
 }
 
 export class AmbiguousSubmissionError extends Error {
-  constructor() {
+  /** Varsa ArcScan mutabakatı için korunan hash. */
+  readonly txHash: string | null;
+  constructor(txHash: string | null = null) {
     super("submission outcome unknown");
     this.name = "AmbiguousSubmissionError";
+    this.txHash = txHash;
   }
 }
 
@@ -559,24 +647,17 @@ function classifyError(
   if (error instanceof SendMarginError) {
     return "insufficientTimeRemaining";
   }
-  if (typeof error === "object" && error !== null) {
-    if ((error as { code?: unknown }).code === 4001) {
-      return "rejected";
-    }
-    // SDK'nın makine tarafından okunabilir sınıflandırması metinden önce gelir.
-    if ((error as { errorCategory?: unknown }).errorCategory === "user_rejected") {
-      return "rejected";
-    }
-  }
-  const message =
-    error instanceof Error
-      ? error.message.toLowerCase()
-      : String(error).toLowerCase();
-
-  if (message.includes("user rejected") || message.includes("user denied")) {
+  /*
+   * YALNIZCA belgelenmiş yapısal alanlar (EIP-1193 kodu, `errorCategory`,
+   * `KitError` ad+kod çifti) kullanılır. Serbest metin eşleştirmesi
+   * YAPILMAZ: "insufficient ..." gibi bir mesaj işlemin yayınlanmadığını
+   * KANITLAMAZ ve yanlışlıkla yeniden denemeye izin verirdi.
+   */
+  const structured = classifySendException(error);
+  if (structured === "rejected") {
     return "rejected";
   }
-  if (message.includes("insufficient")) {
+  if (structured === "insufficientFunds") {
     return "insufficientFunds";
   }
   // Sınıflandırılamayan hata, çağıran adımın kendi koduyla raporlanır
@@ -687,7 +768,8 @@ export async function sendArcUsdc(
     }
   }
 
-  let revertedHash: string | null = null;
+  /** Revert veya belirsiz sonuçta korunan hash; ArcScan mutabakatı için. */
+  let terminalHash: string | null = null;
 
   const outcome = await runGuarded(
     walletUuid,
@@ -709,14 +791,18 @@ export async function sendArcUsdc(
         result = await kit.send(params);
       } catch (error) {
         /*
-         * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca güvenilir biçimde
-         * tanınan cüzdan reddi yayın öncesi sayılır; serbest metin
-         * eşleştirilmez. Diğer her şeyde işlem zincire düşmüş OLABİLİR.
+         * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca hash TAŞIMAYAN ve
+         * yapısal olarak tanınan hatalar (cüzdan reddi, SDK'nın yayın öncesi
+         * bakiye hataları) yeniden denenebilir sayılır; serbest metin
+         * eşleştirilmez. Diğer her şeyde işlem zincire düşmüş OLABİLİR ve
+         * varsa hash mutabakat için KORUNUR.
          */
-        if (classifySendException(error) === "rejected") {
+        const klass = classifySendException(error);
+        if (klass === "rejected" || klass === "insufficientFunds") {
           throw error;
         }
-        throw new AmbiguousSubmissionError();
+        terminalHash = readErrorTxHash(error);
+        throw new AmbiguousSubmissionError(terminalHash);
       }
 
       const classified = classifySendResult(result);
@@ -725,11 +811,13 @@ export async function sendArcUsdc(
       }
       if (classified.kind === "reverted") {
         // Revert ASLA "ödendi" sayılmaz; hash ArcScan için korunur.
-        revertedHash = classified.txHash;
+        terminalHash = classified.txHash;
         throw new RevertedSubmissionError(classified.txHash);
       }
       if (classified.kind === "unknown") {
-        throw new AmbiguousSubmissionError();
+        // Belirsiz sonuçta da hash KORUNUR: mutabakatın tek ipucu odur.
+        terminalHash = classified.txHash;
+        throw new AmbiguousSubmissionError(classified.txHash);
       }
 
       return {
@@ -743,12 +831,20 @@ export async function sendArcUsdc(
     },
   );
 
-  if (!outcome.ok && outcome.code === "reverted" && revertedHash !== null) {
+  /*
+   * Zincire ulaşmış OLABİLECEK her sonuçta hash dışarı taşınır: hem revert
+   * hem de belirsizlik ArcScan'de kontrol edilerek çözülür.
+   */
+  if (
+    !outcome.ok &&
+    (outcome.code === "reverted" || outcome.code === "submissionUnknown") &&
+    terminalHash !== null
+  ) {
     return {
       ok: false,
-      code: "reverted",
-      txHash: revertedHash,
-      explorerUrl: buildArcExplorerTxUrl(revertedHash),
+      code: outcome.code,
+      txHash: terminalHash,
+      explorerUrl: buildArcExplorerTxUrl(terminalHash),
     };
   }
   return outcome;

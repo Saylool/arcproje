@@ -304,3 +304,177 @@ describe("teklif ömrü gözlem tazeliğiyle sınırlanır", () => {
     expect(QUOTE_MIN_SEND_MARGIN_SECONDS).toBe(60);
   });
 });
+
+describe("teklif YERLEŞİM anına çıpalanır", () => {
+  const MINT_ENV = { ...ENV, RATE_QUOTE_SECRET: SECRET };
+  const NOW_SECONDS = Math.floor(NOW / 1000);
+  const MAX_AGE_SECONDS = QUOTE_MAX_OBSERVATION_AGE_MS / 1000;
+
+  /**
+   * Sağlayıcı yanıtı `slowMs` kadar sürer ve bu sırada saat ilerler.
+   * `nowMs` isteğin BAŞLADIĞI an; saat yerleşim anını verir.
+   */
+  function slowProvider(observedAt: number, slowMs: number) {
+    let nowRef = NOW;
+    const fetchImpl = vi.fn(async () => {
+      nowRef = NOW + slowMs;
+      return success(observedAt);
+    });
+    return { fetchImpl, clock: () => nowRef };
+  }
+
+  it("issuedAt isteğin başlangıcı DEĞİL, yanıtın döndüğü andır", async () => {
+    const SLOW_MS = 10_000;
+    const { fetchImpl, clock } = slowProvider(NOW_SECONDS - 5, SLOW_MS);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    // Çıpa başlangıç olsaydı issuedAt NOW_SECONDS olurdu.
+    expect(minted.signed.quote.issuedAt).toBe(NOW_SECONDS + SLOW_MS / 1000);
+  });
+
+  it("expiresAt de yerleşim anından hesaplanır", async () => {
+    const SLOW_MS = 7000;
+    const { fetchImpl, clock } = slowProvider(NOW_SECONDS - 5, SLOW_MS);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    const settledSeconds = NOW_SECONDS + SLOW_MS / 1000;
+    expect(minted.signed.quote.issuedAt).toBe(settledSeconds);
+    expect(minted.signed.quote.expiresAt).toBe(
+      settledSeconds + QUOTE_LIFETIME_MS / 1000,
+    );
+    // İstemciye ulaşan teklif söz verilen tam ömre sahiptir.
+    expect(
+      minted.signed.quote.expiresAt - minted.signed.quote.issuedAt,
+    ).toBe(QUOTE_LIFETIME_MS / 1000);
+  });
+
+  it("YAVAŞ sağlayıcı payı yerse teklif BASILMAZ", async () => {
+    /*
+     * Gözlem ufkuna başlangıçta 65 sn var: eski (başlangıca çıpalı) hesapla
+     * 65 >= 60 olduğu için teklif basılırdı. Yanıt 10 sn sürdüğü için
+     * yerleşim anında yalnızca 55 sn kalır ve teklif ÜRETİLMEMELİDİR.
+     */
+    const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + 65;
+    const { fetchImpl, clock } = slowProvider(observedAt, 10_000);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted).toMatchObject({ ok: false, code: "invalidObservation" });
+  });
+
+  it("aynı gözlem HIZLI dönerse teklif basılır (sınırın diğer yanı)", async () => {
+    // Tek fark yanıt süresi: 1 sn'de dönerse 64 sn kalır ve pay karşılanır.
+    const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + 65;
+    const { fetchImpl, clock } = slowProvider(observedAt, 1000);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    expect(
+      minted.signed.quote.expiresAt - minted.signed.quote.issuedAt,
+    ).toBe(64);
+  });
+
+  it("pay sınırında (tam 60 sn) teklif hâlâ basılır", async () => {
+    const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + 65;
+    const { fetchImpl, clock } = slowProvider(observedAt, 5000);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted.ok).toBe(true);
+    if (!minted.ok) return;
+    expect(
+      minted.signed.quote.expiresAt - minted.signed.quote.issuedAt,
+    ).toBe(QUOTE_MIN_SEND_MARGIN_SECONDS);
+  });
+
+  it("payın bir saniye altında teklif basılmaz", async () => {
+    const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + 65;
+    const { fetchImpl, clock } = slowProvider(observedAt, 6000);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted).toMatchObject({ ok: false, code: "invalidObservation" });
+  });
+
+  it("basılan HİÇBİR teklif söz verilen paydan kısa ömürle çıkmaz", async () => {
+    // Ufka kalan süre ve yanıt gecikmesi taranır; ok olan her sonuç pay tutar.
+    for (const remaining of [60, 61, 65, 90, 120, 300]) {
+      for (const slowMs of [0, 1000, 5000, 12_000, 30_000]) {
+        resetRateQuoteCache();
+        const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + remaining;
+        const { fetchImpl, clock } = slowProvider(observedAt, slowMs);
+
+        const minted = await mintUsdcTryQuote({
+          env: MINT_ENV,
+          fetchImpl: fetchImpl as never,
+          nowMs: NOW,
+          clock,
+        });
+
+        if (!minted.ok) continue;
+        const life = minted.signed.quote.expiresAt - minted.signed.quote.issuedAt;
+        expect(life, `${remaining}s / ${slowMs}ms`).toBeGreaterThanOrEqual(
+          QUOTE_MIN_SEND_MARGIN_SECONDS,
+        );
+        // Ömür yerleşim anından ölçülür; gözlem ufku aşılamaz.
+        expect(
+          minted.signed.quote.expiresAt,
+          `${remaining}s / ${slowMs}ms`,
+        ).toBeLessThanOrEqual(minted.signed.quote.observedAt + MAX_AGE_SECONDS);
+      }
+    }
+  });
+
+  it("gözlem yanıt dönerken tamamen bayatlarsa teklif basılmaz", async () => {
+    // Başlangıçta taze, yerleşimde izin verilen yaşı aşmış bir gözlem.
+    const observedAt = NOW_SECONDS - MAX_AGE_SECONDS + 5;
+    const { fetchImpl, clock } = slowProvider(observedAt, 30_000);
+
+    const minted = await mintUsdcTryQuote({
+      env: MINT_ENV,
+      fetchImpl: fetchImpl as never,
+      nowMs: NOW,
+      clock,
+    });
+
+    expect(minted.ok).toBe(false);
+  });
+});

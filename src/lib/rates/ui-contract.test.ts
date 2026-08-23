@@ -217,12 +217,19 @@ describe("istek oturumu yalıtımı", () => {
 });
 
 describe("gönderim rezervasyonu", () => {
-  it("kit.send'den önce eşzamanlı rezervasyon alınır", () => {
+  it("rezervasyon ve kit.send TEK atomik kilit çağrısındadır", () => {
     const submitBody = payer.slice(payer.indexOf("const submit = async () => {"));
-    const reserveAt = submitBody.indexOf("reserveSubmission(");
+    const lockAt = submitBody.indexOf("runExclusiveSubmission(");
     const sendAt = submitBody.indexOf("sendArcUsdc(");
-    expect(reserveAt).toBeGreaterThanOrEqual(0);
-    expect(reserveAt).toBeLessThan(sendAt);
+    expect(lockAt).toBeGreaterThanOrEqual(0);
+    // sendArcUsdc kilit çağrısının İÇİNDE, yani ondan sonra geçer.
+    expect(lockAt).toBeLessThan(sendAt);
+  });
+
+  it("kilitten AYRI, atomik olmayan bir rezervasyon adımı kalmadı", () => {
+    // localStorage tek başına kilit değildir: ayrı reserve/lock adımı yok.
+    expect(payer).not.toContain("reserveSubmission");
+    expect(payer).not.toContain("withSubmissionLock");
   });
 
   it("yalnızca yayın öncesi hatalarda rezervasyon bırakılır", () => {
@@ -233,6 +240,33 @@ describe("gönderim rezervasyonu", () => {
 
   it("sekmeler arası değişiklik dinlenir ve Web Locks kullanılır", () => {
     expect(payer).toContain("subscribeToSubmissions");
-    expect(payer).toContain("withSubmissionLock");
+    expect(payer).toContain("runExclusiveSubmission");
+  });
+
+  it("kilit/depo yoksa FAIL-CLOSED: Türkçe tarayıcı uyarısı gösterilir", () => {
+    expect(payer).toContain("SUBMISSION_UNAVAILABLE_MESSAGE");
+    expect(payer).toContain('guarded.reason === "unavailable"');
+    expect(payer).toContain('guarded.reason === "busy"');
+  });
+
+  it("belirsiz ve revert sonuçta işlem hash'i ekranda korunur", () => {
+    // ArcScan mutabakatının tek ipucu hash'tir; kaybedilmez.
+    expect(payer).toContain("setPendingTxHash(outcome.txHash ?? null)");
+    expect(payer).toContain("setPendingTxUrl(outcome.explorerUrl ?? null)");
+    expect(payer).toContain("{pendingTxHash}");
+  });
+});
+
+describe("çapraz örnek kota sınırı belgelenir", () => {
+  it("README süreç içi korumanın Vercel'de yetmediğini söyler", () => {
+    expect(readme).toMatch(/süreç içi/i);
+    expect(readme).toContain("Vercel");
+    expect(readme).toMatch(/Redis|KV/);
+  });
+
+  it("paylaşılan sınırlayıcı DAĞITIM GEREKSİNİMİ olarak işaretlenir", () => {
+    expect(readme).toContain("Dağıtım gereksinimi");
+    // Tamamlanmış bir garanti gibi sunulmaz.
+    expect(readme).toMatch(/karşılanmamıştır|açık kalmaktadır/i);
   });
 });

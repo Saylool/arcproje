@@ -30,13 +30,20 @@ import { createQuoteId, readQuoteSecret, signRateQuote } from "./quote-auth";
  * Amaç, her bileşen render'ı veya her kullanıcı için bir CoinGecko kredisi
  * harcamamaktır.
  *
- * SINIRLAR: Önbellek süreç içidir. Sunucusuz (serverless) ortamda her soğuk
- * başlangıç ve her eşzamanlı örnek kendi önbelleğini tutar; bu yüzden
- * önbellek isabet oranı bir garanti değil, bir iyileştirmedir. Kalıcı veya
- * paylaşılan önbellek bu görevin kapsamı dışındadır (arka uç/veritabanı
- * eklenmiyor). Her teklif, önbellekten gelse bile TAZE basılır: yeni quoteId,
- * yeni issuedAt/expiresAt ve yeni HMAC etiketi alır; bayat bir gözlem
- * `observedAt` üzerinden hâlâ sınırlıdır.
+ * SINIRLAR — ÇAPRAZ ÖRNEK KOTA KORUMASI YOKTUR. Önbellek ve soğuma
+ * SÜREÇ İÇİDİR: yalnızca tek bir Node.js örneğini korur. Herkese açık bir
+ * Vercel dağıtımında her soğuk başlangıç ve her eşzamanlı sunucusuz örnek
+ * kendi önbelleğini tutar; toplam CoinGecko hızını hiçbir şey sınırlamaz.
+ * Bu yüzden buradaki koruma bir GARANTİ değil, tek örneklik bir
+ * iyileştirmedir. Örnekler arası koruma bir DAĞITIM GEREKSİNİMİDİR ve bu
+ * depoda KARŞILANMAMIŞTIR: paylaşılan bir sayaç/oran sınırlayıcı (Redis/KV)
+ * ya da Vercel firewall/rate limiting yapılandırması dağıtım tarafında
+ * ayrıca kurulmalıdır. Bu odaklı düzeltmede böyle bir bağımlılık
+ * EKLENMEMİŞTİR.
+ *
+ * Her teklif, önbellekten gelse bile TAZE basılır: yeni quoteId, yeni
+ * issuedAt/expiresAt ve yeni HMAC etiketi alır; bayat bir gözlem `observedAt`
+ * üzerinden hâlâ sınırlıdır.
  */
 
 /** Sağlayıcı sonucunun önbellekte kalma süresi. */
@@ -258,7 +265,10 @@ export type ClockOptions = {
 };
 
 export type MintOptions = FetchQuoteOptions & ClockOptions & {
-  /** Testlerde sabit saat vermek için; üretimde geçerli zaman kullanılır. */
+  /**
+   * Basımın BAŞLADIĞI an. Testlerde sabit başlangıç vermek içindir; teklifin
+   * kendisi bu ana değil, `clock` ile okunan YERLEŞİM anına çıpalanır.
+   */
   nowMs?: number;
   /** Testlerde belirlenimci kimlik vermek için. */
   quoteId?: string;
@@ -282,8 +292,8 @@ export async function mintUsdcTryQuote(
     };
   }
 
-  const nowMs = options.nowMs ?? Date.now();
-  const observed = await getUsdcTryObservation(nowMs, options);
+  const startedAtMs = options.nowMs ?? Date.now();
+  const observed = await getUsdcTryObservation(startedAtMs, options);
   if (!observed.ok) {
     return {
       ok: false,
@@ -303,11 +313,22 @@ export async function mintUsdcTryQuote(
     };
   }
 
-  const issuedAt = Math.floor(nowMs / 1000);
   /*
-   * Teklif ömrü İKİ sınırın küçüğüdür: normal TTL ve gözlemin izin verilen
-   * yaşının bittiği an. Bayat bir gözleme dayanan teklif, sırf yeni basıldı
-   * diye 5 dakika geçerli sayılamaz.
+   * ÇIPA: isteğin başladığı an DEĞİL, gözlemin elde edildiği YERLEŞİM anı.
+   *
+   * CoinGecko çağrısı saniyeler sürebilir. Başlangıç anına çıpalanmış bir
+   * teklif, istemciye söz verdiğinden DAHA KISA bir ömürle ulaşırdı: 5 sn
+   * süren bir çağrıdan sonra "5 dakika geçerli" denen teklifin gerçekte 4:55
+   * ömrü kalırdı ve 60 saniyelik gönderim payı sınırda yenirdi. Bu yüzden
+   * saat gözlemden SONRA yeniden okunur ve issuedAt/expiresAt/pay üçü de bu
+   * ana göre hesaplanır.
+   */
+  const settledAtMs = options.clock?.() ?? options.nowMs ?? Date.now();
+  const issuedAt = Math.floor(settledAtMs / 1000);
+  /*
+   * Teklif ömrü İKİ sınırın küçüğüdür: yerleşim anından itibaren normal TTL
+   * ve gözlemin izin verilen yaşının bittiği an. Bayat bir gözleme dayanan
+   * teklif, sırf yeni basıldı diye 5 dakika geçerli sayılamaz.
    */
   const observationHorizon =
     observed.observation.observedAt + QUOTE_MAX_OBSERVATION_AGE_MS / 1000;
@@ -315,6 +336,8 @@ export async function mintUsdcTryQuote(
 
   /*
    * Gönderim payından kısa ömürlü bir teklif zaten kullanılamaz; üretilmez.
+   * Ölçüm yerleşim anına göredir: yavaş sağlayıcı payı tükettiyse teklif
+   * BASILMAZ, kısa ömürle dışarı verilmez.
    */
   if (expiresAt - issuedAt < QUOTE_MIN_SEND_MARGIN_SECONDS) {
     return {
@@ -339,7 +362,7 @@ export async function mintUsdcTryQuote(
   };
 
   // Ürettiğimiz teklif de tükettiğimiz teklifle AYNI katı yoldan geçer.
-  const validated = validateRateQuote(candidate, nowMs);
+  const validated = validateRateQuote(candidate, settledAtMs);
   if (!validated.ok) {
     return {
       ok: false,

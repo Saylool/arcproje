@@ -138,6 +138,11 @@ eşzamanlı örnek kendi önbelleğini tutar; bu yüzden önbellek bir garanti d
 bir iyileştirmedir. Paylaşılan/kalıcı önbellek bu sürümün kapsamı dışındadır
 (arka uç veya veritabanı eklenmemiştir).
 
+> **Dağıtım gereksinimi — tamamlanmış bir garanti DEĞİL.** Herkese açık bir
+> Vercel dağıtımında örnekler arası kota koruması bu depoda
+> **karşılanmamıştır**. Paylaşılan bir sayaç/oran sınırlayıcı (Redis/KV) ya da
+> Vercel firewall/rate limiting **dağıtım tarafında ayrıca yapılandırılmalıdır**.
+
 ### Sağlayıcı hatalarında soğuma (negatif önbellek)
 
 Sağlayıcı 429/5xx/zaman aşımı döndüğünde her istek yeni bir yukarı akış çağrısı
@@ -161,21 +166,37 @@ soğuma** uygulanır:
 - Bozuk veya bayat veri asla geçerli başarı olarak önbelleklenmez.
 
 > **Bu koruma yalnızca MVP düzeyindedir ve çapraz örnek riski ÇÖZÜLMEMİŞTİR.**
-> Soğuma ve önbellek **süreç içidir**;
-> Vercel sunucusuz örnekleri arasında **paylaşılmaz**. Gerçek ölçekte, birden
-> çok örneğin toplam yukarı akış hızını sınırlayabilmek için paylaşılan bir
-> depo/oran sınırlayıcı (ör. Redis/KV tabanlı) gerekir. Bu odaklı düzeltmede
-> böyle bir bağımlılık eklenmemiştir.
+> Soğuma ve önbellek **süreç içidir**; Vercel sunucusuz örnekleri arasında
+> **paylaşılmaz**. Tek bir örneği korur, toplam yukarı akış hızını **hiç**
+> sınırlamaz: yeterince eşzamanlı örnekle Demo kotası yine tükenebilir.
+>
+> Gerçek ölçekte gereken paylaşılan depo/oran sınırlayıcı (ör. Redis/KV
+> tabanlı) ya da Vercel firewall/rate limiting bir **dağıtım gereksinimidir**;
+> bu odaklı düzeltmede böyle bir bağımlılık **eklenmemiştir** ve risk
+> **açık kalmaktadır**.
 
 ### Gönderim sonucu belirsizse
 
 `kit.send` çağrıldıktan sonra ortaya çıkan her hata "gönderilemedi" demek
 değildir: işlem zincire düşmüş olabilir. Bu yüzden sonuçlar ikiye ayrılır.
 
+Sınıflandırma **yalnızca belgelenmiş yapısal alanlara** bakar (EIP-1193 kodu,
+App Kit `errorCategory`, `KitError` ad+kod çifti). Hata **metni** hiçbir karara
+girmez: "insufficient ..." veya "user rejected" yazması işlemin yayınlanmadığını
+kanıtlamaz.
+
 | Durum | Davranış |
 | --- | --- |
-| Cüzdan reddi (4001), yetersiz bakiye | Yayın öncesi kesin; yeniden denenebilir |
-| Tanınmayan istisna, geçersiz/eksik işlem hash'i | **Belirsiz**; gönderim kilidi açılmaz |
+| Cüzdan reddi (4001 / `user_rejected`), hash **yok** | Yayın öncesi kesin; yeniden denenebilir |
+| `BALANCE_INSUFFICIENT_TOKEN/GAS/ALLOWANCE` (9001–9003), hash **yok** | Yayın öncesi kesin; yeniden denenebilir |
+| `state: "success"` **ve** geçerli hash | Başarı |
+| `state: "error"` + geçerli hash + kategori **yok** | **Revert** (kurulu SDK'nın onaylanmış makbuz şekli); asla "ödendi" değil |
+| `chain_revert`, `reverted_onchain`, `partial_reverted` | **Revert**; hash korunur |
+| `pending`, `noop`, tanınmayan durum veya kategori | **Belirsiz**; gönderim kilidi açılmaz, hash korunur |
+| Herhangi bir hata **hash taşıyorsa** | Yayın öncesi sayılmaz; **belirsiz** |
+
+Revert ve belirsizlikte işlem hash'i **kaybedilmez**: yerel kayıtta ve ekranda
+tutulur ki ArcScan'de mutabakat yapılabilsin.
 
 Belirsiz durumda kullanıcıya önce MetaMask işlem geçmişini ve ArcScan'i kontrol
 etmesi söylenir. Ayrıca `chainId + requestId` anahtarlı, **gizli veri
@@ -233,13 +254,14 @@ aşağıdakiler **hâlâ gereklidir** ve bu depoda yoktur:
   ayrıldığı bir akış. Şu anki süre kontrolleri istemci ve sunucu tarafındadır;
   imzalanmış bir işlem gecikmeli olarak yayınlanırsa zincir bunu engellemez.
 - **Örnekler arası kota koruması** — CoinGecko sınırları için paylaşılan bir
-  Redis/KV sayacı ya da Vercel firewall/rate limiting. Süreç içi soğuma yalnızca
-  tek örneği korur; herkese açık bir Vercel dağıtımında bu risk **açık
+  Redis/KV sayacı ya da Vercel firewall/rate limiting. Bu bir **dağıtım
+  gereksinimidir** ve bu depoda **karşılanmamıştır**: süreç içi soğuma yalnızca
+  tek örneği korur, herkese açık bir Vercel dağıtımında risk **açık
   kalmaktadır**.
-- **Aynı tarayıcı dışında tekrar engeli** — `localStorage` rezervasyonu, Web
-  Locks ve `BroadcastChannel` yalnızca tek tarayıcı içindir. Başka cihaz, başka
-  tarayıcı veya gizli sekme hiçbir şey bilmez; yetkili engel için arka uçta ya
-  da zincir üstünde atomik `requestId` tüketimi şarttır.
+- **Aynı tarayıcı dışında tekrar engeli** — Web Locks, `localStorage` ve
+  `BroadcastChannel` yalnızca tek tarayıcı içindir. Başka cihaz, başka tarayıcı
+  veya gizli sekme hiçbir şey bilmez; yetkili engel için arka uçta ya da zincir
+  üstünde atomik `requestId` tüketimi şarttır.
 
 ### Hata davranışı
 
@@ -267,6 +289,11 @@ Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
 - `RATE_QUOTE_SECRET`
 
 Üçü de `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+
+Ayrıca bir **dağıtım gereksinimi** vardır ve kod tarafında karşılanamaz:
+CoinGecko kotasını örnekler arasında koruyacak paylaşılan bir sayaç/oran
+sınırlayıcı (Redis/KV) ya da Vercel firewall/rate limiting yapılandırması.
+Uygulamadaki soğuma **süreç içidir** ve tek başına yeterli **değildir**.
 
 ## Fiş analizi nasıl çalışıyor
 

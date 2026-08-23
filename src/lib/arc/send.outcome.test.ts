@@ -61,6 +61,7 @@ const {
   keepsSubmissionLocked,
   classifySendResult,
   classifySendException,
+  readErrorTxHash,
 } = await import("./send");
 
 const DEBTOR = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
@@ -208,20 +209,35 @@ describe("App Kit sonuç durumları (BridgeStep)", () => {
       kind: "success",
       txHash: TX_HASH,
     });
-    // Geçerli hash tek başına yetmez.
-    expect(classifySendResult({ txHash: TX_HASH })).toEqual({ kind: "unknown" });
-    // Başarı durumu ama bozuk hash: doğrulanamaz.
+    // Geçerli hash tek başına yetmez; durum yoksa sonuç belirsizdir.
+    expect(classifySendResult({ txHash: TX_HASH })).toEqual({
+      kind: "unknown",
+      txHash: TX_HASH,
+    });
+    // Başarı durumu ama bozuk hash: doğrulanamaz, korunacak hash de yok.
     expect(classifySendResult({ state: "success", txHash: "0xdead" })).toEqual({
       kind: "unknown",
+      txHash: null,
     });
-    expect(classifySendResult({ state: "success" })).toEqual({ kind: "unknown" });
+    expect(classifySendResult({ state: "success" })).toEqual({
+      kind: "unknown",
+      txHash: null,
+    });
   });
 
-  it("pending ve noop belirsizdir", () => {
+  it("pending ve noop belirsizdir ama HASH KORUNUR", () => {
     expect(classifySendResult({ state: "pending", txHash: TX_HASH })).toEqual({
       kind: "unknown",
+      txHash: TX_HASH,
     });
-    expect(classifySendResult({ state: "noop" })).toEqual({ kind: "unknown" });
+    expect(classifySendResult({ state: "noop", txHash: TX_HASH })).toEqual({
+      kind: "unknown",
+      txHash: TX_HASH,
+    });
+    expect(classifySendResult({ state: "noop" })).toEqual({
+      kind: "unknown",
+      txHash: null,
+    });
   });
 
   it("zincir revert kategorileri revert sayılır ve hash korunur", () => {
@@ -233,16 +249,252 @@ describe("App Kit sonuç durumları (BridgeStep)", () => {
     }
   });
 
-  it("sınıflandırılamayan error durumu belirsizdir", () => {
+  it("KURULU SDK: error + hash + kategori YOK => onaylanmış REVERT", () => {
+    /*
+     * @circle-fin/app-kit 1.12.1 aynı zincir `send` yolu makbuzu bekler ve
+     *   state: receipt.status === 'success' ? 'success' : 'error'
+     * döndürür; `errorCategory` HİÇ set edilmez. Bu, revert eden makbuzun
+     * belgelenmiş şeklidir: belirsiz DEĞİL, revert. Ve asla "ödendi" değil.
+     */
+    expect(classifySendResult({ name: "send", state: "error", txHash: TX_HASH })).toEqual(
+      { kind: "reverted", txHash: TX_HASH },
+    );
+    // Hash yoksa revert kanıtlanamaz: belirsiz kalır.
+    expect(classifySendResult({ name: "send", state: "error" })).toEqual({
+      kind: "unknown",
+      txHash: null,
+    });
+    // Hash bozuksa da kanıt yoktur.
     expect(
-      classifySendResult({ state: "error", errorCategory: "unknown" }),
-    ).toEqual({ kind: "unknown" });
+      classifySendResult({ name: "send", state: "error", txHash: "0xdead" }),
+    ).toEqual({ kind: "unknown", txHash: null });
+  });
+
+  it("user_rejected YALNIZCA hash yokken yeniden denenebilir", () => {
+    expect(
+      classifySendResult({ state: "error", errorCategory: "user_rejected" }),
+    ).toEqual({ kind: "rejected" });
+    // Hash varsa bir şey zincire gitmiştir: tekrar denemeye izin verilmez.
+    expect(
+      classifySendResult({
+        state: "error",
+        errorCategory: "user_rejected",
+        txHash: TX_HASH,
+      }),
+    ).toEqual({ kind: "unknown", txHash: TX_HASH });
+  });
+
+  it("belgelenmiş HER kategori × hash birleşimi doğru sınıflanır", () => {
+    // BridgeStepErrorCategory'nin kurulu sürümdeki tam listesi.
+    const categories = [
+      "user_rejected",
+      "atomic_unsupported",
+      "batch_too_large",
+      "duplicate_batch_id",
+      "unknown_bundle",
+      "polling_timeout",
+      "failed_offchain",
+      "reverted_onchain",
+      "partial_reverted",
+      "chain_revert",
+      "unknown",
+    ] as const;
+    const revertCategories = new Set([
+      "reverted_onchain",
+      "partial_reverted",
+      "chain_revert",
+    ]);
+
+    for (const category of categories) {
+      const withHash = classifySendResult({
+        state: "error",
+        errorCategory: category,
+        txHash: TX_HASH,
+      });
+      const withoutHash = classifySendResult({
+        state: "error",
+        errorCategory: category,
+      });
+
+      if (revertCategories.has(category)) {
+        expect(withHash, category).toEqual({ kind: "reverted", txHash: TX_HASH });
+        expect(withoutHash, category).toEqual({ kind: "reverted", txHash: null });
+        continue;
+      }
+      if (category === "user_rejected") {
+        expect(withHash, category).toEqual({ kind: "unknown", txHash: TX_HASH });
+        expect(withoutHash, category).toEqual({ kind: "rejected" });
+        continue;
+      }
+      // Kanıtlanmamış diğer her kategori belirsizdir; hash varsa korunur.
+      expect(withHash, category).toEqual({ kind: "unknown", txHash: TX_HASH });
+      expect(withoutHash, category).toEqual({ kind: "unknown", txHash: null });
+      // Hiçbiri ASLA başarı sayılmaz.
+      expect(withHash.kind, category).not.toBe("success");
+    }
+  });
+
+  it("tanınmayan durum adları belirsizdir, hash korunur", () => {
+    for (const state of ["PENDING", "confirmed", "", 7, null]) {
+      expect(classifySendResult({ state, txHash: TX_HASH }), String(state)).toEqual({
+        kind: "unknown",
+        txHash: TX_HASH,
+      });
+    }
   });
 
   it("nesne olmayan sonuç belirsizdir", () => {
     for (const bad of [null, undefined, "ok", 42]) {
-      expect(classifySendResult(bad), String(bad)).toEqual({ kind: "unknown" });
+      expect(classifySendResult(bad), String(bad)).toEqual({
+        kind: "unknown",
+        txHash: null,
+      });
     }
+  });
+});
+
+describe("belirsiz sonuçta hash MUTABAKAT için korunur", () => {
+  it("pending sonucu hash'i ile birlikte submissionUnknown döner", async () => {
+    sendMock.mockResolvedValue({ name: "send", state: "pending", txHash: TX_HASH });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("submissionUnknown");
+    expect(result.txHash).toBe(TX_HASH);
+    expect(result.explorerUrl).toBe(`https://testnet.arcscan.app/tx/${TX_HASH}`);
+  });
+
+  it("noop sonucu da hash'i korur", async () => {
+    sendMock.mockResolvedValue({ name: "send", state: "noop", txHash: TX_HASH });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+  });
+
+  it("kategorisiz error + hash REVERT olur, ödendi olmaz", async () => {
+    // Kurulu SDK'nın revert eden makbuz için döndürdüğü tam şekil.
+    sendMock.mockResolvedValue({
+      name: "send",
+      state: "error",
+      txHash: TX_HASH,
+      explorerUrl: "https://sdk.example/tx",
+    });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("reverted");
+    expect(result.txHash).toBe(TX_HASH);
+    // Bağlantı SDK'nın verdiğinden değil, doğrulanmış hash'ten kurulur.
+    expect(result.explorerUrl).toBe(`https://testnet.arcscan.app/tx/${TX_HASH}`);
+    expect(keepsSubmissionLocked("reverted")).toBe(true);
+  });
+
+  it("user_rejected + hash tekrar denenemez ve hash korunur", async () => {
+    sendMock.mockResolvedValue({
+      state: "error",
+      errorCategory: "user_rejected",
+      txHash: TX_HASH,
+    });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+    expect(keepsSubmissionLocked("submissionUnknown")).toBe(true);
+  });
+
+  it("istisna cause.trace.txHash taşıyorsa hash korunur", async () => {
+    // SDK revert hatasını `cause.trace` altında taşır.
+    sendMock.mockRejectedValue({
+      name: "ONCHAIN_TRANSACTION_REVERTED",
+      code: 8001,
+      message: "Transaction reverted",
+      cause: { trace: { txHash: TX_HASH, chain: "Arc_Testnet" } },
+    });
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+  });
+
+  it("hash okuyucu yalnızca GEÇERLİ hash döner", () => {
+    expect(readErrorTxHash({ txHash: TX_HASH })).toBe(TX_HASH);
+    expect(readErrorTxHash({ cause: { trace: { txHash: TX_HASH } } })).toBe(TX_HASH);
+    expect(readErrorTxHash({ txHash: "0xdead" })).toBeNull();
+    expect(readErrorTxHash({ cause: { trace: {} } })).toBeNull();
+    expect(readErrorTxHash(new Error("boş"))).toBeNull();
+    expect(readErrorTxHash(null)).toBeNull();
+  });
+});
+
+describe("yapısal bakiye hataları YALNIZCA hash yokken denenebilir", () => {
+  it("BALANCE_INSUFFICIENT_TOKEN yayın öncesi sayılır", async () => {
+    // Kurulu SDK: prepareSend içindeki bakiye doğrulaması, execute'tan ÖNCE.
+    sendMock.mockRejectedValue(
+      Object.assign(new Error("Insufficient USDC balance"), {
+        name: "BALANCE_INSUFFICIENT_TOKEN",
+        code: 9001,
+        type: "BALANCE",
+      }),
+    );
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "insufficientFunds" });
+    expect(keepsSubmissionLocked("insufficientFunds")).toBe(false);
+  });
+
+  it("BALANCE_INSUFFICIENT_GAS de yayın öncesi sayılır", async () => {
+    sendMock.mockRejectedValue(
+      Object.assign(new Error("Insufficient gas"), {
+        name: "BALANCE_INSUFFICIENT_GAS",
+        code: 9002,
+        type: "BALANCE",
+      }),
+    );
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "insufficientFunds" });
+  });
+
+  it("ad ile kod uyuşmazsa yapısal sayılmaz", () => {
+    // Yalnızca belgelenmiş ad+kod ÇİFTİ kabul edilir; ad tek başına yetmez.
+    expect(
+      classifySendException({ name: "BALANCE_INSUFFICIENT_TOKEN", code: 1234 }),
+    ).toBe("submissionUnknown");
+    expect(classifySendException({ name: "BALANCE_INSUFFICIENT_TOKEN" })).toBe(
+      "submissionUnknown",
+    );
+    // Kodsuz rastgele bir hata da eşleşmez.
+    expect(classifySendException(new Error("herhangi"))).toBe("submissionUnknown");
+  });
+
+  it("hash taşıyan bakiye hatası ARTIK yayın öncesi sayılmaz", async () => {
+    sendMock.mockRejectedValue(
+      Object.assign(new Error("Insufficient USDC balance"), {
+        name: "BALANCE_INSUFFICIENT_TOKEN",
+        code: 9001,
+        txHash: TX_HASH,
+      }),
+    );
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+  });
+
+  it("hash taşıyan 4001 de yeniden denenebilir sayılmaz", () => {
+    expect(classifySendException({ code: 4001, txHash: TX_HASH })).toBe(
+      "submissionUnknown",
+    );
+    expect(
+      classifySendException({ errorCategory: "user_rejected", txHash: TX_HASH }),
+    ).toBe("submissionUnknown");
   });
 });
 
@@ -285,22 +537,35 @@ describe("kit.send sonrası metin eşleştirmesi yapılmaz", () => {
     expect(result).toEqual({ ok: false, code: "submissionUnknown" });
   });
 
-  it("yalnızca 4001 ve user_rejected yayın öncesi sayılır", () => {
+  it("yalnızca yapısal 4001/user_rejected/bakiye kodları tanınır", () => {
     expect(classifySendException({ code: 4001 })).toBe("rejected");
     expect(classifySendException({ errorCategory: "user_rejected" })).toBe(
       "rejected",
     );
+    expect(
+      classifySendException({ name: "BALANCE_INSUFFICIENT_TOKEN", code: 9001 }),
+    ).toBe("insufficientFunds");
     for (const other of [
       new Error("insufficient confirmations"),
       new Error("network error"),
+      new Error("user rejected the request"),
+      new Error("user denied transaction signature"),
       { code: 4900 },
       { errorCategory: "polling_timeout" },
+      { errorCategory: "chain_revert" },
       null,
     ]) {
       expect(classifySendException(other), JSON.stringify(other)).toBe(
         "submissionUnknown",
       );
     }
+  });
+
+  it('metinde "user rejected" geçmesi tek başına ret KANITI değildir', async () => {
+    // Yapısal kod yok: kit.send çağrıldıktan sonra işlem gitmiş olabilir.
+    sendMock.mockRejectedValue(new Error("user rejected the request"));
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "submissionUnknown" });
   });
 });
 
