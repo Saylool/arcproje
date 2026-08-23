@@ -59,6 +59,7 @@ const {
   sendArcUsdc,
   SEND_MIN_REMAINING_SECONDS,
   keepsSubmissionLocked,
+  reviewStateAfterSendFailure,
   classifySendResult,
   classifySendException,
   readErrorTxHash,
@@ -720,5 +721,246 @@ describe("viem onay zaman aşımında hash KURTARILIR", () => {
     const b: Record<string, unknown> = { name: "B", cause: a };
     a.cause = b;
     expect(readErrorTxHash(a)).toBeNull();
+  });
+});
+
+describe("iç içe cüzdan reddi güvenli sınıflanır", () => {
+  /** Ham EIP-1193 reddi: MetaMask'ın sağlayıcıdan fırlattığı şekil. */
+  const rawRejection = () =>
+    Object.assign(new Error("User rejected the request."), { code: 4001 });
+
+  /** viem `UserRejectedRequestError` (`_esm/errors/rpc.js`). */
+  const viemUserRejected = () =>
+    Object.assign(new Error("User rejected the request."), {
+      name: "UserRejectedRequestError",
+      code: 4001,
+      shortMessage: "User rejected the request.",
+      details: "MetaMask Tx Signature: User denied transaction signature.",
+    });
+
+  /** viem `TransactionExecutionError`, reddi `cause` altında sarar. */
+  const viemExecutionWrapper = (cause: unknown) =>
+    Object.assign(new Error("User rejected the request."), {
+      name: "TransactionExecutionError",
+      shortMessage: "User rejected the request.",
+      cause,
+    });
+
+  /** App Kit `KitError`: bağlamı `cause.trace`, özgün hatayı `rawError`. */
+  const kitError = (
+    fields: Record<string, unknown>,
+    trace: Record<string, unknown> = {},
+  ) =>
+    Object.assign(new Error("Kit failure"), {
+      recoverability: "RETRYABLE",
+      ...fields,
+      cause: { trace },
+    });
+
+  it("DOĞRUDAN ham EIP-1193 reddi yeniden denenebilir", async () => {
+    expect(classifySendException(rawRejection())).toBe("rejected");
+    sendMock.mockRejectedValue(rawRejection());
+    const result = await sendArcUsdc("w", snapshotOf(), at(NOW));
+    expect(result).toEqual({ ok: false, code: "rejected" });
+    // Rezervasyon serbest bırakılır ve inceleme ekranda kalır.
+    expect(keepsSubmissionLocked("rejected")).toBe(false);
+    expect(reviewStateAfterSendFailure("rejected")).toBe("keepReview");
+  });
+
+  it("viem TransactionExecutionError içindeki ret çözülür", async () => {
+    const wrapped = viemExecutionWrapper(viemUserRejected());
+    expect(classifySendException(wrapped)).toBe("rejected");
+    sendMock.mockRejectedValue(wrapped);
+    expect(await sendArcUsdc("w", snapshotOf(), at(NOW))).toEqual({
+      ok: false,
+      code: "rejected",
+    });
+  });
+
+  it("App Kit cause.trace.rawError.rawError sarmalaması çözülür", async () => {
+    /*
+     * Gerçek grafik: KitError -> cause.trace -> rawError (viem sarmalayıcısı)
+     * -> rawError (UserRejectedRequestError). Yalnızca `cause` izlenseydi
+     * gerçek ret GÖRÜLMEZDİ.
+     */
+    const graph = kitError(
+      { name: "ONCHAIN_TRANSACTION_FAILED", code: 7001, type: "ONCHAIN" },
+      {
+        chain: "Arc_Testnet",
+        rawError: {
+          name: "TransactionExecutionError",
+          rawError: viemUserRejected(),
+        },
+      },
+    );
+    expect(classifySendException(graph)).toBe("rejected");
+    sendMock.mockRejectedValue(graph);
+    expect(await sendArcUsdc("w", snapshotOf(), at(NOW))).toEqual({
+      ok: false,
+      code: "rejected",
+    });
+  });
+
+  it("cause -> trace -> rawError -> cause karışık yolu da çözülür", () => {
+    const graph = kitError(
+      { name: "RPC_ENDPOINT_ERROR", code: 4001, type: "RPC" },
+      { rawError: viemExecutionWrapper(viemUserRejected()) },
+    );
+    expect(classifySendException(graph)).toBe("rejected");
+  });
+
+  it("RPC_ENDPOINT_ERROR (code 4001) ret SAYILMAZ", async () => {
+    /*
+     * Kurulu App Kit'te RpcError.ENDPOINT_ERROR de code 4001 kullanır. Bu bir
+     * uç nokta arızasıdır; kit.send sonrası işlem zincire gitmiş OLABİLİR.
+     */
+    const rpcFailure = kitError({
+      name: "RPC_ENDPOINT_ERROR",
+      code: 4001,
+      type: "RPC",
+    });
+    expect(classifySendException(rpcFailure)).toBe("submissionUnknown");
+    sendMock.mockRejectedValue(rpcFailure);
+    expect(await sendArcUsdc("w", snapshotOf(), at(NOW))).toEqual({
+      ok: false,
+      code: "submissionUnknown",
+    });
+    // Rezervasyon KİLİTLİ kalır: körlemesine tekrar denenmez.
+    expect(keepsSubmissionLocked("submissionUnknown")).toBe(true);
+    expect(reviewStateAfterSendFailure("submissionUnknown")).toBe("leaveReview");
+  });
+
+  it("type RPC + code 4001 (adı farklı olsa da) ret SAYILMAZ", () => {
+    expect(
+      classifySendException(
+        Object.assign(new Error("endpoint down"), {
+          name: "SomeWrapper",
+          type: "RPC",
+          code: 4001,
+        }),
+      ),
+    ).toBe("submissionUnknown");
+  });
+
+  it("ağ KitError sarmalayıcısı 4001 ile ret SAYILMAZ", () => {
+    for (const fields of [
+      { name: "NETWORK_CONNECTION_FAILED", code: 4001, type: "NETWORK" },
+      { name: "RPC_ENDPOINT_ERROR", code: 4001 },
+      { name: "SOME_KIT_ERROR", code: 4001 },
+    ]) {
+      expect(classifySendException(kitError(fields)), fields.name).toBe(
+        "submissionUnknown",
+      );
+    }
+  });
+
+  it("grafikte HEM ret HEM geçerli hash varsa ret sayılmaz", async () => {
+    // Hash her şeyin önündedir: bir şey zincire gitmiş olabilir.
+    const graph = kitError(
+      { name: "ONCHAIN_TRANSACTION_FAILED", code: 7001, type: "ONCHAIN" },
+      { txHash: TX_HASH, rawError: viemUserRejected() },
+    );
+    expect(readErrorTxHash(graph)).toBe(TX_HASH);
+    expect(classifySendException(graph)).toBe("submissionUnknown");
+
+    sendMock.mockRejectedValue(graph);
+    expect(await sendArcUsdc("w", snapshotOf(), at(NOW))).toMatchObject({
+      ok: false,
+      code: "submissionUnknown",
+      txHash: TX_HASH,
+    });
+  });
+
+  it("hash derinde, ret yüzeyde olsa bile ret sayılmaz", () => {
+    const graph = Object.assign(new Error("User rejected the request."), {
+      code: 4001,
+      cause: { trace: { rawError: { txHash: TX_HASH } } },
+    });
+    expect(classifySendException(graph)).toBe("submissionUnknown");
+  });
+
+  it("DÖNGÜSEL grafik sonsuza gitmez", () => {
+    const a: Record<string, unknown> = { name: "A", type: "RPC", code: 4001 };
+    const b: Record<string, unknown> = { name: "B", cause: a };
+    a.cause = b;
+    a.rawError = b;
+    expect(classifySendException(a)).toBe("submissionUnknown");
+    expect(readErrorTxHash(a)).toBeNull();
+
+    // Döngünün içine gerçek bir ret konursa yine de bulunur.
+    b.trace = { rawError: { name: "UserRejectedRequestError" } };
+    expect(classifySendException(a)).toBe("rejected");
+  });
+
+  it("AŞIRI DERİN grafik sınırda durur ve belirsiz kalır", () => {
+    // Düğüm sınırının çok ötesine gömülü bir ret aranmaya devam edilmez.
+    let deep: Record<string, unknown> = { name: "UserRejectedRequestError" };
+    for (let i = 0; i < 60; i += 1) {
+      deep = { name: `KATMAN_${i}`, cause: deep };
+    }
+    expect(classifySendException(deep)).toBe("submissionUnknown");
+    expect(readErrorTxHash(deep)).toBeNull();
+  });
+
+  it("sınır İÇİNDEKİ derin ret hâlâ bulunur", () => {
+    let deep: Record<string, unknown> = { name: "UserRejectedRequestError" };
+    for (let i = 0; i < 6; i += 1) {
+      deep = { name: `KATMAN_${i}`, cause: deep };
+    }
+    expect(classifySendException(deep)).toBe("rejected");
+  });
+
+  it("ALAKASIZ alandaki code 4001 ret SAYILMAZ", () => {
+    /*
+     * Yalnızca cause/trace/rawError izlenir. Rastgele bir yükün içindeki
+     * 4001 değeri kullanıcı reddi kanıtı değildir.
+     */
+    for (const unrelated of [
+      { name: "RpcRequestError", details: { code: 4001 } },
+      { name: "HttpRequestError", body: { error: { code: 4001 } } },
+      { name: "Bilinmeyen", response: { code: 4001 } },
+      { name: "Bilinmeyen", data: { originalError: { code: 4001 } } },
+      { code: "4001" },
+      { code: 4901 },
+    ]) {
+      expect(classifySendException(unrelated), JSON.stringify(unrelated)).toBe(
+        "submissionUnknown",
+      );
+    }
+  });
+
+  it("nesne olmayan girdi belirsizdir", () => {
+    for (const bad of [null, undefined, "4001", 4001]) {
+      expect(classifySendException(bad), String(bad)).toBe("submissionUnknown");
+    }
+  });
+
+  it("bakiye hatası YALNIZCA en üst düğümde kabul edilir", () => {
+    // Üstte: yayın öncesi kesin.
+    expect(
+      classifySendException(
+        Object.assign(new Error("Insufficient USDC balance"), {
+          name: "BALANCE_INSUFFICIENT_TOKEN",
+          code: 9001,
+          type: "BALANCE",
+        }),
+      ),
+    ).toBe("insufficientFunds");
+
+    // Derinde: sarmalayan RPC arızasının yayın öncesi olduğunu kanıtlamaz.
+    expect(
+      classifySendException(
+        kitError(
+          { name: "RPC_ENDPOINT_ERROR", code: 4001, type: "RPC" },
+          {
+            rawError: {
+              name: "BALANCE_INSUFFICIENT_TOKEN",
+              code: 9001,
+              type: "BALANCE",
+            },
+          },
+        ),
+      ),
+    ).toBe("submissionUnknown");
   });
 });

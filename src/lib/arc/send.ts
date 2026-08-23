@@ -335,11 +335,13 @@ export function classifySendResult(result: unknown): SendResultClassification {
  * `kit.send` ÇAĞRILDIKTAN sonra fırlayan istisnanın sınıflandırılması.
  *
  * Yayın ÖNCESİ sayılmanın İKİ koşulu vardır:
- * 1. Hata geçerli bir işlem hash'i TAŞIMAMALIDIR. Hash varsa bir şey zincire
- *    gitmiştir ve hiçbir "yeniden denenebilir" sınıf uygulanmaz.
- * 2. Sinyal BELGELENMİŞ ve YAPISAL olmalıdır: EIP-1193 kodu 4001, App Kit
- *    `errorCategory: "user_rejected"` ya da kurulu SDK'nın bakiye
- *    `KitError` ad+kod çifti (9001/9002/9003).
+ * 1. Hata grafiğinin HİÇBİR yerinde geçerli işlem hash'i OLMAMALIDIR. Hash
+ *    varsa bir şey zincire gitmiştir ve hiçbir "yeniden denenebilir" sınıf
+ *    uygulanmaz.
+ * 2. Sinyal BELGELENMİŞ ve OLUMLU bir kimlik olmalıdır: viem'in
+ *    `UserRejectedRequestError`'ı, App Kit'in `user_rejected` kategorisi,
+ *    ham EIP-1193 4001 reddi ya da kurulu SDK'nın bakiye `KitError` ad+kod
+ *    çifti (9001/9002/9003).
  *
  * Serbest metin eşleştirmesi YAPILMAZ: "insufficient confirmations" gibi bir
  * mesaj işlemin gönderilmediğini kanıtlamaz. Kalan her şey belirsizdir.
@@ -388,8 +390,104 @@ const VIEM_RECEIPT_TIMEOUT_ERROR = "WaitForTransactionReceiptTimeoutError";
 const VIEM_TIMEOUT_HASH_PATTERN =
   /^Timed out while waiting for transaction with hash "(0x[0-9a-fA-F]{64})" to be confirmed\.$/;
 
-/** `cause` zincirinde bakılacak en fazla düğüm. */
-const MAX_ERROR_CAUSE_DEPTH = 8;
+/**
+ * Hata grafiğinde izlenen TEK bağlantı adları.
+ *
+ * Kurulu yığın hatayı birden çok katmanda sarmalar: `KitError` bağlamı
+ * `cause.trace` altına koyar, `trace` ise özgün hatayı belgelenmiş
+ * `rawError` alanında taşır ve bu iç içe geçebilir
+ * (`cause.trace.rawError.rawError`). viem ise klasik `cause` zinciri kullanır.
+ *
+ * Yürüyüş YALNIZCA bu adlara bakar. Nesnenin tüm alanlarında gezinmek,
+ * alakasız bir yükün içindeki `code: 4001` gibi bir değeri "kullanıcı reddi"
+ * sanmaya yol açardı.
+ */
+const ERROR_GRAPH_LINKS = ["cause", "trace", "rawError"] as const;
+
+/** Ziyaret edilecek en fazla düğüm; döngü ve aşırı derinlik burada durur. */
+const MAX_ERROR_GRAPH_NODES = 32;
+
+/**
+ * Hata grafiğinin SINIRLI ve DÖNGÜYE DAYANIKLI dolaşımı.
+ *
+ * Genişlik öncelikli; görülen nesneler kimlik (`Set`) ile işaretlenir, bu
+ * yüzden `a.cause = b; b.cause = a` gibi bir döngü sonsuza gitmez. Diziler
+ * atlanır: beklenen bağlantılar nesnedir.
+ */
+function collectErrorGraph(error: unknown): Record<string, unknown>[] {
+  const nodes: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
+  const queue: unknown[] = [error];
+
+  while (queue.length > 0 && nodes.length < MAX_ERROR_GRAPH_NODES) {
+    const current = queue.shift();
+    if (
+      typeof current !== "object" ||
+      current === null ||
+      Array.isArray(current) ||
+      seen.has(current)
+    ) {
+      continue;
+    }
+    seen.add(current);
+    const record = current as Record<string, unknown>;
+    nodes.push(record);
+
+    for (const link of ERROR_GRAPH_LINKS) {
+      const next = record[link];
+      if (typeof next === "object" && next !== null && !seen.has(next)) {
+        queue.push(next);
+      }
+    }
+  }
+  return nodes;
+}
+
+/** viem'in kullanıcı reddi hatasının TAM adı (`_esm/errors/rpc.js`). */
+const VIEM_USER_REJECTED_ERROR = "UserRejectedRequestError";
+
+/** App Kit'in belgelenmiş iptal kategorisi. */
+const APP_KIT_USER_REJECTED = "user_rejected";
+
+/** EIP-1193 kullanıcı reddi kodu. */
+const EIP1193_USER_REJECTED_CODE = 4001;
+
+/**
+ * App Kit `KitError` adları BÜYÜK_HARF_ALT_ÇİZGİ biçimindedir; SDK bunu
+ * `^[A-Z_][A-Z0-9_]*$` ile doğrular. `type` alanı da yalnızca `KitError`'da
+ * bulunur. İkisi birlikte, ham EIP-1193 hatasını App Kit sarmalayıcısından
+ * ayırmaya yeter.
+ */
+const KIT_ERROR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
+
+function isKitErrorNode(node: Record<string, unknown>): boolean {
+  const name = node.name;
+  if (typeof name === "string" && KIT_ERROR_NAME_PATTERN.test(name)) {
+    return true;
+  }
+  return typeof node.type === "string" && node.type !== "";
+}
+
+/**
+ * Bu düğüm OLUMLU bir kullanıcı iptali kimliği mi?
+ *
+ * Kod 4001 TEK BAŞINA yeterli DEĞİLDİR: kurulu App Kit'te
+ * `RpcError.ENDPOINT_ERROR` da `code: 4001` (`name: "RPC_ENDPOINT_ERROR"`,
+ * `type: "RPC"`) kullanır. Bu bir uç nokta arızasıdır, kullanıcı reddi
+ * DEĞİLDİR ve `kit.send` sonrası belirsiz bir gönderimi temsil edebilir.
+ * Bu yüzden 4001 yalnızca düğüm bir `KitError` DEĞİLKEN kabul edilir.
+ */
+function isUserRejectionNode(node: Record<string, unknown>): boolean {
+  if (node.errorCategory === APP_KIT_USER_REJECTED) {
+    return true;
+  }
+  if (node.name === VIEM_USER_REJECTED_ERROR) {
+    return true;
+  }
+  return (
+    node.code === EIP1193_USER_REJECTED_CODE && !isKitErrorNode(node)
+  );
+}
 
 /**
  * Zaman aşımı hatasından hash kurtarma.
@@ -418,67 +516,71 @@ function readViemTimeoutHash(node: Record<string, unknown>): string | null {
 }
 
 /**
- * Hata nesnesinin taşıdığı geçerli işlem hash'i.
+ * Hata grafiğinin TAMAMINDA aranan geçerli işlem hash'i.
  *
- * `cause` zinciri sınırlı derinlikte yürünür; her düğümde önce TİPLİ alanlar
- * (`txHash`, App Kit'in `trace.txHash`'i) denenir, sonra yalnızca ADI birebir
- * tutan viem zaman aşımı hatası için tam kalıplı metin okuması yapılır.
- * Rastgele bir mesajın içinden hash ÇIKARILMAZ.
+ * Her düğümde önce TİPLİ `txHash` alanı denenir (App Kit'in `trace.txHash`'i
+ * de `trace` bağlantısı üzerinden aynı yolla görülür), sonra yalnızca ADI
+ * birebir tutan viem zaman aşımı hatası için tam kalıplı metin okuması
+ * yapılır. Rastgele bir mesajın içinden hash ÇIKARILMAZ.
  */
-export function readErrorTxHash(error: unknown): string | null {
-  let node: unknown = error;
-  for (let depth = 0; depth < MAX_ERROR_CAUSE_DEPTH; depth += 1) {
-    if (typeof node !== "object" || node === null) {
-      return null;
+function findTxHashInGraph(
+  nodes: readonly Record<string, unknown>[],
+): string | null {
+  for (const node of nodes) {
+    if (isValidTransactionHash(node.txHash)) {
+      return node.txHash;
     }
-    const record = node as Record<string, unknown>;
-
-    if (isValidTransactionHash(record.txHash)) {
-      return record.txHash;
-    }
-    const trace = record.trace;
-    if (typeof trace === "object" && trace !== null) {
-      const nested = (trace as Record<string, unknown>).txHash;
-      if (isValidTransactionHash(nested)) {
-        return nested;
-      }
-    }
-
-    const fromTimeout = readViemTimeoutHash(record);
+    const fromTimeout = readViemTimeoutHash(node);
     if (fromTimeout !== null) {
       return fromTimeout;
     }
-
-    node = record.cause;
   }
   return null;
+}
+
+export function readErrorTxHash(error: unknown): string | null {
+  return findTxHashInGraph(collectErrorGraph(error));
 }
 
 export function classifySendException(error: unknown): SendExceptionClass {
   if (typeof error !== "object" || error === null) {
     return "submissionUnknown";
   }
+  const graph = collectErrorGraph(error);
+
   /*
-   * Hata bir işlem hash'i taşıyorsa yayın ÖNCESİ olduğu KANITLANAMAZ.
-   * Bu durumda hiçbir "yeniden denenebilir" sınıflandırma uygulanmaz.
+   * ÖNCE hash. Grafiğin herhangi bir yerinde geçerli bir işlem hash'i varsa
+   * yayın ÖNCESİ olduğu KANITLANAMAZ; iptal kimliği bulunsa bile yeniden
+   * denenebilir sayılmaz.
    */
-  if (readErrorTxHash(error) !== null) {
+  if (findTxHashInGraph(graph) !== null) {
     return "submissionUnknown";
   }
-  const code = (error as { code?: unknown }).code;
-  if (code === 4001) {
+
+  /*
+   * Sonra OLUMLU iptal kimliği. Sarmalayıcı bir `KitError` grafiğin tepesinde
+   * dursa bile, gerçek `UserRejectedRequestError` derinlerde
+   * (`cause.trace.rawError.rawError`) bulunabilir.
+   */
+  if (graph.some(isUserRejectionNode)) {
     return "rejected";
   }
-  if ((error as { errorCategory?: unknown }).errorCategory === "user_rejected") {
-    return "rejected";
-  }
-  const name = (error as { name?: unknown }).name;
+
+  /*
+   * Bakiye hataları YALNIZCA en üst düğümde aranır: bunlar `prepareSend`
+   * tarafından doğrudan fırlatılır. Grafiğin derinliklerinde bulunan bir
+   * bakiye izi, sarmalayan RPC/ağ arızasının yayın öncesi olduğunu kanıtlamaz.
+   */
+  const top = error as Record<string, unknown>;
+  const name = top.name;
   if (typeof name === "string") {
     const expected = PRE_BROADCAST_BALANCE_ERRORS.get(name);
-    if (expected !== undefined && expected === code) {
+    if (expected !== undefined && expected === top.code) {
       return "insufficientFunds";
     }
   }
+
+  // RPC/ağ arızaları dâhil kanıtlanmamış her şey belirsizdir.
   return "submissionUnknown";
 }
 

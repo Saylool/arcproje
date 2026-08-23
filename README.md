@@ -187,7 +187,8 @@ kanıtlamaz.
 
 | Durum | Davranış |
 | --- | --- |
-| Cüzdan reddi (4001 / `user_rejected`), hash **yok** | Yayın öncesi kesin; yeniden denenebilir |
+| `UserRejectedRequestError` / `user_rejected` / **ham** EIP-1193 4001, hash **yok** | Yayın öncesi kesin; yeniden denenebilir |
+| `RPC_ENDPOINT_ERROR`, `type: "RPC"` veya 4001 kullanan ağ `KitError`'ı | **Belirsiz**; 4001 tek başına ret kanıtı DEĞİLDİR |
 | `BALANCE_INSUFFICIENT_TOKEN/GAS/ALLOWANCE` (9001–9003), hash **yok** | Yayın öncesi kesin; yeniden denenebilir |
 | `state: "success"` **ve** geçerli hash | Başarı |
 | `state: "error"` + geçerli hash + kategori **yok** | **Revert** (kurulu SDK'nın onaylanmış makbuz şekli); asla "ödendi" değil |
@@ -198,6 +199,16 @@ kanıtlamaz.
 
 Revert ve belirsizlikte işlem hash'i **kaybedilmez**: yerel kayıtta ve ekranda
 tutulur ki ArcScan'de mutabakat yapılabilsin.
+
+Hata **grafiği** sınırlı ve döngüye dayanıklı biçimde dolaşılır; yalnızca
+beklenen bağlantılar (`cause`, `trace`, `rawError`) izlenir. Kurulu yığın
+gerçek cüzdan reddini `cause.trace.rawError.rawError` gibi derin bir yola
+gömebildiği için yalnızca `cause` zincirini izlemek yetmez. Buna karşılık
+**kod 4001 tek başına ret kanıtı değildir**: kurulu App Kit'te
+`RpcError.ENDPOINT_ERROR` da 4001 kullanır (`type: "RPC"`), bu bir uç nokta
+arızasıdır ve `kit.send` sonrası belirsiz bir gönderimi temsil edebilir. Ret
+yalnızca **olumlu bir iptal kimliğinden** tanınır ve grafikte **geçerli bir
+işlem hash'i varsa asla** ret sayılmaz.
 
 Kurulu `viem` (2.55.19) onay bekleme zaman aşımında hash'i **tipli bir alanda
 tutmaz**, yalnızca hata cümlesinin içinde geçirir; kurulu adaptör de bu çağrıyı
