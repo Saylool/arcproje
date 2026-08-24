@@ -261,13 +261,16 @@ INSERT INTO shared_bill_payment_offers (
 )
 SELECT $1, d.bill_id, d.debtor_address, b.recipient_address, d.try_minor,
        $4, $5::numeric, $6::numeric, to_timestamp($7), to_timestamp($8),
-       $9::numeric, to_timestamp($10), to_timestamp($11)
+       $9::numeric, to_timestamp($13), to_timestamp($11)
 FROM shared_bill_debts d
 JOIN shared_bills b ON b.bill_id = d.bill_id
 WHERE d.bill_id = $2
   AND lower(d.debtor_address) = lower($3)
   AND d.payment_status = 'unpaid'
   AND b.status = 'open'
+  -- $10 = SU AN (hesap tazeligi). Teklifin VERILIS ani ayri parametredir
+  -- ($13): saglayici cagrisi surerken saat ilerledigi icin ikisi ayni
+  -- olmayabilir ve issued_at, icindeki kurdan ONCE olamaz.
   AND b.expires_at > to_timestamp($10)
   -- Depodaki tutar, teklifin türetildiği tutarla BİREBİR aynı olmalı.
   AND d.try_minor = $12::numeric
@@ -820,6 +823,9 @@ export async function createNeonSharedBillRepository(
           Math.floor(nowMs / 1000),
           offer.expiresAt,
           offer.tryMinor,
+          // $13 = teklifin VERILIS ani; servis bunu kurun anindan once
+          // olmayacak sekilde hesaplar.
+          offer.issuedAt,
         ])) as { offer_id: unknown }[];
 
         if (rows.length === 0) {

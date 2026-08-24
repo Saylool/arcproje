@@ -326,10 +326,22 @@ export function createFakeSharedBillRepository(
       if (offers.has(offer.offerId)) {
         return { ok: false, reason: "constraint" };
       }
-      // Teklif dayandığı kurdan UZUN yaşayamaz.
+      /*
+       * VERİTABANI KISITLARININ BELLEK İÇİ KARŞILIĞI.
+       *
+       * Bunlar `shared_bill_payment_offers` tablosundaki CHECK kısıtlarını
+       * birebir yansıtır. Sahte depo daha gevşek olursa testler yeşil kalır
+       * ama ÜRETİM kısıtı reddeder — tam olarak yakalanması gereken sınıf.
+       */
+      const OFFER_MAX_LIFETIME_SECONDS = 5 * 60;
       if (
+        // ..._within_quote: teklif dayandığı kurdan UZUN yaşayamaz.
         offer.expiresAt > offer.quoteExpiresAt ||
+        // ..._window_ordered
         offer.expiresAt <= offer.issuedAt ||
+        // ..._lifetime_max_5_min
+        offer.expiresAt > offer.issuedAt + OFFER_MAX_LIFETIME_SECONDS ||
+        // ..._amounts_positive
         BigInt(offer.tryMinor) <= BigInt(0) ||
         BigInt(offer.microUsdc) <= BigInt(0)
       ) {

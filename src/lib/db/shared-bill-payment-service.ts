@@ -338,21 +338,33 @@ export async function prepareSharedBillPaymentOffer(
     return AMOUNT_FAILURE;
   }
 
-  const nowSeconds = Math.floor(input.nowMs / 1000);
+  /*
+   * TEKLİFİN VERİLİŞ ANI, İÇİNDEKİ KURDAN ÖNCE OLAMAZ.
+   *
+   * Sağlayıcı çağrısı sürerken saat ilerler: kur, isteğin GİRİŞ anından
+   * SONRA basılmış olabilir. Veriliş anını giriş anına çıpalamak, kurun
+   * bitişini teklifin ömür penceresinin DIŞINA taşırır
+   * (`expires_at > issued_at + 5 dk`) ve depo kısıtı satırı REDDEDER —
+   * aralıklı, nedeni gizlenmiş bir hata olarak görünür.
+   *
+   * Çıpa, ikisinin GEÇ olanıdır. Bu hem kısıtı her zaman sağlar hem de kalan
+   * süreyi olduğundan UZUN göstermez: pay ölçümü de bu ana göre yapılır.
+   */
+  const issuedAt = Math.max(Math.floor(input.nowMs / 1000), quote.issuedAt);
   /*
    * TEKLİF, NE KURDAN NE DE HESAPTAN UZUN YAŞAR. Üçünün en erken bitişi
    * alınır; böylece süresi dolmuş bir kurla ya da kapanmış bir hesapla
    * gönderim yapılamaz.
    */
   const expiresAt = Math.min(quote.expiresAt, context.billExpiresAt);
-  if (expiresAt <= nowSeconds) {
+  if (expiresAt <= issuedAt) {
     return MARGIN_FAILURE;
   }
   /*
    * GÖNDERİM PAYI: cüzdanda onay verilirken zaman geçer. Bu paydan kısa
    * ömürlü bir teklif zaten gönderilemez; basılması yanıltıcı olurdu.
    */
-  if (expiresAt - nowSeconds < QUOTE_MIN_SEND_MARGIN_SECONDS) {
+  if (expiresAt - issuedAt < QUOTE_MIN_SEND_MARGIN_SECONDS) {
     return MARGIN_FAILURE;
   }
 
@@ -369,7 +381,7 @@ export async function prepareSharedBillPaymentOffer(
     quoteIssuedAt: quote.issuedAt,
     quoteExpiresAt: quote.expiresAt,
     microUsdc: microUsdc.toString(),
-    issuedAt: nowSeconds,
+    issuedAt,
     expiresAt,
   };
 

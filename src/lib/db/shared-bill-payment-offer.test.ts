@@ -102,6 +102,48 @@ describe("teklif TAM SAYI aritmetiğiyle türetilir", () => {
   });
 });
 
+describe("YAVAŞ kur sağlayıcısı teklifi bozmaz", () => {
+  /*
+   * GERÇEK ARIZA (yerel entegrasyon testinde yakalandı): CoinGecko çağrısı
+   * ~0,5-1 sn sürer. Teklifin `issuedAt`i isteğin GİRİŞ anına, kurun
+   * `expiresAt`i ise sağlayıcı yanıtının DÖNDÜĞÜ ana çıpalanıyordu. Çağrı bir
+   * saniye sınırını geçtiğinde
+   *
+   *     expires_at = quote.issuedAt + 300 > issued_at + 300
+   *
+   * olur ve `shared_bill_payment_offers_lifetime_max_5_min` CHECK kısıtı
+   * satırı REDDEDER. Sonuç: aralıklı HTTP 500 ("AMOUNT_UNAVAILABLE"), üstelik
+   * gerçek nedeni gizleyen yanlış bir mesajla.
+   *
+   * Teklifin veriliş anı, içindeki kurdan ÖNCE olamaz.
+   */
+  it("kur istekten SONRA basılmış olsa bile teklif yazılabilir", async () => {
+    const seeded = await seedPaidBill();
+    const routeNowMs = PAYMENT_NOW;
+    // Sağlayıcı 1200 ms sürdü: kur, isteğin girişinden SONRA basıldı.
+    const slowQuoteNowMs = PAYMENT_NOW + 1200;
+
+    const result = await prepareSharedBillPaymentOffer({
+      sessionToken: seeded.sessionTokens[0],
+      pathBillId: PAYMENT_BILL_ID,
+      repository: seeded.repository,
+      nowMs: routeNowMs,
+      mintQuote: fakeMint({}, slowQuoteNowMs),
+      offerId: OFFER_ID,
+    });
+    if (!result.ok) {
+      throw new Error(`yavas saglayici teklifi bozdu: ${result.code}`);
+    }
+
+    // Depodaki satır, veritabanı kısıtlarının HEPSİNİ sağlamalı.
+    const stored = seeded.repository.offers.get(OFFER_ID);
+    if (stored === undefined) throw new Error("teklif depoda yok");
+    expect(stored.expiresAt).toBeGreaterThan(stored.issuedAt);
+    expect(stored.expiresAt).toBeLessThanOrEqual(stored.issuedAt + 5 * 60);
+    expect(stored.expiresAt).toBeLessThanOrEqual(stored.quoteExpiresAt);
+  });
+});
+
 describe("teklif FAIL-CLOSED reddedilir", () => {
   it("oturum yoksa hiçbir şey dönmez", async () => {
     const { result } = await prepare({ sessionToken: null });
