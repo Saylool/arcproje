@@ -257,12 +257,12 @@ describe("API istemcisi yaniti KATI dogrular", () => {
   });
 });
 
-describe("Part 1 kapisi", () => {
+describe("ortak hesap kapisi", () => {
   const creator = readFileSync("src/components/SharedBillCreator.tsx", "utf8");
   const flow = readFileSync("src/components/ReceiptFlow.tsx", "utf8");
 
-  it("paylasilan hesap akisi Part 1'de KAPALIDIR", () => {
-    expect(SHARED_BILL_FLOW_ENABLED).toBe(false);
+  it("paylasilan hesap akisi ACIKTIR", () => {
+    expect(SHARED_BILL_FLOW_ENABLED).toBe(true);
   });
 
   it("akis bayrakla korunur ve eski olusturucu calismaya devam eder", () => {

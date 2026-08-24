@@ -1,16 +1,25 @@
 /**
- * PAYLASILAN HESAP AKISININ KAPISI (Part 1).
+ * PAYLASILAN HESAP AKISININ KAPISI.
  *
- * Part 1 yalnizca TEMELI kurar: imzali manifest, kalici depo, dogrulama,
- * olusturma API'si ve olusturucu arayuzu. Borclu tarafi (`/pay/<billId>`
- * cozumlemesi, odeme rezervasyonu ve islem kesinlestirme) Part 2'dedir.
+ * Bayrak ACIK: fisi odeyen kisi artik TEK bir manifest imzalayip TEK bir
+ * baglanti paylasabilir. Zincir tamamdir — imzali manifest ve kalici depo
+ * (Part 1), borclunun cuzdanla kimlik dogrulamasi ve yalnizca kendi borcunu
+ * gormesi (Part 2), sunucu tarafli odeme yasam dongusu: taze kur teklifi,
+ * atomik rezervasyon, mevcut gonderim siniri ve zincir ustu makbuz
+ * dogrulamasi (Part 3).
  *
- * Bu bayrak `false` oldugu surece uretimde ESKI, borclu basina ayri bagalanti
- * ureten akis calismaya devam eder; yeni bilesen derlenir ve test edilir ama
- * kullaniciya GOSTERILMEZ. Boylece Part 2 tamamlanana kadar kimse calisan bir
- * borclu sayfasi olmayan bir bagalanti paylasamaz.
+ * ESKI AKIS KALDIRILMADI. Borclu basina ayri baglanti ureten imzali odeme
+ * talebi akisi (`PaymentRequestCreator`) derlenmeye, test edilmeye ve
+ * calismaya devam eder; yalnizca olusturma ekraninda artik ortak hesap
+ * olusturucusu gosterilir. Daha once uretilmis ayri baglantilar gecerliligini
+ * korur.
  *
- * Tip bilerek `boolean`dir: sabit `false` olarak daraltilirsa bagimli kod
- * yolu tur denetiminden duser ve derlenmeyi birakirdi.
+ * CALISMA GEREKSINIMI: ortak akis kalici bir depo ister. Sunucuda
+ * `DATABASE_URL`, `SHARED_BILL_AUTH_SECRET` ve `APP_ORIGIN` tanimli degilse
+ * ilgili rotalar kontrollu bir 503 doner; bellek ici bir yedege ASLA
+ * dusulmez.
+ *
+ * Tip bilerek `boolean`dir: sabit bir degere daraltilirsa diger kod yolu tur
+ * denetiminden duser ve derlenmeyi birakirdi.
  */
-export const SHARED_BILL_FLOW_ENABLED: boolean = false;
+export const SHARED_BILL_FLOW_ENABLED: boolean = true;

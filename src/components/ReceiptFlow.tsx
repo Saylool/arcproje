@@ -379,10 +379,10 @@ export function ReceiptFlow() {
       )}
 
       {/*
-        PART 1 KAPISI: `SHARED_BILL_FLOW_ENABLED` `false` oldugu surece ESKI,
-        borclu basina ayri baglanti ureten akis calisir. Yeni tek-baglanti
-        olusturucu derlenir ve test edilir ama kullaniciya gosterilmez; borclu
-        tarafi (`/pay/<billId>`) Part 2'de eklenecektir.
+        ORTAK HESAP KAPISI: `SHARED_BILL_FLOW_ENABLED` ACIK oldugu icin
+        olusturma ekraninda TEK BAGLANTILI ortak hesap olusturucusu gosterilir.
+        Bayrak kapatilirsa ESKI, borclu basina ayri baglanti ureten akis geri
+        doner; iki yol da derlenir ve test edilir.
       */}
       {screen === "payment" && receipt !== null && debtResult !== null && (
         SHARED_BILL_FLOW_ENABLED ? (

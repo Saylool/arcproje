@@ -177,8 +177,12 @@ describe("tarayıcı deposu YETKİLİ durum DEĞİLDİR", () => {
 });
 
 describe("özellik bayrağı", () => {
-  it("ortak akış HÂLÂ KAPALIDIR", () => {
-    // Part 4'te sağlama/inceleme tamamlanana kadar açılmaz.
-    expect(SHARED_BILL_FLOW_ENABLED).toBe(false);
+  it("ortak akış AÇIKTIR", () => {
+    /*
+     * Bağımsız inceleme ve tüm doğrulama kapıları geçildikten sonra açıldı.
+     * Kapalıyken eski, borçlu başına ayrı bağlantı üreten akış çalışır; iki
+     * yol da derlenir ve test edilir.
+     */
+    expect(SHARED_BILL_FLOW_ENABLED).toBe(true);
   });
 });

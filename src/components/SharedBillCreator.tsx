@@ -55,9 +55,10 @@ import type { Participant } from "@/lib/split/participants";
  *
  * Baglanti borc listesini TASIMAZ; yalnizca tahmin edilemez bir kimlik icerir.
  *
- * PART 1 KAPISI: bu bilesen `SHARED_BILL_FLOW_ENABLED` bayragi acilana kadar
- * uretimde GOSTERILMEZ (bkz. `shared-bill-feature.ts`). Borclu tarafi
- * (`/pay/<billId>`) Part 2'de eklenecektir.
+ * KAPI ACIK: `SHARED_BILL_FLOW_ENABLED` artik `true` (bkz.
+ * `shared-bill-feature.ts`), yani bu bilesen olusturma ekraninda GOSTERILIR.
+ * Borclu tarafi `/pay/<billId>` yolunda calisir: cuzdanla kimlik dogrulama,
+ * yalnizca kendi borcunu gorme ve Arc Testnet uzerinde odeme.
  */
 
 type Props = {
