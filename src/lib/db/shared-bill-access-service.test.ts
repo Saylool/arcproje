@@ -239,7 +239,11 @@ describe("cozumleme (resolve)", () => {
 
     for (const tag of [
       `0x${"00".repeat(32)}`,
-      challenge.tag.replace(/.$/, "0"),
+      // Son karakter HER ZAMAN degisir: etiket "0" ile bitiyorsa "1" yazilir.
+      // Sabit "0" yazmak, etiket zaten "0" ile bitiyorsa (16'da 1 olasilik)
+      // hic kurcalamaz; o zaman gecerli etiket dogru sekilde KABUL edilir ve
+      // test sebepsiz duserdi.
+      challenge.tag.replace(/.$/, (last) => (last === "0" ? "1" : "0")),
       "0xkisa",
       "",
     ]) {
