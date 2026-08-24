@@ -12,7 +12,7 @@ import {
   SHARED_BILL_TYPES,
   buildSharedBillTypedData,
   canonicalizeSharedBillDebts,
-  computeSharedBillDebtsHash,
+  computeSharedBillRoot,
   createSharedBill,
   type SharedBillManifest,
 } from "./shared-bill";
@@ -103,9 +103,9 @@ describe("manifestin HER alani imza tarafindan kapsanir", () => {
       ["recipient", { recipient: other.address }],
       ["recipientLabel", { recipientLabel: "Poyraz2" }],
       [
-        "debtsHash",
+        "debtsRoot",
         {
-          debtsHash: computeSharedBillDebtsHash({
+          debtsRoot: computeSharedBillRoot({
             chainId: CHAIN,
             billId: BILL_ID,
             debts: otherDebts.debts,
@@ -117,7 +117,7 @@ describe("manifestin HER alani imza tarafindan kapsanir", () => {
       ["issuedAt", { issuedAt: manifest.issuedAt + 1 }],
       ["expiresAt", { expiresAt: manifest.expiresAt + 1 }],
       ["chainId", { chainId: CHAIN + 1 }],
-      ["schemaVersion", { schemaVersion: 2 }],
+      ["schemaVersion", { schemaVersion: 3 }],
     ];
 
     for (const [label, mutation] of mutations) {
@@ -143,13 +143,13 @@ describe("manifestin HER alani imza tarafindan kapsanir", () => {
 
     const mutated: SharedBillManifest = {
       ...manifest,
-      debtsHash: computeSharedBillDebtsHash({
+      debtsRoot: computeSharedBillRoot({
         chainId: CHAIN,
         billId: BILL_ID,
         debts: tampered.debts,
       }),
     };
-    expect(mutated.debtsHash).not.toBe(manifest.debtsHash);
+    expect(mutated.debtsRoot).not.toBe(manifest.debtsRoot);
     expect((await verifySharedBillSignature(mutated, signature)).ok).toBe(false);
   });
 });

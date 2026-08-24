@@ -34,8 +34,10 @@ CREATE TABLE IF NOT EXISTS shared_bills (
   -- Checksum'lı adres, uygulama sınırında normalleştirilmiş olarak gelir.
   recipient_address   text        NOT NULL,
   recipient_label     text        NOT NULL,
-  -- Borç listesinin kanonik, alan ayrılmış kriptografik taahhüdü.
-  debts_hash          text        NOT NULL,
+  -- Borç listesinin kanonik MERKLE KÖKÜ (alan ayrılmış, borç sayısına bağlı).
+  -- Bir borçlu kendi satırını, diğer satırları görmeden bu köke karşı
+  -- doğrulayabilir.
+  debts_root          text        NOT NULL,
   debt_count          smallint    NOT NULL,
   issued_at           timestamptz NOT NULL,
   expires_at          timestamptz NOT NULL,
@@ -49,8 +51,11 @@ CREATE TABLE IF NOT EXISTS shared_bills (
   CONSTRAINT shared_bills_pkey PRIMARY KEY (bill_id),
   CONSTRAINT shared_bills_bill_id_format
     CHECK (bill_id ~ '^0x[0-9a-f]{64}$'),
-  CONSTRAINT shared_bills_debts_hash_format
-    CHECK (debts_hash ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bills_debts_root_format
+    CHECK (debts_root ~ '^0x[0-9a-f]{64}$'),
+  -- Yalnızca Merkle tabanlı şema kabul edilir; toplu hash'li sürüm 1 değil.
+  CONSTRAINT shared_bills_schema_version_supported
+    CHECK (schema_version = 2),
   CONSTRAINT shared_bills_signature_format
     CHECK (recipient_signature ~ '^0x[0-9a-fA-F]{130}$'),
   CONSTRAINT shared_bills_recipient_format
@@ -81,6 +86,9 @@ CREATE TABLE IF NOT EXISTS shared_bill_debts (
   debt_key       text        NOT NULL,
   -- TRY minor unit. TAM SAYI: kayan nokta ASLA kullanılmaz.
   try_minor      numeric(30, 0) NOT NULL,
+  -- Satırın KANONİK Merkle indeksi (borçlu adresi artan sırada 0'dan başlar).
+  -- Kanıt üretimi için saklanır; sıradan türetilebilir olsa da açıkça tutulur.
+  leaf_index     smallint    NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT shared_bill_debts_bill_fk
@@ -100,10 +108,79 @@ CREATE TABLE IF NOT EXISTS shared_bill_debts (
     UNIQUE (bill_id, debtor_address),
   -- Borç kimliği de hesap başına benzersizdir.
   CONSTRAINT shared_bill_debts_unique_key
-    UNIQUE (bill_id, debt_key)
+    UNIQUE (bill_id, debt_key),
+  CONSTRAINT shared_bill_debts_leaf_index_range
+    CHECK (leaf_index >= 0 AND leaf_index < 50),
+  -- Kanonik indeks hesap başına benzersizdir: iki satır aynı yaprağı
+  -- işaret edemez.
+  CONSTRAINT shared_bill_debts_unique_leaf_index
+    UNIQUE (bill_id, leaf_index)
 );
 
 CREATE INDEX IF NOT EXISTS shared_bill_debts_bill_idx
   ON shared_bill_debts (bill_id);
+
+-- ---------------------------------------------------------------------------
+-- PART 2 — borçlu cüzdan kimlik doğrulaması
+--
+-- Bu tablolar YALNIZCA "bu adresi kontrol eden kişi kendi borcunu görebilsin"
+-- sorusunu çözer. Ödeme denemesi, ödeme başarısı ve işlem kesinleştirme
+-- tabloları BİLEREK eklenmemiştir; onlar Part 3'tedir.
+--
+-- Cüzdan imzası bir KİMLİK/KYC kanıtı DEĞİLDİR ve borcun gerçek dünyada
+-- meşru olduğunu KANITLAMAZ; yalnızca adresin kontrolünü kanıtlar.
+-- ---------------------------------------------------------------------------
+
+-- Tüketilmiş kimlik doğrulama nonce'ları. Bir nonce YALNIZCA BİR KEZ
+-- kullanılabilir; tekrar oynatma burada atomik olarak engellenir.
+CREATE TABLE IF NOT EXISTS shared_bill_auth_nonces (
+  bill_id        text        NOT NULL,
+  nonce          text        NOT NULL,
+  debtor_address text        NOT NULL,
+  consumed_at    timestamptz NOT NULL DEFAULT now(),
+  -- Nonce'un kendi son kullanma anı; süresi dolan satır temizlenebilir.
+  expires_at     timestamptz NOT NULL,
+
+  CONSTRAINT shared_bill_auth_nonces_pkey PRIMARY KEY (bill_id, nonce),
+  CONSTRAINT shared_bill_auth_nonces_bill_fk
+    FOREIGN KEY (bill_id) REFERENCES shared_bills (bill_id) ON DELETE CASCADE,
+  CONSTRAINT shared_bill_auth_nonces_nonce_format
+    CHECK (nonce ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_auth_nonces_debtor_format
+    CHECK (debtor_address ~ '^0x[0-9a-fA-F]{40}$')
+);
+
+CREATE INDEX IF NOT EXISTS shared_bill_auth_nonces_expires_at_idx
+  ON shared_bill_auth_nonces (expires_at);
+
+-- Kısa ömürlü kimlik doğrulanmış oturumlar.
+--
+-- HAM OTURUM JETONU ASLA SAKLANMAZ: yalnızca kriptografik özeti tutulur.
+-- Veritabanını okuyan biri geçerli bir çerez üretemez.
+CREATE TABLE IF NOT EXISTS shared_bill_sessions (
+  -- Ham jetonun SHA-256 özeti (0x + 64 hex). Birincil anahtar budur.
+  session_hash   text        NOT NULL,
+  bill_id        text        NOT NULL,
+  debtor_address text        NOT NULL,
+  chain_id       bigint      NOT NULL,
+  created_at     timestamptz NOT NULL DEFAULT now(),
+  expires_at     timestamptz NOT NULL,
+
+  CONSTRAINT shared_bill_sessions_pkey PRIMARY KEY (session_hash),
+  CONSTRAINT shared_bill_sessions_bill_fk
+    FOREIGN KEY (bill_id) REFERENCES shared_bills (bill_id) ON DELETE CASCADE,
+  CONSTRAINT shared_bill_sessions_hash_format
+    CHECK (session_hash ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_sessions_debtor_format
+    CHECK (debtor_address ~ '^0x[0-9a-fA-F]{40}$'),
+  CONSTRAINT shared_bill_sessions_window_ordered
+    CHECK (expires_at > created_at),
+  -- Oturum ömrü üst sınırı ikinci savunma hattı olarak burada da uygulanır.
+  CONSTRAINT shared_bill_sessions_lifetime_max_15_min
+    CHECK (expires_at <= created_at + interval '15 minutes')
+);
+
+CREATE INDEX IF NOT EXISTS shared_bill_sessions_expires_at_idx
+  ON shared_bill_sessions (expires_at);
 
 COMMIT;

@@ -126,7 +126,7 @@ describe("basarili atomik olusturma", () => {
     const serialized = JSON.stringify(result);
     for (const secret of [
       prepared.signature,
-      prepared.manifest.debtsHash,
+      prepared.manifest.debtsRoot,
       prepared.manifest.recipient,
       DEBTOR_A,
       DEBTOR_B,
@@ -229,7 +229,7 @@ describe("idempotent tekrar karari", () => {
       code: "BILL_ID_UNAVAILABLE",
     });
     // Ilk kayit korunur.
-    expect(repository.bills.get(BILL_ID.toLowerCase())?.recipient).toBe(
+    expect(repository.bills.get(BILL_ID.toLowerCase())?.manifest.recipient).toBe(
       first.manifest.recipient,
     );
   });

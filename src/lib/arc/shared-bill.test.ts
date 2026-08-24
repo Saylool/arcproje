@@ -8,11 +8,11 @@ import {
   buildSharedBillPath,
   buildSharedBillUrl,
   canonicalizeSharedBillDebts,
-  computeSharedBillDebtsHash,
+  computeSharedBillRoot,
   createSharedBill,
   createSharedBillId,
   describeSharedBillProblem,
-  hashSharedBillDebtRow,
+  computeSharedBillLeaves,
   validateSharedBillManifest,
   validateSharedBillSubmission,
   type SharedBillDebt,
@@ -72,7 +72,7 @@ function manifestOf(over: Record<string, unknown> = {}) {
     chainId: CHAIN,
     recipient: RECIPIENT,
     recipientLabel: "Poyraz",
-    debtsHash: computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts }),
+    debtsRoot: computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts }),
     debtCount: debts.length,
     issuedAt: NOW_SECONDS,
     expiresAt: NOW_SECONDS + 3600,
@@ -133,7 +133,7 @@ describe("kanonik borc listesi", () => {
     expect(shuffled.debts).toEqual(forward.debts);
 
     const hash = (debts: readonly SharedBillDebt[]) =>
-      computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+      computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     expect(hash(reversed.debts)).toBe(hash(forward.debts));
     expect(hash(shuffled.debts)).toBe(hash(forward.debts));
   });
@@ -329,15 +329,15 @@ describe("tutarlar TAM SAYI minor unit kalir", () => {
 describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
   it("belirlenimcidir", () => {
     const debts = canonicalDebts();
-    const a = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
-    const b = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+    const a = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
+    const b = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     expect(a).toBe(b);
     expect(a).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it("JSON.stringify ciktisina BAGLI DEGILDIR", () => {
     const debts = canonicalDebts();
-    const hash = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+    const hash = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     // Ayni alanlar, farkli anahtar sirasiyla kurulmus satirlar.
     const reordered = debts.map((debt) =>
       Object.freeze({
@@ -348,13 +348,13 @@ describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
       }),
     );
     expect(
-      computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts: reordered }),
+      computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts: reordered }),
     ).toBe(hash);
   });
 
   it("her alan taahhudu DEGISTIRIR", () => {
     const debts = canonicalDebts();
-    const base = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+    const base = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     const mutations: readonly Partial<SharedBillDebt>[] = [
       { debtor: DEBTOR_C },
       { debtorLabel: "Adax" },
@@ -364,7 +364,7 @@ describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
     for (const mutation of mutations) {
       const mutated = [{ ...debts[0], ...mutation }, ...debts.slice(1)];
       expect(
-        computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts: mutated }),
+        computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts: mutated }),
         JSON.stringify(mutation),
       ).not.toBe(base);
     }
@@ -372,12 +372,12 @@ describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
 
   it("zincire ve hesap kimligine BAGLIDIR", () => {
     const debts = canonicalDebts();
-    const base = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+    const base = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     expect(
-      computeSharedBillDebtsHash({ chainId: CHAIN + 1, billId: BILL_ID, debts }),
+      computeSharedBillRoot({ chainId: CHAIN + 1, billId: BILL_ID, debts }),
     ).not.toBe(base);
     expect(
-      computeSharedBillDebtsHash({
+      computeSharedBillRoot({
         chainId: CHAIN,
         billId: `0x${"5b".repeat(32)}`,
         debts,
@@ -387,9 +387,9 @@ describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
 
   it("satir SAYISINA baglidir: satir cikarmak taahhudu bozar", () => {
     const debts = canonicalDebts();
-    const base = computeSharedBillDebtsHash({ chainId: CHAIN, billId: BILL_ID, debts });
+    const base = computeSharedBillRoot({ chainId: CHAIN, billId: BILL_ID, debts });
     expect(
-      computeSharedBillDebtsHash({
+      computeSharedBillRoot({
         chainId: CHAIN,
         billId: BILL_ID,
         debts: debts.slice(0, 2),
@@ -398,27 +398,25 @@ describe("borc taahhudu kanonik ve alan ayrilmistir", () => {
   });
 
   it("satir yapragi da alan ayrilmistir", () => {
-    const debts = canonicalDebts();
-    expect(hashSharedBillDebtRow(debts[0])).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(hashSharedBillDebtRow(debts[0])).not.toBe(
-      hashSharedBillDebtRow(debts[1]),
+    const leaves = computeSharedBillLeaves(
+      { chainId: CHAIN, billId: BILL_ID },
+      canonicalDebts(),
     );
+    for (const leaf of leaves) {
+      expect(leaf).toMatch(/^0x[0-9a-f]{64}$/);
+    }
+    expect(new Set(leaves).size).toBe(leaves.length);
   });
 
   it("etiket siniri kaydirma saldirisina kapalidir", () => {
-    // "Ada"+"x" ile "Ada"/"x" ayrimi hash'te korunur (uzunluk kacisi yok).
-    const left = hashSharedBillDebtRow({
-      debtor: DEBTOR_A,
-      debtorLabel: "Ada",
-      debtKey: "xa->p",
-      tryMinor: "1",
-    });
-    const right = hashSharedBillDebtRow({
-      debtor: DEBTOR_A,
-      debtorLabel: "Adax",
-      debtKey: "a->p",
-      tryMinor: "1",
-    });
+    // "Ada"+"x" ile "Ada"/"x" ayrimi ozette korunur (uzunluk kacisi yok).
+    const context = { chainId: CHAIN, billId: BILL_ID };
+    const left = computeSharedBillLeaves(context, [
+      { debtor: DEBTOR_A, debtorLabel: "Ada", debtKey: "xa->p", tryMinor: "1" },
+    ])[0];
+    const right = computeSharedBillLeaves(context, [
+      { debtor: DEBTOR_A, debtorLabel: "Adax", debtKey: "a->p", tryMinor: "1" },
+    ])[0];
     expect(left).not.toBe(right);
   });
 });
@@ -456,7 +454,7 @@ describe("manifest dogrulamasi", () => {
   });
 
   it("sema surumu katidir", () => {
-    for (const version of [0, 2, "1", null]) {
+    for (const version of [0, 3, "2", null]) {
       expect(
         validateSharedBillManifest(manifestOf({ schemaVersion: version }), NOW),
         String(version),
@@ -464,12 +462,22 @@ describe("manifest dogrulamasi", () => {
     }
   });
 
+  it("ESKI toplu hash semasi (surum 1) FAIL-CLOSED reddedilir", () => {
+    /*
+     * Surum 1 taahhudu bir borclunun kendi satirini, digerlerini gormeden
+     * dogrulamasina izin vermiyordu. Sessizce kabul edilmez.
+     */
+    expect(
+      validateSharedBillManifest(manifestOf({ schemaVersion: 1 }), NOW),
+    ).toEqual({ ok: false, problem: "legacyAggregateSchema" });
+  });
+
   it("bozuk hesap kimligi ve taahhut bicimi reddedilir", () => {
     expect(validateSharedBillManifest(manifestOf({ billId: "0xkisa" }), NOW)).toEqual(
       { ok: false, problem: "invalidBillId" },
     );
     expect(
-      validateSharedBillManifest(manifestOf({ debtsHash: "0xkisa" }), NOW),
+      validateSharedBillManifest(manifestOf({ debtsRoot: "0xkisa" }), NOW),
     ).toEqual({ ok: false, problem: "commitmentMismatch" });
   });
 

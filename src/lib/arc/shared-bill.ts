@@ -1,6 +1,13 @@
-import { encodeAbiParameters, keccak256, stringToBytes } from "viem";
 
 import { normalizeWalletAddress, walletAddressesEqual } from "./address";
+import {
+  computeSharedBillDebtsRoot,
+  computeSharedBillLeaf,
+  computeSharedBillTreeRoot,
+  computeSharedBillProofRoot,
+  generateSharedBillProof,
+  type SharedBillProof,
+} from "./shared-bill-merkle";
 import { toCanonicalLabel, validateCanonicalLabel } from "./labels";
 import {
   MAX_DEBT_KEY_LENGTH,
@@ -31,12 +38,22 @@ import { ACTIVE_NETWORK_PROFILE } from "./profile";
  * tutulur; BigInt asla doğrudan JSON'a yazılmaz.
  */
 
-/** Bu modülün şeması. Ödeme talebi şemasından BAĞIMSIZDIR. */
-export const SHARED_BILL_SCHEMA_VERSION = 1;
+/**
+ * Bu modülün şeması. Ödeme talebi şemasından BAĞIMSIZDIR.
+ *
+ * SÜRÜM 2: borç taahhüdü toplu (aggregate) hash'ten MERKLE KÖKÜNE geçti.
+ * Sürüm 1 manifestleri bilinçli olarak REDDEDİLİR (fail-closed): eski taahhüt
+ * bir borçlunun kendi satırını, diğer satırları görmeden doğrulamasına izin
+ * vermiyordu. Sürüm 1 hiçbir yerde yayımlanmadı ve hiçbir veritabanına
+ * yazılmadı; geriye dönük uyumluluk gerekmez.
+ */
+export const SHARED_BILL_SCHEMA_VERSION = 2;
+/** Artık kabul edilmeyen, toplu hash tabanlı ilk şema. */
+export const LEGACY_AGGREGATE_SCHEMA_VERSION = 1;
 
 /** Ayrı EIP-712 alanı: ödeme talebi imzası paylaşılan hesap imzası olamaz. */
 export const SHARED_BILL_DOMAIN_NAME = "Hesabi Bol Shared Bill";
-export const SHARED_BILL_DOMAIN_VERSION = "1";
+export const SHARED_BILL_DOMAIN_VERSION = "2";
 
 /**
  * Hesabın SONLU ömrü.
@@ -61,9 +78,9 @@ export const SHARED_BILL_ROUTE = "/pay";
 /**
  * İmzalanan manifest alanlarının kanonik sırası.
  *
- * Borç LİSTESİ manifeste gömülmez; yerine kriptografik bir taahhüt
- * (`debtsHash`) imzalanır. Böylece imza tüm borçları kapsar ama manifest
- * sabit boyutlu kalır ve liste bağlantıya sızmaz.
+ * Borç LİSTESİ manifeste gömülmez; yerine bir MERKLE KÖKÜ (`debtsRoot`)
+ * imzalanır. Böylece imza tüm borçları kapsar, manifest sabit boyutlu kalır ve
+ * bir borçlu KENDİ satırını diğer satırları GÖRMEDEN doğrulayabilir.
  */
 export const SHARED_BILL_TYPES = {
   SharedBillManifest: [
@@ -72,7 +89,7 @@ export const SHARED_BILL_TYPES = {
     { name: "chainId", type: "uint256" },
     { name: "recipient", type: "address" },
     { name: "recipientLabel", type: "string" },
-    { name: "debtsHash", type: "bytes32" },
+    { name: "debtsRoot", type: "bytes32" },
     { name: "debtCount", type: "uint16" },
     { name: "issuedAt", type: "uint64" },
     { name: "expiresAt", type: "uint64" },
@@ -86,8 +103,8 @@ export type SharedBillManifest = Readonly<{
   chainId: number;
   recipient: string;
   recipientLabel: string;
-  /** Borç listesinin kanonik kriptografik taahhüdü (0x + 64 hex). */
-  debtsHash: string;
+  /** Borç listesinin kanonik Merkle KÖKÜ (0x + 64 hex). */
+  debtsRoot: string;
   debtCount: number;
   /** Unix saniye. */
   issuedAt: number;
@@ -136,6 +153,8 @@ export type SharedBillProblem =
   | "tooManyDebts"
   | "debtCountMismatch"
   | "commitmentMismatch"
+  | "invalidProof"
+  | "legacyAggregateSchema"
   | "invalidTimestamps"
   | "expired"
   | "notYetValid"
@@ -162,6 +181,10 @@ const PROBLEM_MESSAGES: Record<SharedBillProblem, string> = {
   debtCountMismatch: "Borç sayısı manifest ile uyuşmuyor.",
   commitmentMismatch:
     "Borç listesi, imzalanan taahhütle uyuşmuyor. Bu hesaba güvenme.",
+  invalidProof:
+    "Borcun imzalanan köke ait olduğu kanıtlanamadı. Bu hesaba güvenme.",
+  legacyAggregateSchema:
+    "Bu paylaşılan hesap, artık desteklenmeyen eski bir taahhüt biçimiyle oluşturulmuş. Hesabı oluşturan kişiden yeni bir bağlantı iste.",
   invalidTimestamps: "Paylaşılan hesabın zaman bilgisi geçersiz.",
   expired: "Bu paylaşılan hesabın süresi dolmuş.",
   notYetValid: "Bu paylaşılan hesap henüz geçerli değil.",
@@ -205,59 +228,28 @@ export function createSharedBillId(): string {
 
 /*
  * ---------------------------------------------------------------------------
- * KANONİK BORÇ TAAHHÜDÜ
+ * KANONİK BORÇ TAAHHÜDÜ (MERKLE)
  * ---------------------------------------------------------------------------
  *
  * `JSON.stringify` çıktısı taahhüt olarak KULLANILMAZ: anahtar sırası, boşluk
  * ve Unicode kaçışları uygulamadan uygulamaya değişir ve aynı borç listesi
  * farklı baytlar üretebilir.
  *
- * Bunun yerine her satır EIP-712 struct hash'i gibi ABI-kodlanır, satırlar
- * KANONİK SIRAYA (borçlu adresi, küçük harf, artan) dizilir ve alan
- * ayrılmış bir etiketle tek bir bytes32'ye indirgenir. Taahhüt zincire,
- * hesap kimliğine ve borç SAYISINA da bağlıdır; satır ekleme/çıkarma veya
- * başka bir hesaba kopyalama taahhüdü bozar.
+ * Her satır alan ayrılmış bir YAPRAK özetine indirgenir, satırlar KANONİK
+ * SIRAYA (borçlu adresi, küçük harf, artan) dizilir ve konumsal bir Merkle
+ * ağacıyla tek bir köke çıkarılır. İmzalanan kök; şema sürümünü, zinciri,
+ * hesap kimliğini ve borç SAYISINI da bağlar.
+ *
+ * Ağacın kendisi `./shared-bill-merkle` içindedir; oradaki yorum tek sayıda
+ * düğüm davranışını, yön türetmeyi ve alan ayrımını açıklar.
  */
-
-/** Satır struct'ının tip hash'i. */
-export const SHARED_BILL_DEBT_TYPEHASH = keccak256(
-  stringToBytes(
-    "SharedBillDebt(address debtor,string debtorLabel,string debtKey,uint256 tryMinor)",
-  ),
-);
-
-/** Taahhüdün alan ayracı; başka bir bağlamdaki hash ile karışamaz. */
-export const SHARED_BILL_DEBTS_COMMITMENT_TAG = keccak256(
-  stringToBytes(`HesabiBolSharedBillDebts(${SHARED_BILL_SCHEMA_VERSION})`),
-);
-
-/** Tek bir kanonik borç satırının yaprak hash'i. */
-export function hashSharedBillDebtRow(debt: SharedBillDebt): string {
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: "bytes32" },
-        { type: "address" },
-        { type: "bytes32" },
-        { type: "bytes32" },
-        { type: "uint256" },
-      ],
-      [
-        SHARED_BILL_DEBT_TYPEHASH as `0x${string}`,
-        debt.debtor as `0x${string}`,
-        keccak256(stringToBytes(debt.debtorLabel)),
-        keccak256(stringToBytes(debt.debtKey)),
-        BigInt(debt.tryMinor),
-      ],
-    ),
-  );
-}
 
 /**
  * KANONİK SIRA: borçlu adresine göre (küçük harf, sözlük sırası) ARTAN.
  *
  * Borçlu adresi hesap başına benzersiz olduğu için bu sıra TAM'dır: iki satır
  * asla eşit sıralanamaz. Girdi sırası ne olursa olsun aynı manifest üretilir.
+ * Bir satırın KANONİK İNDEKSİ, bu sıradaki konumudur.
  */
 export function canonicalDebtOrder(
   a: SharedBillDebt,
@@ -270,38 +262,123 @@ export function canonicalDebtOrder(
   return 0;
 }
 
+export type SharedBillTreeContext = Readonly<{
+  chainId: number;
+  billId: string;
+}>;
+
+/** Kanonik satırların yaprak özetleri; sıra kanonik indekstir. */
+export function computeSharedBillLeaves(
+  context: SharedBillTreeContext,
+  debts: readonly SharedBillDebt[],
+): readonly string[] {
+  return debts.map((debt) =>
+    computeSharedBillLeaf({
+      schemaVersion: SHARED_BILL_SCHEMA_VERSION,
+      chainId: context.chainId,
+      billId: context.billId,
+      debtor: debt.debtor,
+      debtorLabel: debt.debtorLabel,
+      debtKey: debt.debtKey,
+      tryMinor: debt.tryMinor,
+    }),
+  );
+}
+
 /**
- * Kanonik sıradaki satırlardan borç taahhüdünü hesaplar.
+ * Kanonik sıradaki satırlardan İMZALANAN KÖKÜ hesaplar.
  *
  * Satırların ZATEN kanonik ve doğrulanmış olduğu varsayılır; ham girdi için
  * önce `canonicalizeSharedBillDebts` çağrılır.
  */
-export function computeSharedBillDebtsHash(input: {
+export function computeSharedBillRoot(input: {
   chainId: number;
   billId: string;
   debts: readonly SharedBillDebt[];
 }): string {
-  const leaves = input.debts.map(
-    (debt) => hashSharedBillDebtRow(debt) as `0x${string}`,
+  const leaves = computeSharedBillLeaves(
+    { chainId: input.chainId, billId: input.billId },
+    input.debts,
   );
-  return keccak256(
-    encodeAbiParameters(
-      [
-        { type: "bytes32" },
-        { type: "uint256" },
-        { type: "bytes32" },
-        { type: "uint16" },
-        { type: "bytes32[]" },
-      ],
-      [
-        SHARED_BILL_DEBTS_COMMITMENT_TAG as `0x${string}`,
-        BigInt(input.chainId),
-        input.billId as `0x${string}`,
-        input.debts.length,
-        leaves,
-      ],
-    ),
+  const treeRoot = computeSharedBillTreeRoot(leaves);
+  if (treeRoot === null) {
+    // Boş liste zaten doğrulamadan geçemez; burada sessiz bir kök üretilmez.
+    throw new Error("shared bill root requires at least one debt");
+  }
+  return computeSharedBillDebtsRoot({
+    schemaVersion: SHARED_BILL_SCHEMA_VERSION,
+    chainId: input.chainId,
+    billId: input.billId,
+    debtCount: input.debts.length,
+    treeRoot,
+  });
+}
+
+/** Tek bir satır için Merkle kanıtı üretir (yalnızca sunucu tarafı kullanır). */
+export function proveSharedBillDebt(input: {
+  chainId: number;
+  billId: string;
+  debts: readonly SharedBillDebt[];
+  leafIndex: number;
+}): SharedBillProof | null {
+  const leaves = computeSharedBillLeaves(
+    { chainId: input.chainId, billId: input.billId },
+    input.debts,
   );
+  return generateSharedBillProof(leaves, input.leafIndex);
+}
+
+export type DebtInclusionResult =
+  | { ok: true }
+  | { ok: false; problem: SharedBillProblem };
+
+/**
+ * Bir borçlunun KENDİ satırının imzalanan köke ait olduğunu doğrular.
+ *
+ * Borçlu bunu diğer satırları GÖRMEDEN yapar: elinde yalnızca kendi satırı,
+ * kanonik indeksi ve kardeş özetleri vardır. Kardeş özetlerden başka bir
+ * satırın adresi, etiketi, borç kimliği veya tutarı TÜRETİLEMEZ.
+ *
+ * Sıra: yaprak yeniden hesaplanır → kanıttan aday ağaç kökü kurulur → aday
+ * kök, şema/zincir/hesap/borç sayısı ile birlikte İMZALANAN köke çevrilir ve
+ * birebir karşılaştırılır.
+ */
+export function verifySharedBillDebtInclusion(input: {
+  manifest: SharedBillManifest;
+  debt: SharedBillDebt;
+  proof: SharedBillProof;
+}): DebtInclusionResult {
+  const { manifest, debt, proof } = input;
+
+  const leaf = computeSharedBillLeaf({
+    schemaVersion: manifest.schemaVersion,
+    chainId: manifest.chainId,
+    billId: manifest.billId,
+    debtor: debt.debtor,
+    debtorLabel: debt.debtorLabel,
+    debtKey: debt.debtKey,
+    tryMinor: debt.tryMinor,
+  });
+
+  const rebuilt = computeSharedBillProofRoot({
+    leaf,
+    proof,
+    debtCount: manifest.debtCount,
+  });
+  if (!rebuilt.ok) {
+    return { ok: false, problem: "invalidProof" };
+  }
+
+  const signed = computeSharedBillDebtsRoot({
+    schemaVersion: manifest.schemaVersion,
+    chainId: manifest.chainId,
+    billId: manifest.billId,
+    debtCount: manifest.debtCount,
+    treeRoot: rebuilt.treeRoot,
+  });
+  return signed.toLowerCase() === manifest.debtsRoot.toLowerCase()
+    ? { ok: true }
+    : { ok: false, problem: "invalidProof" };
 }
 
 export type CanonicalizeDebtsResult =
@@ -477,7 +554,7 @@ export function createSharedBill(
     chainId,
     recipient,
     recipientLabel: toCanonicalLabel(input.recipientLabel),
-    debtsHash: computeSharedBillDebtsHash({
+    debtsRoot: computeSharedBillRoot({
       chainId,
       billId,
       debts: canonical.debts,
@@ -513,7 +590,7 @@ export function buildSharedBillTypedData(manifest: SharedBillManifest) {
       chainId: BigInt(manifest.chainId),
       recipient: manifest.recipient as `0x${string}`,
       recipientLabel: manifest.recipientLabel,
-      debtsHash: manifest.debtsHash as `0x${string}`,
+      debtsRoot: manifest.debtsRoot as `0x${string}`,
       debtCount: manifest.debtCount,
       issuedAt: BigInt(manifest.issuedAt),
       expiresAt: BigInt(manifest.expiresAt),
@@ -546,6 +623,13 @@ export function validateSharedBillManifest(
     }
   }
 
+  /*
+   * Sürüm 1 (toplu hash) bilinçli olarak REDDEDİLİR: o taahhüt bir borçlunun
+   * kendi satırını, diğer satırları görmeden doğrulamasına izin vermiyordu.
+   */
+  if (record.schemaVersion === LEGACY_AGGREGATE_SCHEMA_VERSION) {
+    return { ok: false, problem: "legacyAggregateSchema" };
+  }
   if (record.schemaVersion !== SHARED_BILL_SCHEMA_VERSION) {
     return { ok: false, problem: "unsupportedSchemaVersion" };
   }
@@ -567,7 +651,7 @@ export function validateSharedBillManifest(
     return { ok: false, problem: "invalidLabel" };
   }
 
-  if (typeof record.debtsHash !== "string" || !BYTES32.test(record.debtsHash)) {
+  if (typeof record.debtsRoot !== "string" || !BYTES32.test(record.debtsRoot)) {
     return { ok: false, problem: "commitmentMismatch" };
   }
 
@@ -616,7 +700,7 @@ export function validateSharedBillManifest(
       chainId: ACTIVE_NETWORK_PROFILE.chainId,
       recipient,
       recipientLabel: record.recipientLabel,
-      debtsHash: record.debtsHash.toLowerCase(),
+      debtsRoot: record.debtsRoot.toLowerCase(),
       debtCount,
       issuedAt,
       expiresAt,
@@ -635,7 +719,7 @@ export type ValidateSubmissionResult =
  * İmzanın kriptografik doğrulaması ayrı bir adımdır
  * (`verifySharedBillSignature`); bu fonksiyon ona verilecek kanonik gövdeyi
  * üretir. Taahhüt, gönderilen satırlardan sunucu tarafında yeniden hesaplanır:
- * istemcinin bildirdiği `debtsHash`e asla güvenilmez.
+ * istemcinin bildirdiği `debtsRoot`e asla güvenilmez.
  */
 export function validateSharedBillSubmission(
   value: unknown,
@@ -681,12 +765,12 @@ export function validateSharedBillSubmission(
   }
 
   // Taahhüt SUNUCUDA yeniden hesaplanır; bildirilen değer yalnızca karşılaştırılır.
-  const recomputed = computeSharedBillDebtsHash({
+  const recomputed = computeSharedBillRoot({
     chainId: manifest.chainId,
     billId: manifest.billId,
     debts: canonical.debts,
   });
-  if (recomputed.toLowerCase() !== manifest.debtsHash.toLowerCase()) {
+  if (recomputed.toLowerCase() !== manifest.debtsRoot.toLowerCase()) {
     return { ok: false, problem: "commitmentMismatch" };
   }
 

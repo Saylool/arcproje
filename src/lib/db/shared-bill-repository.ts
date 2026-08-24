@@ -44,6 +44,64 @@ export type CreateSharedBillOutcome =
   /** Depo yapılandırılmamış veya erişilemiyor. */
   | { ok: false; reason: "unavailable" };
 
+/** Depodan okunan tek borç satırı; kanonik Merkle indeksiyle birlikte. */
+export type StoredSharedBillDebt = Readonly<{
+  debtor: string;
+  debtorLabel: string;
+  debtKey: string;
+  tryMinor: string;
+  /** Kanıt üretimi için saklanan kanonik indeks. */
+  leafIndex: number;
+}>;
+
+/** Depodan okunan hesap. Fiş, ürün veya kur verisi İÇERMEZ. */
+export type StoredSharedBill = Readonly<{
+  manifest: SharedBillManifest;
+  signature: string;
+  status: SharedBillStatus;
+  /** TÜM satırlar — YALNIZCA sunucu tarafında; kanıt üretimi için gerekir. */
+  debts: readonly StoredSharedBillDebt[];
+}>;
+
+export type ResolveAccessInput = Readonly<{
+  billId: string;
+  debtor: string;
+  /** Tek kullanımlık değer; atomik olarak tüketilir. */
+  nonce: string;
+  nonceExpiresAt: number;
+  /** Oturum jetonunun SHA-256 özeti; ham jeton ASLA gönderilmez. */
+  sessionHash: string;
+  sessionExpiresAt: number;
+  chainId: number;
+  nowMs: number;
+}>;
+
+/**
+ * Erişim çözümlemesinin sonucu.
+ *
+ * `notFound` GENEL bir hatadır: hesabın olmaması, kapalı olması, süresinin
+ * dolmuş olması ve bu adrese ait borç bulunmaması AYNI cevabı verir. Böylece
+ * bir saldırgan "bu cüzdan bu hesapta var mı?" sorusunu YANIT ÜZERİNDEN
+ * ayırt edemez.
+ */
+export type ResolveAccessOutcome =
+  | { ok: true; bill: StoredSharedBill; debt: StoredSharedBillDebt }
+  /** Nonce daha önce kullanılmış: tekrar oynatma. */
+  | { ok: false; reason: "replay" }
+  | { ok: false; reason: "notFound" }
+  | { ok: false; reason: "unavailable" };
+
+export type SessionLookupOutcome =
+  | {
+      ok: true;
+      bill: StoredSharedBill;
+      /** Oturumun bağlı olduğu, kimliği doğrulanmış borçlu. */
+      debtor: string;
+      debt: StoredSharedBillDebt;
+    }
+  | { ok: false; reason: "notFound" }
+  | { ok: false; reason: "unavailable" };
+
 export type SharedBillRepository = Readonly<{
   /**
    * Hesabı ve TÜM borç satırlarını ATOMİK olarak yazar.
@@ -52,4 +110,27 @@ export type SharedBillRepository = Readonly<{
    * yazılmaz. Çağıran, doğrulamanın TAMAMINI bu çağrıdan ÖNCE yapmış olmalıdır.
    */
   createSharedBill(record: SharedBillRecord): Promise<CreateSharedBillOutcome>;
+
+  /**
+   * Erişimi ATOMİK olarak çözer: nonce'u tüketir VE oturumu yaratır.
+   *
+   * Nonce tüketimi ile oturum yaratma aynı işlemdedir; ikisi birden olur ya
+   * da hiçbiri olmaz. Aynı nonce ile eşzamanlı iki istek gelirse EN FAZLA
+   * BİRİ başarılı olur.
+   *
+   * Çağıran, meydan okuma etiketini ve borçlunun EIP-712 imzasını bu
+   * çağrıdan ÖNCE doğrulamış olmalıdır.
+   */
+  resolveAccess(input: ResolveAccessInput): Promise<ResolveAccessOutcome>;
+
+  /**
+   * Oturum özetinden hesabı ve kimliği doğrulanmış borçlunun satırını okur.
+   *
+   * Süresi dolmuş oturum ve hesap FİZİKSEL olarak silinmemiş olsa bile
+   * KULLANILAMAZ sayılır.
+   */
+  readSession(input: {
+    sessionHash: string;
+    nowMs: number;
+  }): Promise<SessionLookupOutcome>;
 }>;
