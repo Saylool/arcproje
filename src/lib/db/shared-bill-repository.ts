@@ -1,5 +1,10 @@
 import type { SharedBillDebt, SharedBillManifest } from "@/lib/arc/shared-bill";
 
+import type {
+  DebtPaymentStatus,
+  SharedBillPaymentRepository,
+} from "./shared-bill-payment-repository";
+
 /**
  * Paylaşılan hesap deposunun SINIRI (repository boundary).
  *
@@ -49,9 +54,16 @@ export type StoredSharedBillDebt = Readonly<{
   debtor: string;
   debtorLabel: string;
   debtKey: string;
+  /** KANONİK ondalık tam sayı metni; `number`a ASLA indirgenmez. */
   tryMinor: string;
   /** Kanıt üretimi için saklanan kanonik indeks. */
   leafIndex: number;
+  /** Ödeme durum makinesi (Part 3). */
+  paymentStatus: DebtPaymentStatus;
+  /** YALNIZCA sunucu tarafında doğrulanmış makbuzla dolar. */
+  paidTxHash: string | null;
+  /** Unix saniye. */
+  paidAt: number | null;
 }>;
 
 /** Depodan okunan hesap. Fiş, ürün veya kur verisi İÇERMEZ. */
@@ -102,7 +114,14 @@ export type SessionLookupOutcome =
   | { ok: false; reason: "notFound" }
   | { ok: false; reason: "unavailable" };
 
-export type SharedBillRepository = Readonly<{
+/**
+ * Paylaşılan hesap deposunun TAM sözleşmesi: erişim + ödeme yaşam döngüsü.
+ *
+ * Ödeme tarafı ayrı bir modülde tanımlıdır (`./shared-bill-payment-repository`)
+ * ama TEK bir sınır olarak sunulur: rotalar tek bir depo alır.
+ */
+export type SharedBillRepository = SharedBillPaymentRepository &
+  Readonly<{
   /**
    * Hesabı ve TÜM borç satırlarını ATOMİK olarak yazar.
    *
@@ -133,4 +152,4 @@ export type SharedBillRepository = Readonly<{
     sessionHash: string;
     nowMs: number;
   }): Promise<SessionLookupOutcome>;
-}>;
+  }>;

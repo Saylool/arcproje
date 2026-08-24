@@ -30,7 +30,9 @@ import {
   switchToArcTestnet,
   type WalletInfo,
 } from "@/lib/arc/wallet";
-import { formatMinorForDisplay } from "@/lib/receipt/money";
+import { formatMinorUnitsAsTry } from "@/lib/arc/minor-units";
+
+import { SharedBillPaymentPanel } from "./SharedBillPaymentPanel";
 
 /**
  * ORTAK BAĞLANTI — borçlu tarafı.
@@ -42,8 +44,9 @@ import { formatMinorForDisplay } from "@/lib/receipt/money";
  * Bu bileşen sunucuya GÜVENMEZ: borç ekranda görünmeden önce manifest, alıcı
  * imzası ve Merkle kanıtı istemcide bağımsız olarak doğrulanır.
  *
- * PART 2 SINIRI: burada ÖDEME YOKTUR. Kur çekilmez, tahmin alınmaz, App Kit
- * çağrılmaz ve hiçbir işlem gönderilmez. Ödeme Part 3'tedir.
+ * ÖDEME, doğrulama BİTTİKTEN SONRA açılır ve ayrı bir panelde yaşar
+ * (`SharedBillPaymentPanel`). Kimlik doğrulanmadan ve manifest/Merkle
+ * doğrulaması geçmeden HİÇBİR ödeme kontrolü görünmez.
  */
 
 type Props = { billId: string };
@@ -333,7 +336,8 @@ export function SharedBillDebtorView({ billId }: Props) {
         <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
           <h2 className="text-sm font-semibold text-slate-800">Senin borcun</h2>
           <p className="text-2xl font-semibold tracking-tight text-slate-900">
-            {formatMinorForDisplay(Number(stage.view.debt.tryMinor), "TRY")}
+            {/* Gösterim TAM SAYIDAN türer; `Number` ile daraltılmaz. */}
+            {formatMinorUnitsAsTry(stage.view.debt.tryMinor) ?? "—"}
           </p>
           <p className="text-xs text-slate-600">
             {stage.view.debt.debtorLabel} →{" "}
@@ -362,11 +366,25 @@ export function SharedBillDebtorView({ billId }: Props) {
             </p>
           )}
 
-          <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900">
-            <strong>Ödeme bu adımda henüz açık değil.</strong> Bu sürümde
-            yalnızca kendi borcunu görebilirsin; kur çevrimi ve USDC gönderimi
-            sonraki adımda eklenecek.
-          </p>
+          {/*
+            ÖDEME PANELİ. Yalnızca kimlik doğrulandıktan VE manifest/alıcı
+            imzası/Merkle kanıtı istemcide bağımsız doğrulandıktan SONRA
+            görünür.
+
+            `key`: hesap, ağ veya borç değişirse panel SÖKÜLÜP yeniden kurulur.
+            Böylece eski bir teklif, tahmin ya da inceleme yeni bir bağlama
+            taşınamaz.
+          */}
+          {selectedWalletUuid !== null && account !== null && (
+            <SharedBillPaymentPanel
+              key={`${account.toLowerCase()}|${chainId ?? ""}|${stage.view.debt.debtKey}|${stage.view.debt.tryMinor}`}
+              billId={billId}
+              view={stage.view}
+              walletUuid={selectedWalletUuid}
+              account={account}
+              chainId={chainId}
+            />
+          )}
 
           <p className="text-xs leading-relaxed text-slate-500">
             Ağ: {ACTIVE_NETWORK_PROFILE.displayName}. Test USDC&apos;sinin{" "}

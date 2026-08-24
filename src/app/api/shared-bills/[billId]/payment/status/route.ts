@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
-import { readAuthenticatedDebtView } from "@/lib/db/shared-bill-access-service";
+import { readSharedBillPaymentStatus } from "@/lib/db/shared-bill-settlement-service";
 import {
   NO_STORE_HEADERS,
   errorResponse,
@@ -10,14 +10,10 @@ import {
 } from "@/lib/http/shared-bill-route-helpers";
 
 /**
- * Kimliği doğrulanmış borçlunun TEK satırlık görünümü.
+ * Kimliği doğrulanmış borçlunun KENDİ ödeme durumu.
  *
- * Yalnızca imzalı manifest, alıcının açık adresi/etiketi, çağıranın KENDİ borç
- * satırı, o satırın Merkle kanıtı, hesabın bitişi ve hassas olmayan durumu
- * döner. Başka hiçbir borç satırı, adres, etiket veya toplam katılımcı verisi
- * DÖNMEZ.
- *
- * Oturum çerezi olmadan hiçbir hesap verisi verilmez.
+ * Başka bir borç satırı, başka bir katılımcı, tam borç listesi, oturum jetonu
+ * ya da veritabanı ayrıntısı DÖNMEZ. Yanıt ASLA önbelleklenmez.
  */
 
 export const runtime = "nodejs";
@@ -41,27 +37,18 @@ export async function GET(
     );
   }
 
-  const view = await readAuthenticatedDebtView({
+  const status = await readSharedBillPaymentStatus({
     sessionToken: readSessionCookie(request),
     pathBillId: billId,
     repository,
     nowMs: Date.now(),
   });
-
-  if (!view.ok) {
-    return errorResponse(view.status, view.code, view.message);
+  if (!status.ok) {
+    return errorResponse(status.status, status.code, status.message);
   }
 
-  return NextResponse.json(
-    {
-      manifest: view.manifest,
-      recipientSignature: view.recipientSignature,
-      recipient: view.recipient,
-      debt: view.debt,
-      proof: view.proof,
-      billExpiresAt: view.billExpiresAt,
-      status: view.status,
-    },
-    { status: 200, headers: NO_STORE_HEADERS },
-  );
+  return NextResponse.json(status.status, {
+    status: 200,
+    headers: NO_STORE_HEADERS,
+  });
 }

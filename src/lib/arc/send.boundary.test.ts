@@ -73,7 +73,7 @@ function snapshotOf(over: Partial<ArcPaymentSnapshot> = {}): ArcPaymentSnapshot 
     recipientParticipantId: "a",
     debtorAddress: DEBTOR,
     recipientAddress: RECIPIENT,
-    tryMinor: 20000,
+    tryMinor: "20000",
     rateNumerator: "40",
     rateDenominator: "1",
     microUsdc: "5000000",

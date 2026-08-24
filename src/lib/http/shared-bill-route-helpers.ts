@@ -23,6 +23,29 @@ export function errorResponse(status: number, code: string, message: string) {
   );
 }
 
+/**
+ * Oturum çerezini başlıktan güvenli biçimde okur.
+ *
+ * Ham jeton LOGLANMAZ, yanıta konmaz ve yalnızca özeti hesaplanmak üzere
+ * servise verilir. Tek bir uygulama vardır; her rota bunu kullanır.
+ */
+export function readSessionCookie(request: Request): string | null {
+  const header = request.headers.get("cookie");
+  if (header === null) {
+    return null;
+  }
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    const name = part.slice(0, separator).trim();
+    if (name === SHARED_BILL_SESSION_COOKIE) {
+      const value = part.slice(separator + 1).trim();
+      return value === "" ? null : value;
+    }
+  }
+  return null;
+}
+
 /** Yoldan gelen hesap kimliği; biçim tutmuyorsa `null`. */
 export function readBillIdParam(value: unknown): string | null {
   return typeof value === "string" && /^0x[0-9a-f]{64}$/i.test(value)

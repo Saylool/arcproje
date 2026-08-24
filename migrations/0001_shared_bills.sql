@@ -91,6 +91,29 @@ CREATE TABLE IF NOT EXISTS shared_bill_debts (
   leaf_index     smallint    NOT NULL,
   created_at     timestamptz NOT NULL DEFAULT now(),
 
+  -- ---------------------------------------------------------------------
+  -- ÖDEME DURUM MAKİNESİ (Part 3)
+  --
+  --   unpaid ──claim──> reserved ──onaylı makbuz──> paid   (SON)
+  --     ^                  │
+  --     │                  ├──kanıtlı yayın öncesi hata──> unpaid
+  --     │                  ├──onaylı REVERT makbuzu──────> unpaid
+  --     └──────────────────┘
+  --                        └──belirsiz sonuç────────> review_required
+  --
+  --   review_required ──onaylı makbuz──> paid
+  --   review_required ──OTOMATİK──/──> unpaid   (ASLA; elle mutabakat)
+  --   paid ──/──> herhangi bir durum          (ASLA geri dönmez)
+  --
+  -- SINIR: bu sütun bir UYGULAMA kilididir, zincir üstü tek-kullanım
+  -- garantisi DEĞİLDİR. Kullanıcı uygulamanın dışından ikinci bir ERC-20
+  -- transferi göndermekte serbesttir; hiçbir satır bunu engelleyemez.
+  -- ---------------------------------------------------------------------
+  payment_status text        NOT NULL DEFAULT 'unpaid',
+  -- Yalnızca SUNUCU tarafında doğrulanmış makbuzla yazılır.
+  paid_tx_hash   text,
+  paid_at        timestamptz,
+
   CONSTRAINT shared_bill_debts_bill_fk
     FOREIGN KEY (bill_id) REFERENCES shared_bills (bill_id) ON DELETE CASCADE,
   CONSTRAINT shared_bill_debts_amount_positive
@@ -103,9 +126,10 @@ CREATE TABLE IF NOT EXISTS shared_bill_debts (
     CHECK (char_length(debtor_label) BETWEEN 1 AND 40),
   CONSTRAINT shared_bill_debts_key_bounded
     CHECK (char_length(debt_key) BETWEEN 1 AND 120),
-  -- Bir borçlu hesap başına EN FAZLA BİR KEZ görünebilir.
-  CONSTRAINT shared_bill_debts_unique_debtor
-    UNIQUE (bill_id, debtor_address),
+  -- Bir borçlu hesap başına EN FAZLA BİR KEZ görünebilir. Bu çift aynı
+  -- zamanda BİRİNCİL ANAHTARDIR: teklif ve deneme tabloları ona yabancı
+  -- anahtarla bağlanır.
+  CONSTRAINT shared_bill_debts_pkey PRIMARY KEY (bill_id, debtor_address),
   -- Borç kimliği de hesap başına benzersizdir.
   CONSTRAINT shared_bill_debts_unique_key
     UNIQUE (bill_id, debt_key),
@@ -114,7 +138,21 @@ CREATE TABLE IF NOT EXISTS shared_bill_debts (
   -- Kanonik indeks hesap başına benzersizdir: iki satır aynı yaprağı
   -- işaret edemez.
   CONSTRAINT shared_bill_debts_unique_leaf_index
-    UNIQUE (bill_id, leaf_index)
+    UNIQUE (bill_id, leaf_index),
+  CONSTRAINT shared_bill_debts_payment_status_known
+    CHECK (payment_status IN ('unpaid', 'reserved', 'paid', 'review_required')),
+  CONSTRAINT shared_bill_debts_paid_tx_hash_format
+    CHECK (paid_tx_hash IS NULL OR paid_tx_hash ~ '^0x[0-9a-f]{64}$'),
+  -- 'paid' ancak DOĞRULANMIŞ bir işlem hash'i ve zamanıyla birlikte olur;
+  -- diğer durumlar bu alanları TAŞIYAMAZ.
+  CONSTRAINT shared_bill_debts_paid_requires_evidence
+    CHECK (
+      (payment_status = 'paid'
+        AND paid_tx_hash IS NOT NULL AND paid_at IS NOT NULL)
+      OR
+      (payment_status <> 'paid'
+        AND paid_tx_hash IS NULL AND paid_at IS NULL)
+    )
 );
 
 CREATE INDEX IF NOT EXISTS shared_bill_debts_bill_idx
@@ -182,5 +220,203 @@ CREATE TABLE IF NOT EXISTS shared_bill_sessions (
 
 CREATE INDEX IF NOT EXISTS shared_bill_sessions_expires_at_idx
   ON shared_bill_sessions (expires_at);
+
+-- ---------------------------------------------------------------------------
+-- PART 3 — ÖDEME TEKLİFİ ve ÖDEME DENEMESİ
+--
+-- NE SAKLANIR: yalnızca ödemenin ekonomik kimliği — hesap, borçlu, alıcı, TAM
+-- SAYI TRY tutarı, kur teklifinin kimliği ve KANONİK kuru, TAM SAYI mikro
+-- USDC, zaman penceresi ve doğrulanmış işlem hash'i.
+--
+-- NE SAKLANMAZ: fiş görseli, ürün satırları, HAM oturum jetonu, HMAC kur
+-- etiketi, API anahtarları, cüzdan içi veri ve hesapla ilgisiz katılımcılar.
+-- Oturumdan yalnızca ÖZET (`session_hash`) taşınır; ham jeton ASLA yazılmaz.
+--
+-- SINIR: bu tablolar bir AKILLI SÖZLEŞME DEĞİLDİR. Uygulama düzeyinde
+-- yinelenen denemeyi cihazlar arası engellerler; kullanıcının kendi cüzdanından
+-- uygulamanın DIŞINDA ikinci bir ERC-20 transferi göndermesini ENGELLEYEMEZLER.
+-- ---------------------------------------------------------------------------
+
+-- Sunucunun bastığı YETKİLİ ödeme teklifi.
+--
+-- İstemci tutar, kur, alıcı veya borç bildirmez: hepsi saklanan hesaptan ve
+-- sunucunun kur servisinden gelir. Teklif hazırlamak borcu REZERVE ETMEZ.
+CREATE TABLE IF NOT EXISTS shared_bill_payment_offers (
+  offer_id         text        NOT NULL,
+  bill_id          text        NOT NULL,
+  -- Teklifi alan, KİMLİĞİ DOĞRULANMIŞ borçlu.
+  debtor_address   text        NOT NULL,
+  -- İmzalı manifestten gelen alıcı; istemciden ASLA.
+  recipient_address text       NOT NULL,
+  -- TAM SAYI TRY minor unit; borç satırından birebir kopyalanır.
+  try_minor        numeric(30, 0) NOT NULL,
+  -- Kur teklifinin kimliği ve KANONİK rasyonel değeri (pay/payda).
+  quote_id         text        NOT NULL,
+  rate_numerator   numeric(30, 0) NOT NULL,
+  rate_denominator numeric(30, 0) NOT NULL,
+  quote_issued_at  timestamptz NOT NULL,
+  quote_expires_at timestamptz NOT NULL,
+  -- Borç ve kurdan TÜRETİLEN tam sayı mikro USDC.
+  micro_usdc       numeric(30, 0) NOT NULL,
+  issued_at        timestamptz NOT NULL,
+  expires_at       timestamptz NOT NULL,
+  -- Teklif bir denemeye dönüştüğünde işaretlenir; İKİNCİ kez kullanılamaz.
+  consumed_at      timestamptz,
+
+  CONSTRAINT shared_bill_payment_offers_pkey PRIMARY KEY (offer_id),
+  CONSTRAINT shared_bill_payment_offers_bill_fk
+    FOREIGN KEY (bill_id) REFERENCES shared_bills (bill_id) ON DELETE CASCADE,
+  -- Teklif, hesabın GERÇEK bir borç satırına bağlıdır.
+  CONSTRAINT shared_bill_payment_offers_debt_fk
+    FOREIGN KEY (bill_id, debtor_address)
+    REFERENCES shared_bill_debts (bill_id, debtor_address) ON DELETE CASCADE,
+  CONSTRAINT shared_bill_payment_offers_id_format
+    CHECK (offer_id ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_offers_quote_id_format
+    CHECK (quote_id ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_offers_debtor_format
+    CHECK (debtor_address ~ '^0x[0-9a-fA-F]{40}$'),
+  CONSTRAINT shared_bill_payment_offers_recipient_format
+    CHECK (recipient_address ~ '^0x[0-9a-fA-F]{40}$'),
+  -- Alıcı kendi kendine borçlu olamaz.
+  CONSTRAINT shared_bill_payment_offers_not_self
+    CHECK (lower(debtor_address) <> lower(recipient_address)),
+  CONSTRAINT shared_bill_payment_offers_amounts_positive
+    CHECK (try_minor > 0 AND micro_usdc > 0 AND rate_numerator > 0),
+  CONSTRAINT shared_bill_payment_offers_amounts_integral
+    CHECK (
+      try_minor = trunc(try_minor)
+      AND micro_usdc = trunc(micro_usdc)
+      AND rate_numerator = trunc(rate_numerator)
+    ),
+  -- Payda KANONİK ondalıktır: 10^0 .. 10^6. Başka bir payda uygulamanın
+  -- üretmediği bir kur demektir.
+  CONSTRAINT shared_bill_payment_offers_rate_denominator_canonical
+    CHECK (rate_denominator IN (1, 10, 100, 1000, 10000, 100000, 1000000)),
+  CONSTRAINT shared_bill_payment_offers_window_ordered
+    CHECK (expires_at > issued_at AND quote_expires_at > quote_issued_at),
+  -- TEKLİF, DAYANDIĞI KURDAN UZUN YAŞAYAMAZ.
+  CONSTRAINT shared_bill_payment_offers_within_quote
+    CHECK (expires_at <= quote_expires_at),
+  -- Kur teklifi ömrü üst sınırı (5 dk) ikinci savunma hattı olarak burada da.
+  CONSTRAINT shared_bill_payment_offers_lifetime_max_5_min
+    CHECK (expires_at <= issued_at + interval '5 minutes')
+);
+
+CREATE INDEX IF NOT EXISTS shared_bill_payment_offers_expires_at_idx
+  ON shared_bill_payment_offers (expires_at);
+CREATE INDEX IF NOT EXISTS shared_bill_payment_offers_debtor_idx
+  ON shared_bill_payment_offers (bill_id, debtor_address);
+
+-- Borcu REZERVE EDEN ödeme denemesi.
+--
+--   reserved ──istemci hash bildirdi──> submitted
+--   reserved ──kanıtlı yayın öncesi hata──> released      (SON)
+--   reserved ──belirsiz, hash yok────────> unknown        (SON)
+--   reserved | submitted ──onaylı makbuz──> confirmed     (SON)
+--   reserved | submitted ──revert makbuzu─> reverted      (SON)
+--   reserved | submitted ──çözülemedi─────> unknown       (SON)
+--
+-- `confirmed`, `reverted`, `unknown` ve `released` SON durumlardır; hiçbiri
+-- kendiliğinden başka bir duruma geçmez.
+CREATE TABLE IF NOT EXISTS shared_bill_payment_attempts (
+  attempt_id       text        NOT NULL,
+  bill_id          text        NOT NULL,
+  debtor_address   text        NOT NULL,
+  recipient_address text       NOT NULL,
+  offer_id         text        NOT NULL,
+  quote_id         text        NOT NULL,
+  rate_numerator   numeric(30, 0) NOT NULL,
+  rate_denominator numeric(30, 0) NOT NULL,
+  try_minor        numeric(30, 0) NOT NULL,
+  micro_usdc       numeric(30, 0) NOT NULL,
+  -- Denemeyi kuran oturumun ÖZETİ. Ham jeton ASLA saklanmaz.
+  session_hash     text        NOT NULL,
+  status           text        NOT NULL DEFAULT 'reserved',
+  -- İstemcinin bildirdiği ya da makbuzdan doğrulanan işlem hash'i.
+  tx_hash          text,
+  reserved_at      timestamptz NOT NULL,
+  -- Rezervasyonun kendi son kullanma anı (teklifin bitişi).
+  expires_at       timestamptz NOT NULL,
+  -- SUNUCU tarafında makbuz doğrulandığı an.
+  confirmed_at     timestamptz,
+  settled_at       timestamptz,
+
+  CONSTRAINT shared_bill_payment_attempts_pkey PRIMARY KEY (attempt_id),
+  CONSTRAINT shared_bill_payment_attempts_bill_fk
+    FOREIGN KEY (bill_id) REFERENCES shared_bills (bill_id) ON DELETE CASCADE,
+  CONSTRAINT shared_bill_payment_attempts_debt_fk
+    FOREIGN KEY (bill_id, debtor_address)
+    REFERENCES shared_bill_debts (bill_id, debtor_address) ON DELETE CASCADE,
+  CONSTRAINT shared_bill_payment_attempts_offer_fk
+    FOREIGN KEY (offer_id)
+    REFERENCES shared_bill_payment_offers (offer_id) ON DELETE RESTRICT,
+  CONSTRAINT shared_bill_payment_attempts_id_format
+    CHECK (attempt_id ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_attempts_quote_id_format
+    CHECK (quote_id ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_attempts_session_hash_format
+    CHECK (session_hash ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_attempts_debtor_format
+    CHECK (debtor_address ~ '^0x[0-9a-fA-F]{40}$'),
+  CONSTRAINT shared_bill_payment_attempts_recipient_format
+    CHECK (recipient_address ~ '^0x[0-9a-fA-F]{40}$'),
+  CONSTRAINT shared_bill_payment_attempts_not_self
+    CHECK (lower(debtor_address) <> lower(recipient_address)),
+  CONSTRAINT shared_bill_payment_attempts_amounts_positive
+    CHECK (try_minor > 0 AND micro_usdc > 0 AND rate_numerator > 0),
+  CONSTRAINT shared_bill_payment_attempts_amounts_integral
+    CHECK (
+      try_minor = trunc(try_minor)
+      AND micro_usdc = trunc(micro_usdc)
+      AND rate_numerator = trunc(rate_numerator)
+    ),
+  CONSTRAINT shared_bill_payment_attempts_rate_denominator_canonical
+    CHECK (rate_denominator IN (1, 10, 100, 1000, 10000, 100000, 1000000)),
+  CONSTRAINT shared_bill_payment_attempts_status_known
+    CHECK (status IN
+      ('reserved', 'submitted', 'confirmed', 'reverted', 'unknown', 'released')),
+  CONSTRAINT shared_bill_payment_attempts_tx_hash_format
+    CHECK (tx_hash IS NULL OR tx_hash ~ '^0x[0-9a-f]{64}$'),
+  CONSTRAINT shared_bill_payment_attempts_window_ordered
+    CHECK (expires_at > reserved_at),
+  -- ONAY, DOĞRULANMIŞ BİR HASH OLMADAN YAZILAMAZ.
+  CONSTRAINT shared_bill_payment_attempts_confirmed_requires_hash
+    CHECK (
+      status <> 'confirmed'
+      OR (tx_hash IS NOT NULL AND confirmed_at IS NOT NULL)
+    ),
+  -- Revert de zincire ulaşmış bir işlemdir: hash'i olmalıdır.
+  CONSTRAINT shared_bill_payment_attempts_reverted_requires_hash
+    CHECK (status <> 'reverted' OR tx_hash IS NOT NULL),
+  -- SERBEST BIRAKILAN deneme hiçbir koşulda bir hash TAŞIYAMAZ: hash varsa
+  -- bir şey zincire gitmiş olabilir ve rezervasyon açılamaz.
+  CONSTRAINT shared_bill_payment_attempts_released_has_no_hash
+    CHECK (status <> 'released' OR tx_hash IS NULL)
+);
+
+-- BİR BORÇLU İÇİN AYNI ANDA EN FAZLA BİR AKTİF DENEME.
+--
+-- Aktif = rezervasyonu HÂLÂ TUTAN durumlar. `unknown` de aktiftir: belirsiz
+-- bir deneme kendiliğinden serbest bırakılmaz, yerine yenisi açılamaz.
+-- Cihaz/oturum fark etmez; kısıt veritabanı düzeyindedir.
+CREATE UNIQUE INDEX IF NOT EXISTS shared_bill_payment_attempts_unique_active
+  ON shared_bill_payment_attempts (bill_id, debtor_address)
+  WHERE status IN ('reserved', 'submitted', 'unknown');
+
+-- BİR İŞLEM HASH'İ EN FAZLA BİR DENEMEYE AİT OLABİLİR (küresel).
+-- Aynı hash ikinci bir borcu kapatmak için kullanılamaz.
+CREATE UNIQUE INDEX IF NOT EXISTS shared_bill_payment_attempts_unique_tx_hash
+  ON shared_bill_payment_attempts (tx_hash)
+  WHERE tx_hash IS NOT NULL;
+
+-- Bir teklif EN FAZLA BİR denemeye dönüşebilir.
+CREATE UNIQUE INDEX IF NOT EXISTS shared_bill_payment_attempts_unique_offer
+  ON shared_bill_payment_attempts (offer_id);
+
+CREATE INDEX IF NOT EXISTS shared_bill_payment_attempts_debtor_idx
+  ON shared_bill_payment_attempts (bill_id, debtor_address);
+CREATE INDEX IF NOT EXISTS shared_bill_payment_attempts_expires_at_idx
+  ON shared_bill_payment_attempts (expires_at);
 
 COMMIT;

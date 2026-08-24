@@ -154,6 +154,16 @@ export function createAccessNonce(): string {
 }
 
 /**
+ * Kriptografik olarak rastgele ödeme kimliği (0x + 64 hex).
+ *
+ * Teklif ve deneme kimlikleri TAHMİN EDİLEMEZ olmalıdır: sıralı bir kimlik,
+ * başka bir borçlunun denemesini yoklamayı mümkün kılardı. 256 bit yeter.
+ */
+export function createPaymentId(): string {
+  return `0x${randomBytes(32).toString("hex")}`;
+}
+
+/**
  * Kriptografik olarak rastgele oturum jetonu.
  *
  * HAM jeton YALNIZCA HttpOnly çerezde taşınır; veritabanına ASLA yazılmaz.

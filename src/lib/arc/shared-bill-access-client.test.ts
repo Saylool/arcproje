@@ -380,20 +380,45 @@ describe("borclu arayuzu sozlesmesi", () => {
   const view = readFileSync("src/components/SharedBillDebtorView.tsx", "utf8");
   const page = readFileSync("src/app/pay/[billId]/page.tsx", "utf8");
 
-  it("PART 2'de odeme yolu ACILMAZ", () => {
-    // Kur, tahmin, App Kit ve gonderim burada YOKTUR.
+  it("gorunumun KENDISI hicbir odeme cagrisi YAPMAZ", () => {
+    /*
+     * Part 3'te odeme ACILDI ama bu bilesen hala yalnizca DOGRULAMA yapar:
+     * kur cekme, tahmin, App Kit ve gonderim AYRI panelde yasar ve panel
+     * ancak dogrulama gectikten SONRA takilir.
+     */
     for (const forbidden of [
       "fetchQuoteFromServer",
       "verifyQuoteWithServer",
       "estimateArcSend",
       "sendArcUsdc",
       "app-kit",
-      "coingecko",
       "convertTryMinorToMicroUsdc",
     ]) {
       expect(view.toLowerCase(), forbidden).not.toContain(forbidden.toLowerCase());
     }
-    expect(view).toContain("Ödeme bu adımda henüz açık değil");
+  });
+
+  it("odeme paneli YALNIZCA dogrulanmis gorunumun ICINDE takilir", () => {
+    // Panel, `stage.status === "ready"` blogunun icindedir.
+    const readyBlock = view.slice(view.indexOf('stage.status === "ready"'));
+    expect(readyBlock).toContain("<SharedBillPaymentPanel");
+    // Panel referansi baska hicbir yerde gecmez (import disinda).
+    const mounts = view.split("<SharedBillPaymentPanel").length - 1;
+    expect(mounts).toBe(1);
+  });
+
+  it("hesap/ag/borc degisince panel SOKULUR (key ile)", () => {
+    const mount = view.slice(view.indexOf("<SharedBillPaymentPanel"));
+    expect(mount).toContain("key={");
+    expect(mount).toContain("account.toLowerCase()");
+    expect(mount).toContain("chainId");
+    expect(mount).toContain("debtKey");
+    expect(mount).toContain("tryMinor");
+  });
+
+  it("tutar gosteriminde `number` daraltmasi yapilmaz", () => {
+    expect(view).not.toContain("Number(stage.view.debt.tryMinor)");
+    expect(view).toContain("formatMinorUnitsAsTry");
   });
 
   it("kimlik dogrulama materyali TARAYICI DEPOSUNA yazilmaz", () => {

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
-import { readAuthenticatedDebtView } from "@/lib/db/shared-bill-access-service";
+import { prepareSharedBillPaymentOffer } from "@/lib/db/shared-bill-payment-service";
 import {
   NO_STORE_HEADERS,
   errorResponse,
@@ -10,20 +10,23 @@ import {
 } from "@/lib/http/shared-bill-route-helpers";
 
 /**
- * Kimliği doğrulanmış borçlunun TEK satırlık görünümü.
+ * TAZE, SUNUCU KİMLİKLENDİRMELİ ÖDEME TEKLİFİ.
  *
- * Yalnızca imzalı manifest, alıcının açık adresi/etiketi, çağıranın KENDİ borç
- * satırı, o satırın Merkle kanıtı, hesabın bitişi ve hassas olmayan durumu
- * döner. Başka hiçbir borç satırı, adres, etiket veya toplam katılımcı verisi
- * DÖNMEZ.
+ * İstek GÖVDESİ YOKTUR: istemci tutar, kur, alıcı ya da borç BİLDİREMEZ.
+ * Hepsi imzalı manifestten, depodaki borç satırından ve sunucunun kendi kur
+ * servisinden gelir.
  *
- * Oturum çerezi olmadan hiçbir hesap verisi verilmez.
+ * Bu uç nokta BORCU REZERVE ETMEZ ve HİÇBİR CÜZDAN ÇAĞIRMAZ. Rezervasyon
+ * ayrı bir adımdır (`/payment/claim`).
+ *
+ * Yanıt YALNIZCA kimliği doğrulanmış borçlunun KENDİ teklifini taşır ve
+ * ASLA önbelleklenmez.
  */
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(
+export async function POST(
   request: Request,
   context: { params: Promise<{ billId: string }> },
 ) {
@@ -41,27 +44,18 @@ export async function GET(
     );
   }
 
-  const view = await readAuthenticatedDebtView({
+  const prepared = await prepareSharedBillPaymentOffer({
     sessionToken: readSessionCookie(request),
     pathBillId: billId,
     repository,
     nowMs: Date.now(),
   });
-
-  if (!view.ok) {
-    return errorResponse(view.status, view.code, view.message);
+  if (!prepared.ok) {
+    return errorResponse(prepared.status, prepared.code, prepared.message);
   }
 
   return NextResponse.json(
-    {
-      manifest: view.manifest,
-      recipientSignature: view.recipientSignature,
-      recipient: view.recipient,
-      debt: view.debt,
-      proof: view.proof,
-      billExpiresAt: view.billExpiresAt,
-      status: view.status,
-    },
+    { offer: prepared.offer },
     { status: 200, headers: NO_STORE_HEADERS },
   );
 }

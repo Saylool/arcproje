@@ -229,7 +229,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       recipientParticipantId: request.payload.recipientLabel,
       debtorAddress: request.payload.debtor,
       recipientAddress: request.payload.recipient,
-      tryMinor: Number(request.payload.tryMinor),
+      // İmzalı gövde zaten KANONİK ondalık metin taşır; `number`a indirilmez.
+      tryMinor: request.payload.tryMinor,
       rateNumerator: request.payload.rateNumerator,
       rateDenominator: request.payload.rateDenominator,
       microUsdc: request.payload.microUsdc,
