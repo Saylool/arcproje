@@ -29,9 +29,14 @@ cp .env.example .env.local
 | `OPENAI_RECEIPT_MODEL` | hayır | Kullanılacak model. Varsayılan: `gpt-5.6-luna` |
 | `COINGECKO_DEMO_API_KEY` | evet | USDC/TRY kuru için CoinGecko Demo anahtarı. **Yalnızca sunucuda okunur.** |
 | `RATE_QUOTE_SECRET` | evet | Kur teklifini imzalayan HMAC sırrı. **Yalnızca sunucuda okunur.** |
+| `DATABASE_URL` | hayır (Part 1) | Neon Postgres bağlantısı; paylaşılan ortak hesap deposu. **Yalnızca sunucuda okunur.** |
 
-Bu üç değişkenin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
+Bu değişkenlerin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
 paketine girmez.
+
+`DATABASE_URL` tanımlı olmasa bile uygulama ve testler derlenir; yalnızca
+`POST /api/shared-bills` kontrollü bir 503 döner. Şema ve geçiş için
+"Tek bağlantılı ortak hesap" bölümüne bak.
 
 Anahtar tanımlı olmasa bile uygulama açılır ve fiş yükleme ekranı çalışır; yalnızca
 analiz isteği kontrollü bir "servis yapılandırılmamış" hatası döner.
@@ -342,13 +347,151 @@ Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
 - `OPENAI_API_KEY`
 - `COINGECKO_DEMO_API_KEY`
 - `RATE_QUOTE_SECRET`
+- `DATABASE_URL` (paylaşılan ortak hesap deposu; Part 2'de zorunlu olacak)
 
-Üçü de `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+Hepsi `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+Neon veritabanı **bu bölümde sağlanmadı**; Marketplace kurulumu, geçişin
+uygulanması ve `DATABASE_URL`'in tanımlanması ayrı bir adımdır.
 
 Ayrıca bir **dağıtım gereksinimi** vardır ve kod tarafında karşılanamaz:
 CoinGecko kotasını örnekler arasında koruyacak paylaşılan bir sayaç/oran
 sınırlayıcı (Redis/KV) ya da Vercel firewall/rate limiting yapılandırması.
 Uygulamadaki soğuma **süreç içidir** ve tek başına yeterli **değildir**.
+
+## Tek bağlantılı ortak hesap (Part 1 — temel)
+
+Bugünkü akışta fişi ödeyen kişi **her borçlu için ayrı** bir talep imzalar ve
+**ayrı** bir bağlantı üretir. Hedef mimari tek bağlantıdır: ödeyen cüzdanını bir
+kez bağlar, her borçlu için bir adres girer, **tek bir EIP-712 manifest** imzalar
+ve **herkes aynı** `/pay/<billId>` bağlantısını alır.
+
+> **Part 1 yalnızca TEMELİ kurar.** İmzalı manifest, kalıcı depo, katı
+> doğrulama, oluşturma API'si ve oluşturucu arayüzü hazırdır. **Borçlu tarafı
+> henüz yoktur**: `/pay/<billId>` rotası, ödeme rezervasyonu ve işlem
+> kesinleştirme Part 2'dedir. Bu yüzden yeni akış
+> `SHARED_BILL_FLOW_ENABLED` bayrağıyla **kapalıdır** ve üretimde eski,
+> borçlu başına ayrı bağlantı üreten akış çalışmaya devam eder.
+
+### Neden bir veritabanı gerekiyor
+
+Tek bağlantı, borç listesini URL'ye gömemez: aksi hâlde bağlantıyı eline geçiren
+herkes **bütün borçluları, adresleri ve tutarları** görürdü ve bağlantı
+kilometrelerce uzun olurdu. Bu yüzden liste sunucuda saklanır ve URL yalnızca
+**tahmin edilemez bir kimlik** taşır. Üretimde **Neon Postgres** (Vercel
+Marketplace üzerinden) kullanılır; sunucu değişkeni `DATABASE_URL`'dir.
+
+### Ne saklanır, ne saklanmaz
+
+| Saklanır | Saklanmaz |
+| --- | --- |
+| Genel hesap kimliği (0x + 64 hex) | Fiş görseli |
+| Şema sürümü, Arc chainId | Ürün satırları, vergi/servis/indirim |
+| Alıcı adresi ve etiketi | OpenAI çıktısı |
+| Borç listesinin **kriptografik taahhüdü** | API anahtarları, HMAC etiketi |
+| Borç sayısı, veriliş/bitiş anı | **Kur teklifi** (bilerek) |
+| Alıcının EIP-712 imzası | İlgisiz katılımcılar |
+| Borç satırları: adres, etiket, borç kimliği, TRY minor tutar | |
+
+**Kur bilerek saklanmaz.** Alıcı yalnızca TRY minor unit borçları imzalar; USDC
+tutarı, borçlu ödediği anda alınan **taze ve sunucu kimliklendirmeli** bir
+USDC/TRY teklifinden türetilir (Part 2). Böylece günlerce yaşayan bir bağlantı,
+dakikalar ömürlü bir kura çakılmaz.
+
+### İmzalanan manifest
+
+Ayrı bir EIP-712 alanı kullanılır (`Hesabi Bol Shared Bill`); ödeme talebi
+imzası paylaşılan hesap imzası olarak **kullanılamaz**. İmza şunları kapsar:
+
+`schemaVersion`, `billId`, `chainId`, `recipient`, `recipientLabel`,
+`debtsHash`, `debtCount`, `issuedAt`, `expiresAt`.
+
+Borç **listesi** manifeste gömülmez; yerine kanonik bir taahhüt imzalanır:
+
+1. Her satır EIP-712 struct hash'i gibi ABI-kodlanır
+   (`SharedBillDebt(address debtor,string debtorLabel,string debtKey,uint256 tryMinor)`);
+   metin alanları `keccak256` ile özetlenir.
+2. Satırlar **kanonik sıraya** dizilir: borçlu adresine göre (küçük harf) artan.
+   Borçlu adresi hesap başına benzersiz olduğu için bu sıra tamdır — girdi
+   sırası ne olursa olsun **aynı** manifest üretilir.
+3. Yapraklar, alan ayrılmış bir etiket + `chainId` + `billId` + satır sayısı ile
+   birlikte tek bir `bytes32`'ye indirgenir.
+
+`JSON.stringify` çıktısı taahhüt olarak **kullanılmaz**: anahtar sırası ve
+Unicode kaçışları uygulamadan uygulamaya değişir. Sunucu, gönderilen satırlardan
+taahhüdü **yeniden hesaplar**; istemcinin bildirdiği `debtsHash`e güvenilmez.
+
+### API sözleşmesi
+
+`POST /api/shared-bills` — `Content-Type: application/json`, `Cache-Control: no-store`.
+
+İstek: `{ manifest, debts, signature }`. Yanıt (201 yeni / 200 idempotent):
+
+```json
+{ "billId": "0x…", "path": "/pay/0x…", "expiresAt": 1700000000 }
+```
+
+Borç listesi, adresler, etiketler, taahhüt ve imza **dönmez**. Hata kodları:
+`INVALID_CONTENT_TYPE`, `BODY_TOO_LARGE`, `MALFORMED_JSON`, `DUPLICATE_FIELD`,
+`INVALID_SHARED_BILL`, `INVALID_SIGNATURE`, `BILL_ID_UNAVAILABLE`,
+`STORAGE_REJECTED`, `SERVICE_NOT_CONFIGURED`, `SERVICE_UNAVAILABLE`.
+
+Sıra kritiktir: gövde sınırlanır → yinelenen anahtar taranır → manifest, satırlar
+ve taahhüt doğrulanır → alıcı imzası doğrulanır → **ancak ondan sonra**
+veritabanı işlemi açılır. Hesap ve tüm borç satırları **atomik** yazılır; kısmi
+bir hesap kalmaz.
+
+**Idempotency:** aynı `billId` ile gelen tekrar, yalnızca depodaki **taahhüt,
+alıcı ve imza birebir eşleşirse** güvenli sayılır ve yeniden yazılmaz. Aksi hâlde
+üzerine yazılmaz, `BILL_ID_UNAVAILABLE` döner.
+
+### Veritabanı yapılandırması ve geçiş
+
+`.env.local` içine (bu dosya asla commit edilmez):
+
+```bash
+DATABASE_URL=
+```
+
+Şema **elle** uygulanır; tablolar istek işleyicisi içinde tembel oluşturulmaz:
+
+```bash
+psql "$DATABASE_URL" -f migrations/0001_shared_bills.sql
+```
+
+`DATABASE_URL` yoksa uygulama ve testler yine derlenir; depo gerektiren rota
+kontrollü **503 `SERVICE_NOT_CONFIGURED`** döner ve bellek içi bir yedeğe
+**asla** düşmez.
+
+### Gizlilik sınırı
+
+> Bağlantıyı **eline geçiren herkes hesabı açabilir.** Bağlantı borç listesini
+> taşımaz, ama sayfayı açmak listeyi getirir (Part 2). Bu yüzden bağlantı
+> yalnızca ilgili kişilerle paylaşılmalıdır. Adresler, etiketler, imzalar,
+> manifestler ve üretilen bağlantılar **loglanmaz**; hata mesajları belirli bir
+> cüzdanın bir hesapta olup olmadığını açığa vurmaz.
+
+### Hesap ömrü
+
+Hesaplar sonludur: üst sınır **yedi gündür**
+(`SHARED_BILL_MAX_LIFETIME_MS`). Süresi dolmuş bir hesap, fiziksel olarak
+silinmemiş olsa bile **kullanılamaz sayılır**; sorgular her hâlükârda bitiş anını
+filtreler. **Fiziksel temizlik (cleanup job) Part 2'ye ertelenmiştir**: bugün
+süresi dolmuş satırlar tabloda kalmaya devam eder.
+
+### Part 1'de YAPILMAYANLAR
+
+- **Borçlu tarafı yok**: `/pay/<billId>` rotası, hesabın çözülmesi ve gösterimi.
+- **Ödeme tamamlama yok**: rezervasyon, işlem kesinleştirme, durum güncelleme.
+- **Yetkili tekrar oynatma engeli yok.**
+- Süresi dolmuş kayıtların fiziksel temizliği yok.
+- Neon/Vercel sağlama (provisioning) yapılmadı.
+
+> **Bir veritabanı satırı, zincir üstünde yinelenen transferleri ENGELLEMEZ.**
+> Kayıt kriptografik bir tek-kullanım garantisi değildir. Bir istemcinin
+> "başarılı" demesi ödemenin yapıldığını **kanıtlamaz**; bağlantının varlığı
+> gerçek dünyada bir borcun var olduğunu **kanıtlamaz**. Bu sürüm **Arc
+> Testnet** içindir ve **mainnet'e hazır değildir**; test USDC'sinin gerçek
+> parasal değeri yoktur.
 
 ## Fiş analizi nasıl çalışıyor
 

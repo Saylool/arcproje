@@ -79,17 +79,41 @@ describe("ödeyen ekranı", () => {
 });
 
 describe("bağlantı geçerlilik süresi doğru anlatılır", () => {
-  it("yedi gün iddiası hiçbir yerde kalmadı", () => {
+  /*
+   * BORÇLU BAŞINA ödeme talebi bağlantısı kur teklifine bağlıdır ve EN FAZLA
+   * 5 dakika yaşar; hiçbir yerde "yedi gün" denemez.
+   *
+   * README artık AYRI bir ürünü de anlatıyor: paylaşılan ortak hesap
+   * (`/pay/<billId>`). Onun ömrü gerçekten yedi güne kadardır ve kur teklifine
+   * bağlı DEĞİLDİR. Bu yüzden README kontrolü, ödeme talebini anlatan bölümle
+   * sınırlanır; paylaşılan hesap bölümü ayrıca kendi doğru iddiasıyla test
+   * edilir. Böylece özgün güvence korunur, yanlış yere taşınmaz.
+   */
+  const SHARED_BILL_HEADING = "## Tek bağlantılı ortak hesap";
+  const readmeBeforeSharedBill = readme.slice(
+    0,
+    readme.indexOf(SHARED_BILL_HEADING),
+  );
+
+  it("yedi gün iddiası ödeme talebi anlatımında kalmadı", () => {
+    expect(readme).toContain(SHARED_BILL_HEADING);
     for (const [name, source] of [
       ["creator", creator],
       ["payer", payer],
       ["conversion", conversion],
-      ["README", readme],
+      ["README (ödeme talebi bölümü)", readmeBeforeSharedBill],
     ] as const) {
       expect(source, name).not.toContain("7 gün");
       expect(source, name).not.toContain("yedi gün");
       expect(source.toLowerCase(), name).not.toContain("seven days");
     }
+  });
+
+  it("paylaşılan hesabın YEDİ GÜNLÜK üst sınırı doğru anlatılır", () => {
+    const sharedBillSection = readme.slice(readme.indexOf(SHARED_BILL_HEADING));
+    expect(sharedBillSection).toContain("yedi gündür");
+    // Paylaşılan hesap kur teklifine bağlanmaz.
+    expect(sharedBillSection).toContain("Kur bilerek saklanmaz");
   });
 
   it("gerçek bitiş anı ve kalan süre gösterilir", () => {
