@@ -80,14 +80,14 @@ function MoneyInput({
         aria-invalid={error === null ? undefined : true}
         aria-describedby={error === null ? undefined : errorId}
         onChange={(event) => handleChange(event.target.value)}
-        className={`w-full rounded-xl border bg-white px-3 py-2 text-right text-sm tabular-nums text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+        className={`w-full rounded-xl border bg-card px-3 py-2 text-right text-sm tabular-nums text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
           error === null
-            ? "border-slate-200 focus:border-violet-300"
-            : "border-red-300 bg-red-50/50"
+            ? "border-line focus:border-brand-line"
+            : "border-danger-line-strong bg-danger-surface/50"
         }`}
       />
       {error !== null && (
-        <p id={errorId} className="mt-1 text-[11px] leading-snug text-red-600">
+        <p id={errorId} className="mt-1 text-[11px] leading-snug text-danger-ink-soft">
           {error}
         </p>
       )}
@@ -132,22 +132,22 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
   return (
     <section
       aria-label="Fiş içeriği"
-      className="flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-card sm:p-5"
+      className="flex flex-col gap-4 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold tracking-tight text-slate-900">
+        <h2 className="text-base font-semibold tracking-tight text-ink">
           {receipt.merchantName ?? "Satıcı adı okunamadı"}
         </h2>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-faint">
           Para birimi: {currencyLabel} · Analiz sonucunu kontrol edip
           düzeltebilirsin.
         </p>
       </header>
 
       {receipt.warnings.length > 0 && (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-          <p className="text-xs font-semibold text-amber-900">Analiz notları</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-amber-800">
+        <div className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5">
+          <p className="text-xs font-semibold text-warn-ink">Analiz notları</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-warn-ink-soft">
             {receipt.warnings.map((warning, index) => (
               <li key={`${index}-${warning}`}>{warning}</li>
             ))}
@@ -156,12 +156,12 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
       )}
 
       <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
           Ürünler
         </h3>
 
         {receipt.items.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+          <p className="rounded-2xl border border-dashed border-line px-3 py-4 text-center text-xs text-ink-faint">
             Ürün listesi boş. Aşağıdan ürün ekleyebilirsin.
           </p>
         ) : (
@@ -169,7 +169,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
             {receipt.items.map((item, index) => (
               <li
                 key={item.id}
-                className="flex flex-col gap-2 rounded-2xl border border-slate-200 p-2.5 sm:flex-row sm:items-start sm:gap-3"
+                className="flex flex-col gap-2 rounded-2xl border border-line p-2.5 sm:flex-row sm:items-start sm:gap-3"
               >
                 <input
                   type="text"
@@ -179,7 +179,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                   onChange={(event) =>
                     updateItem(item.id, { name: event.target.value })
                   }
-                  className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus:border-violet-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="min-w-0 flex-1 rounded-xl border border-line bg-card px-3 py-2 text-sm text-ink transition-colors focus:border-brand-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 />
 
                 <div className="flex items-start gap-2">
@@ -195,7 +195,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                     type="button"
                     onClick={() => removeItem(item.id)}
                     aria-label={`${index + 1}. ürünü sil`}
-                    className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
                     Sil
                   </button>
@@ -208,16 +208,16 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
         <button
           type="button"
           onClick={addItem}
-          className="self-start rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+          className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           + Ürün ekle
         </button>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-slate-500">Ürünler toplamı</span>
-          <span className="text-sm tabular-nums text-slate-500">
+          <span className="text-sm text-ink-faint">Ürünler toplamı</span>
+          <span className="text-sm tabular-nums text-ink-faint">
             {formatMinorForDisplay(totals.itemsSubtotalMinor, receipt.currency)}
           </span>
         </div>
@@ -267,7 +267,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
       {totals.status === "mismatch" && (
         <p
           role="status"
-          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+          className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
         >
           Ürünler ve ayrı uygulanan kalemler{" "}
           <strong className="font-semibold tabular-nums">
@@ -285,7 +285,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
       {totals.status === "indeterminate" && (
         <p
           role="status"
-          className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs leading-relaxed text-slate-700"
+          className="rounded-2xl border border-line bg-muted px-3 py-2.5 text-xs leading-relaxed text-ink-soft"
         >
           Bazı ücretlerin ürün fiyatlarına dahil olup olmadığı belirsiz:{" "}
           <strong className="font-semibold">
@@ -325,7 +325,7 @@ function SummaryRow({
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <span
         className={`text-sm sm:pt-2 ${
-          emphasized ? "font-semibold text-slate-900" : "text-slate-600"
+          emphasized ? "font-semibold text-ink" : "text-ink-soft"
         }`}
       >
         {label}
@@ -341,7 +341,7 @@ function SummaryRow({
             onChange={(event) =>
               onTreatmentChange(event.target.value as AdjustmentTreatment)
             }
-            className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-2 py-2 text-xs text-slate-700 transition-colors focus:border-violet-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 sm:w-44 sm:flex-none"
+            className="min-w-0 flex-1 rounded-xl border border-line bg-card px-2 py-2 text-xs text-ink-soft transition-colors focus:border-brand-line focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:w-44 sm:flex-none"
           >
             {ADJUSTMENT_TREATMENTS.map((option) => (
               <option key={option} value={option}>

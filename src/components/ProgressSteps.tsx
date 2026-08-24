@@ -35,10 +35,10 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
                 aria-hidden="true"
                 className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold sm:h-7 sm:w-7 sm:text-xs ${
                   isActive
-                    ? "bg-violet-600 text-white shadow-sm shadow-violet-200"
+                    ? "bg-brand text-white shadow-sm shadow-brand"
                     : isCompleted
-                      ? "bg-violet-100 text-violet-700"
-                      : "border border-slate-200 bg-white text-slate-400"
+                      ? "bg-brand-soft-strong text-brand-ink"
+                      : "border border-line bg-card text-ink-faint"
                 }`}
               >
                 {isCompleted ? "✓" : index + 1}
@@ -47,10 +47,10 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
               <span
                 className={`whitespace-nowrap text-[11px] font-medium sm:text-sm ${
                   isActive
-                    ? "text-slate-900"
+                    ? "text-ink"
                     : isCompleted
-                      ? "text-violet-700"
-                      : "text-slate-400"
+                      ? "text-brand-ink"
+                      : "text-ink-faint"
                 }`}
               >
                 {step.label}
@@ -70,7 +70,7 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
                 <span
                   aria-hidden="true"
                   className={`mx-1 h-px flex-1 sm:mx-2 ${
-                    isCompleted ? "bg-violet-200" : "bg-slate-200"
+                    isCompleted ? "bg-brand-soft-strong" : "bg-muted-strong"
                   }`}
                 />
               )}
