@@ -404,7 +404,7 @@ settled_debt AS (
   WHERE d.bill_id = t.bill_id
     AND lower(d.debtor_address) = lower(t.debtor_address)
     AND d.payment_status <> 'paid'
-  RETURNING d.bill_id
+  RETURNING d.bill_id, d.debtor_address
 ),
 closed_bill AS (
   UPDATE shared_bills b
@@ -412,10 +412,20 @@ closed_bill AS (
   FROM settled_debt s
   WHERE b.bill_id = s.bill_id
     AND b.status = 'open'
+    -- Hesap YALNIZCA bu yerleşim bir ONAY ise kapanabilir.
+    AND $5::text = 'paid'
     -- Hesap YALNIZCA HER borç BAĞIMSIZ olarak onaylandıysa kapanır.
+    --
+    -- DIKKAT: PostgreSQL'de WITH alt deyimleri BIRBIRININ etkisini GOREMEZ;
+    -- hepsi deyim oncesi anlik goruntuyu okur. Bu yuzden settled_debt CTE'sinin
+    -- az once 'paid' yaptigi satir burada HALA eski durumda gorunur ve
+    -- "odenmemis" sayilirdi. O satir ACIKCA haric tutulur; geri kalan TUM
+    -- borclarin zaten 'paid' olmasi aranir.
     AND NOT EXISTS (
       SELECT 1 FROM shared_bill_debts d2
-      WHERE d2.bill_id = b.bill_id AND d2.payment_status <> 'paid'
+      WHERE d2.bill_id = b.bill_id
+        AND d2.payment_status <> 'paid'
+        AND lower(d2.debtor_address) <> lower(s.debtor_address)
     )
   RETURNING b.bill_id
 )

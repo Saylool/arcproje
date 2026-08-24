@@ -76,6 +76,24 @@ describe("deneme geçişleri", () => {
     }
   });
 
+  it("`unknown` deneme SONRADAN onaylanamaz: elle mutabakat şarttır", () => {
+    /*
+     * Belgelenen davranış budur ve BİLEREK katıdır: sonucu çözülemeyen bir
+     * deneme, sonradan gelen bir makbuz doğrulamasıyla bile OTOMATİK olarak
+     * `confirmed`e taşınmaz. `review_required` borç, insan tarafından
+     * yürütülen açık bir mutabakat gerektirir.
+     *
+     * Bu sınır gevşetilirse, belirsiz bir denemenin hash'ine bağlanmış
+     * herhangi bir makbuz kilidi tek başına açabilirdi.
+     */
+    for (const settlement of ALL_SETTLEMENTS) {
+      expect(
+        isAllowedSettlement("unknown", settlement),
+        `unknown -> ${settlement}`,
+      ).toBe(false);
+    }
+  });
+
   it("her durum için izin listesi TANIMLIDIR", () => {
     for (const status of ALL_STATUSES) {
       for (const settlement of ALL_SETTLEMENTS) {

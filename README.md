@@ -654,7 +654,7 @@ unpaid ──claim──> reserved ──onaylı makbuz──> paid          (SO
   └──────────────────┘
                      └── belirsiz sonuç ────────> review_required
 
-review_required ── onaylı makbuz ──> paid
+review_required ── OTOMATİK ──/──> paid       (ASLA; elle mutabakat)
 review_required ── OTOMATİK ──/──> unpaid     (ASLA; elle mutabakat)
 paid ──/──> herhangi bir durum                (ASLA geri dönmez)
 ```
@@ -727,6 +727,12 @@ korunur, **sınırlı** yoklamaya izin verilir, ödendi denmez. Revert: kanıt
 saklanır, hash ArcScan için korunur, borç ödenmemiş kalır. Sonuç
 çözülemiyorsa: `unknown` / `review_required`, kilit korunur, **otomatik tekrar
 yoktur**.
+
+`unknown` bir deneme **son** durumdur: sonradan gelen bir makbuz doğrulaması
+bile onu otomatik olarak `confirmed`e taşımaz ve `review_required` bir borcu
+`paid` yapmaz. Bu bilerek katıdır — belirsiz bir denemenin hash'ine bağlanmış
+herhangi bir makbuz, kilidi tek başına açabilirdi. Bu durumdan çıkış, insan
+tarafından yürütülen açık bir mutabakat gerektirir (ArcScan + cüzdan geçmişi).
 
 #### Onay gereksinimi ve sınırı
 
@@ -845,23 +851,36 @@ bir kalem `unknown` ise yanlış bir uyuşmazlık iddiası üretilmez; sonuç
 değiştirebilir ve toplam kontrolü anında güncellenir; hiçbir değer otomatik
 olarak değiştirilmez.
 
-## Bu adımda tamamlananlar
+## Şu anda çalışan özellikler
 
-- "Fişini yükle" ekranı: sürükle-bırak, dosya doğrulama (JPG/PNG/WEBP, en fazla 10 MB),
-  önizleme, değiştirme ve kaldırma
-- "Fişi analiz et" akışı: yükleme durumu, tekrar deneme, Türkçe hata mesajları
-- Analiz sonucunun düzenlenebilir gösterimi: ürün adı/tutarı değiştirme, ürün ekleme
-  ve silme, vergi / servis / indirim / genel toplam düzenleme
-- `320,50` ve `320.50` gibi girdilerin güvenli biçimde minor unit'e çevrilmesi;
-  geçersiz girdilerde sessiz yuvarlama yerine açık doğrulama hatası
-- Vergi / servis / indirim için "ürün fiyatlarına dahil mi, ayrı mı" seçimi ve
-  buna göre doğru genel toplam kontrolü (KDV'nin iki kez eklenmesini önler)
-- Ürün toplamı ile genel toplam uyuşmadığında değerleri değiştirmeden uyarı gösterme
-- Zod tabanlı ortak veri sözleşmesi ve API anahtarı gerektirmeyen birim testleri
+- **Fiş yükleme ve analiz**: sürükle-bırak, dosya doğrulama (JPG/PNG/WEBP, en
+  fazla 10 MB), OpenAI Responses API ile ürün çıkarımı, düzenlenebilir sonuç.
+- **Vergi / servis / indirim** için "fiyatlara dahil mi, ayrı mı" seçimi ve
+  buna göre doğru genel toplam kontrolü.
+- **Ürünleri kişilere atama** ve **borç hesabı**: tam sayı minor unit ile,
+  kayan nokta kullanmadan.
+- **Arc Testnet USDC ödemesi** iki akışta:
+  1. **Borçlu başına ayrı bağlantı** (imzalı ödeme talebi, EIP-712 şema 2).
+  2. **Tek bağlantılı ortak hesap**: alıcı tek bir manifest imzalar, herkes
+     aynı bağlantıyı alır, her borçlu cüzdanıyla kimliğini doğrulayıp yalnızca
+     kendi borcunu görür ve öder.
+- **Otomatik USDC/TRY kuru**: CoinGecko'dan alınan, sunucu tarafından HMAC ile
+  kimliklendirilen taze teklif; elle kur girişi yoktur.
+- **Sunucu tarafı ödeme yaşam döngüsü**: yetkili teklif, atomik rezervasyon,
+  zincir üstü makbuz doğrulaması ve ancak ondan sonra "ödendi".
+- **Kalıcı depo**: Neon Postgres; şema gözden geçirilmiş bir SQL geçişiyle
+  **elle** uygulanır.
 
-## Henüz yapılmadı
+## Sınırlar ve bilinen eksikler
 
-- **Ürünleri kişilere atama** ekranı yok (ilerleme göstergesinde 2. adım).
-- **Borç hesaplama** yok.
-- **Arc Testnet ve USDC ödeme entegrasyonu** yok (3. adım).
-- Backend veritabanı, kullanıcı hesabı ve kimlik doğrulama yok.
+- **Yalnızca Arc Testnet.** Mainnet'e hazır **değildir** ve mainnet/Ethereum
+  Sepolia desteklenmez. Test USDC'sinin **gerçek parasal değeri yoktur**.
+- **Sunucu veritabanı bir akıllı sözleşme değildir**: rezervasyon yalnızca
+  uygulama üzerinden yinelenen denemeyi engeller, kullanıcının uygulama
+  dışından ikinci bir transfer göndermesini engelleyemez.
+- **Kullanıcı hesabı / oturum sistemi yoktur**: kimlik doğrulama yalnızca
+  cüzdan sahipliği kanıtıdır, KYC değildir.
+- **Kur servisinde örnekler arası kota koruması yoktur**; oran sınırlama bir
+  dağıtım gereksinimidir (Vercel Firewall ile karşılanır).
+- Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
+  görülebilir ama bağlantının kendisi gizli sayılmalıdır.
