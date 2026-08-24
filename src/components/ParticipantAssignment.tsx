@@ -63,13 +63,13 @@ export function ParticipantAssignment({
   return (
     <section
       aria-label="Kişiler ve ürün atamaları"
-      className="flex flex-col gap-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-card sm:p-5"
+      className="flex flex-col gap-5 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-1">
-        <h2 className="text-base font-semibold tracking-tight text-slate-900">
+        <h2 className="text-base font-semibold tracking-tight text-ink">
           Kişileri ekle, ürünleri dağıt
         </h2>
-        <p className="text-xs leading-relaxed text-slate-500">
+        <p className="text-xs leading-relaxed text-ink-faint">
           Bir ürünü birden fazla kişiye atarsan o ürün seçtiğin kişiler arasında
           eşit bölünür.
         </p>
@@ -77,12 +77,12 @@ export function ParticipantAssignment({
 
       {/* --- Kişiler --- */}
       <div className="flex flex-col gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
           Kişiler
         </h3>
 
         {state.participants.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+          <p className="rounded-2xl border border-dashed border-line px-3 py-4 text-center text-xs text-ink-faint">
             Hiç kişi yok. Aşağıdan kişi ekle.
           </p>
         ) : (
@@ -116,10 +116,10 @@ export function ParticipantAssignment({
                           ),
                         )
                       }
-                      className={`min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+                      className={`min-w-0 flex-1 rounded-xl border bg-card px-3 py-2 text-sm text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
                         issue === undefined
-                          ? "border-slate-200 focus:border-violet-300"
-                          : "border-red-300 bg-red-50/50"
+                          ? "border-line focus:border-brand-line"
+                          : "border-danger-line-strong bg-danger-surface/50"
                       }`}
                     />
                     <button
@@ -128,13 +128,13 @@ export function ParticipantAssignment({
                         onChange(removeParticipant(state, participant.id))
                       }
                       aria-label={`${participant.name || `${index + 1}. kişi`} kişisini sil`}
-                      className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                      className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
                       Sil
                     </button>
                   </div>
                   {issue !== undefined && (
-                    <p className="text-[11px] leading-snug text-red-600">
+                    <p className="text-[11px] leading-snug text-danger-ink-soft">
                       {describeParticipantNameError(issue)}
                     </p>
                   )}
@@ -164,16 +164,16 @@ export function ParticipantAssignment({
                   handleAdd();
                 }
               }}
-              className={`min-w-0 flex-1 rounded-xl border bg-white px-3 py-2 text-sm text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 ${
+              className={`min-w-0 flex-1 rounded-xl border bg-card px-3 py-2 text-sm text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus ${
                 addError === null
-                  ? "border-slate-200 focus:border-violet-300"
-                  : "border-red-300 bg-red-50/50"
+                  ? "border-line focus:border-brand-line"
+                  : "border-danger-line-strong bg-danger-surface/50"
               }`}
             />
             <button
               type="button"
               onClick={handleAdd}
-              className="shrink-0 rounded-full border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+              className="shrink-0 rounded-full border border-line bg-card px-3.5 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               + Kişi ekle
             </button>
@@ -182,7 +182,7 @@ export function ParticipantAssignment({
             <p
               id={newNameErrorId}
               role="alert"
-              className="text-[11px] leading-snug text-red-600"
+              className="text-[11px] leading-snug text-danger-ink-soft"
             >
               {describeParticipantNameError(addError)}
             </p>
@@ -192,8 +192,8 @@ export function ParticipantAssignment({
 
       {/* --- Ödeyen --- */}
       {state.participants.length > 0 && (
-        <fieldset className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-          <legend className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        <fieldset className="flex flex-col gap-2 border-t border-line-soft pt-4">
+          <legend className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
             Fişi kim ödedi?
           </legend>
           <div className="flex flex-wrap gap-2">
@@ -211,7 +211,7 @@ export function ParticipantAssignment({
                   onChange={() => onChange(setPayer(state, participant.id))}
                   className="peer sr-only"
                 />
-                <span className="inline-block max-w-[10rem] truncate rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors peer-checked:border-violet-600 peer-checked:bg-violet-600 peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-500">
+                <span className="inline-block max-w-[10rem] truncate rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
                   {participant.name || "(isimsiz)"}
                 </span>
               </label>
@@ -221,8 +221,8 @@ export function ParticipantAssignment({
       )}
 
       {/* --- Ürün atamaları --- */}
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
           Ürünler
         </h3>
 
@@ -236,25 +236,25 @@ export function ParticipantAssignment({
                 key={item.id}
                 className={`rounded-2xl border p-3 ${
                   isUnassigned
-                    ? "border-amber-300 bg-amber-50/60"
-                    : "border-slate-200"
+                    ? "border-warn-line-strong bg-warn-surface/60"
+                    : "border-line"
                 }`}
               >
                 <fieldset className="flex flex-col gap-2">
                   <legend className="flex w-full items-baseline justify-between gap-3">
                     <span
-                      className="min-w-0 flex-1 truncate text-sm font-medium text-slate-900"
+                      className="min-w-0 flex-1 truncate text-sm font-medium text-ink"
                       title={item.name}
                     >
                       {item.name}
                     </span>
-                    <span className="shrink-0 text-sm tabular-nums text-slate-500">
+                    <span className="shrink-0 text-sm tabular-nums text-ink-faint">
                       {formatMinorForDisplay(item.totalMinor, receipt.currency)}
                     </span>
                   </legend>
 
                   {state.participants.length === 0 ? (
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-ink-faint">
                       Önce kişi ekle.
                     </p>
                   ) : (
@@ -279,7 +279,7 @@ export function ParticipantAssignment({
                             }
                             className="peer sr-only"
                           />
-                          <span className="inline-block max-w-[10rem] truncate rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors peer-checked:border-violet-600 peer-checked:bg-violet-600 peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-500">
+                          <span className="inline-block max-w-[10rem] truncate rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
                             {participant.name || "(isimsiz)"}
                           </span>
                         </label>
@@ -288,12 +288,12 @@ export function ParticipantAssignment({
                   )}
 
                   {isUnassigned && (
-                    <p className="text-[11px] leading-snug text-amber-800">
+                    <p className="text-[11px] leading-snug text-warn-ink-soft">
                       Bu ürün henüz kimseye atanmadı.
                     </p>
                   )}
                   {assignedIds.length > 1 && (
-                    <p className="text-[11px] leading-snug text-slate-500">
+                    <p className="text-[11px] leading-snug text-ink-faint">
                       {assignedIds.length} kişi arasında eşit bölünecek.
                     </p>
                   )}
@@ -305,26 +305,26 @@ export function ParticipantAssignment({
       </div>
 
       {/* --- CTA --- */}
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <div className="flex flex-col gap-2 sm:flex-row-reverse sm:items-center sm:justify-start">
           <button
             type="button"
             onClick={onComplete}
             disabled={!completion.ok}
-            className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300 disabled:shadow-none"
+            className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled disabled:shadow-none"
           >
             Atamaları kaydet
           </button>
           <button
             type="button"
             onClick={onBack}
-            className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+            className="inline-flex items-center justify-center rounded-full border border-line bg-card px-4 py-2.5 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             Fişe dön
           </button>
         </div>
 
-        <p aria-live="polite" className="text-xs leading-relaxed text-slate-500">
+        <p aria-live="polite" className="text-xs leading-relaxed text-ink-faint">
           {completion.ok
             ? `Her ürün atandı. ${MIN_PARTICIPANTS} veya daha fazla kişiyle devam edebilirsin.`
             : completion.message}

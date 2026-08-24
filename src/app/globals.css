@@ -1,23 +1,283 @@
 @import "tailwindcss";
 
+/*
+ * TEMA BELIRTECLERI (semantic design tokens)
+ *
+ * Renkler bilesenlerde ham tonlarla (slate-200, violet-600...) degil
+ * ANLAMLARIYLA kullanilir: yuzey, murekkep, cizgi, marka, durum. Boylece tema
+ * degistirmek tek bir yerde tanimli degiskenleri degistirmek demektir; her
+ * bilesende `dark:` varyanti cogaltmak gerekmez.
+ *
+ * Tailwind v4'te `@theme` icindeki `--color-*` degiskenleri hem `:root`a CSS
+ * ozel degiskeni olarak yazilir hem de yardimci sinif uretir (`bg-card`,
+ * `text-ink`, `border-line`...). Asagidaki koyu tema bloklari AYNI
+ * degiskenleri ezdigi icin gecis tamamen calisma zamanindadir.
+ *
+ * KARANLIK TEMA TERS CEVIRME DEGILDIR: mor marka aksani korunur, zemin saf
+ * siyah yerine hafif mor-lacivert bir derinlik kullanir ve metin saf beyaz
+ * yerine yumusatilmis bir tondur (parlama/halo azaltilir).
+ */
+
 @theme {
-  /* Uzak font bağımlılığı yok: yalnızca işletim sisteminde hazır bulunan yüzler. */
+  /* Uzak font bagimliligi yok: yalnizca isletim sisteminde hazir bulunan yuzler. */
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, "Noto Sans", sans-serif, "Apple Color Emoji",
     "Segoe UI Emoji";
 
+  /* ---- Yuzeyler ---- */
+  --color-surface: #ffffff;          /* sayfa zemini */
+  --color-card: #ffffff;             /* yukseltilmis kart */
+  --color-muted: #f8fafc;            /* ikincil/sakin zemin */
+  --color-muted-strong: #f1f5f9;     /* biraz daha belirgin zemin */
+  --color-field: #ffffff;            /* form alani zemini */
+
+  /* ---- Metin ---- */
+  --color-ink: #0f172a;              /* birincil metin */
+  --color-ink-soft: #475569;         /* ikincil metin */
+  --color-ink-faint: #64748b;        /* sonuk/yardimci metin */
+
+  /* ---- Cizgiler ---- */
+  --color-line: #e2e8f0;             /* kenarlik */
+  --color-line-soft: #f1f5f9;        /* ince ayrac */
+
+  /* ---- Marka (mor aksan KORUNUR) ---- */
+  --color-brand: #7c3aed;            /* birincil dugme zemini */
+  --color-brand-strong: #6d28d9;     /* hover */
+  --color-brand-soft: #f5f3ff;       /* mor bilgi yuzeyi */
+  --color-brand-soft-strong: #ede9fe;
+  --color-brand-line: #c4b5fd;       /* mor kenarlik */
+  --color-brand-line-soft: #ede9fe;
+  --color-brand-ink: #6d28d9;        /* mor yuzey ustundeki metin */
+  --color-focus: #8b5cf6;            /* odak halkasi */
+
+  /* ---- Durum: hata ---- */
+  --color-danger-surface: #fef2f2;
+  --color-danger-surface-strong: #fee2e2;
+  --color-danger-line: #fee2e2;
+  --color-danger-line-strong: #fca5a5;
+  --color-danger-ink: #b91c1c;
+  --color-danger-ink-soft: #dc2626;
+
+  /* ---- Durum: uyari ---- */
+  --color-warn-surface: #fffbeb;
+  --color-warn-surface-strong: #fef3c7;
+  --color-warn-line: #fde68a;
+  --color-warn-line-strong: #fcd34d;
+  --color-warn-ink: #78350f;
+  --color-warn-ink-soft: #92400e;
+  --color-warn-ink-faint: #b45309;
+
+  /* ---- Durum: basari ---- */
+  --color-ok-surface: #ecfdf5;
+  --color-ok-line: #a7f3d0;
+  --color-ok-ink: #064e3b;
+
+  /* ---- Durum: bilgi ---- */
+  --color-info-surface: #f0f9ff;
+  --color-info-line: #bae6fd;
+  --color-info-ink: #0c4a6e;
+
+  /* ---- Devre disi ---- */
+  --color-disabled: #c4b5fd;
+  --color-disabled-ink: #ffffff;
+
   --shadow-card: 0 1px 2px 0 rgb(15 23 42 / 0.04),
     0 16px 40px -24px rgb(15 23 42 / 0.24);
+  --shadow-brand: 0 1px 2px 0 rgb(124 58 237 / 0.18);
+}
+
+/*
+ * KOYU TEMA — iki yoldan etkinlesir, ikisi de AYNI degisken kumesini ezer:
+ *   1. :root[data-theme="dark"]   -> kullanicinin ACIK secimi (kalici),
+ *   2. prefers-color-scheme: dark -> kayitli secim YOKKEN sistem tercihi.
+ *
+ * (2) yalnizca kullanici acikca AYDINLIK secmediyse uygulanir
+ * (`:root:not([data-theme="light"])`), boylece KAYITLI TERCIH sistem
+ * tercihini HER ZAMAN yener.
+ */
+
+:root[data-theme="dark"] {
+  --color-surface: #0b1120;
+  --color-card: #131a2b;
+  --color-muted: #1a2234;
+  --color-muted-strong: #232c40;
+  --color-field: #171f30;
+
+  --color-ink: #e8edf7;
+  --color-ink-soft: #b3bdd0;
+  --color-ink-faint: #8f9bb1;
+
+  --color-line: #2a3348;
+  --color-line-soft: #1f2739;
+
+  /* Marka moru KORUNUR. Dugme zemini ayni tonda kalir ki uzerindeki beyaz
+     metin AA esigini gecmeye devam etsin; hover ise acilir. */
+  --color-brand: #7c3aed;
+  --color-brand-strong: #8b5cf6;
+  --color-brand-soft: #241b3d;
+  --color-brand-soft-strong: #2f2350;
+  --color-brand-line: #4c3a7d;
+  --color-brand-line-soft: #2f2350;
+  --color-brand-ink: #c4b5fd;
+  --color-focus: #a78bfa;
+
+  --color-danger-surface: #2a1417;
+  --color-danger-surface-strong: #3a1a1e;
+  --color-danger-line: #5b2126;
+  --color-danger-line-strong: #7f2a31;
+  --color-danger-ink: #fca5a5;
+  --color-danger-ink-soft: #f87171;
+
+  --color-warn-surface: #2a2011;
+  --color-warn-surface-strong: #3a2c15;
+  --color-warn-line: #5c4318;
+  --color-warn-line-strong: #7a5a1f;
+  --color-warn-ink: #fcd34d;
+  --color-warn-ink-soft: #fbbf24;
+  --color-warn-ink-faint: #f0b429;
+
+  --color-ok-surface: #0f2a20;
+  --color-ok-line: #1d5540;
+  --color-ok-ink: #6ee7b7;
+
+  --color-info-surface: #0e2233;
+  --color-info-line: #1c4a68;
+  --color-info-ink: #7dd3fc;
+
+  --color-disabled: #3b3357;
+  --color-disabled-ink: #9aa3b8;
+
+  /* Koyu zeminde golge yerine derinlik: daha koyu golge + gorunur kenar. */
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.5),
+    0 18px 44px -28px rgb(0 0 0 / 0.75);
+  --shadow-brand: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-surface: #0b1120;
+    --color-card: #131a2b;
+    --color-muted: #1a2234;
+    --color-muted-strong: #232c40;
+    --color-field: #171f30;
+
+    --color-ink: #e8edf7;
+    --color-ink-soft: #b3bdd0;
+    --color-ink-faint: #8f9bb1;
+
+    --color-line: #2a3348;
+    --color-line-soft: #1f2739;
+
+    /* Marka moru KORUNUR. Dugme zemini ayni tonda kalir ki uzerindeki beyaz
+       metin AA esigini gecmeye devam etsin; hover ise acilir. */
+    --color-brand: #7c3aed;
+    --color-brand-strong: #8b5cf6;
+    --color-brand-soft: #241b3d;
+    --color-brand-soft-strong: #2f2350;
+    --color-brand-line: #4c3a7d;
+    --color-brand-line-soft: #2f2350;
+    --color-brand-ink: #c4b5fd;
+    --color-focus: #a78bfa;
+
+    --color-danger-surface: #2a1417;
+    --color-danger-surface-strong: #3a1a1e;
+    --color-danger-line: #5b2126;
+    --color-danger-line-strong: #7f2a31;
+    --color-danger-ink: #fca5a5;
+    --color-danger-ink-soft: #f87171;
+
+    --color-warn-surface: #2a2011;
+    --color-warn-surface-strong: #3a2c15;
+    --color-warn-line: #5c4318;
+    --color-warn-line-strong: #7a5a1f;
+    --color-warn-ink: #fcd34d;
+    --color-warn-ink-soft: #fbbf24;
+    --color-warn-ink-faint: #f0b429;
+
+    --color-ok-surface: #0f2a20;
+    --color-ok-line: #1d5540;
+    --color-ok-ink: #6ee7b7;
+
+    --color-info-surface: #0e2233;
+    --color-info-line: #1c4a68;
+    --color-info-ink: #7dd3fc;
+
+    --color-disabled: #3b3357;
+    --color-disabled-ink: #9aa3b8;
+
+    /* Koyu zeminde golge yerine derinlik: daha koyu golge + gorunur kenar. */
+    --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.5),
+      0 18px 44px -28px rgb(0 0 0 / 0.75);
+    --shadow-brand: 0 1px 2px 0 rgb(0 0 0 / 0.45);
+  }
+}
+
+/*
+ * `color-scheme`: yerel denetimlerin (kaydirma cubugu, form alani
+ * varsayilanlari) dogru tema ile cizilmesini saglar. Erken baslatma betigi
+ * bunu `<html>` uzerine de yazar; buradaki kural JavaScript CALISMASA BILE
+ * sistem tercihini karsilar.
+ */
+:root {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
 }
 
 body {
   min-height: 100dvh;
-  background-color: #ffffff;
+  background-color: var(--color-surface);
+  /* Marka parildisi iki temada da korunur; koyuda biraz daha belirgin. */
   background-image: radial-gradient(
     52rem 26rem at 50% -14rem,
     rgb(139 92 246 / 0.12),
     rgb(139 92 246 / 0) 70%
   );
   background-repeat: no-repeat;
-  color: #0f172a;
+  color: var(--color-ink);
+}
+
+:root[data-theme="dark"] body {
+  background-image: radial-gradient(
+    52rem 26rem at 50% -14rem,
+    rgb(139 92 246 / 0.16),
+    rgb(139 92 246 / 0) 70%
+  );
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) body {
+    background-image: radial-gradient(
+      52rem 26rem at 50% -14rem,
+      rgb(139 92 246 / 0.16),
+      rgb(139 92 246 / 0) 70%
+    );
+  }
+}
+
+/*
+ * TEMAYA GORE SIMGE: gunes/ay ikonlari CSS ile secilir, JavaScript ile degil.
+ * Boylece dogru simge ILK BOYAMADA gorunur ve hidrasyondan once degismez.
+ */
+.theme-icon-dark {
+  display: none;
+}
+:root[data-theme="dark"] .theme-icon-dark {
+  display: block;
+}
+:root[data-theme="dark"] .theme-icon-light {
+  display: none;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-icon-dark {
+    display: block;
+  }
+  :root:not([data-theme="light"]) .theme-icon-light {
+    display: none;
+  }
 }

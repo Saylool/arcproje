@@ -264,10 +264,10 @@ export function ReceiptFlow() {
   return (
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
           {heading.title}
         </h1>
-        <p className="text-sm leading-relaxed text-slate-500 sm:text-base">
+        <p className="text-sm leading-relaxed text-ink-faint sm:text-base">
           {heading.description}
         </p>
       </header>
@@ -282,30 +282,30 @@ export function ReceiptFlow() {
           />
 
           {file !== null && (
-            <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
+            <div className="flex flex-col gap-3 rounded-3xl border border-line bg-card p-4 shadow-card">
               <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   onClick={analyze}
                   disabled={isAnalyzing}
-                  className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300 disabled:shadow-none"
+                  className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled disabled:shadow-none"
                 >
                   {ctaLabel}
                 </button>
-                <p className="text-xs leading-relaxed text-slate-400">
+                <p className="text-xs leading-relaxed text-ink-faint">
                   Fiş görselin analiz için OpenAI&apos;ye gönderilir. Görsel
                   sunucuda saklanmaz.
                 </p>
               </div>
 
               {isAnalyzing && (
-                <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs leading-relaxed text-violet-800 sm:text-sm">
+                <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink sm:text-sm">
                   Fişteki ürünler okunuyor, bu birkaç saniye sürebilir…
                 </p>
               )}
 
               {status === "error" && errorMessage !== null && (
-                <p className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700 sm:text-sm">
+                <p className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink sm:text-sm">
                   {errorMessage}
                 </p>
               )}
@@ -320,22 +320,22 @@ export function ReceiptFlow() {
                 onChange={handleReceiptChange}
               />
 
-              <div className="flex flex-col gap-2 rounded-3xl border border-slate-200 bg-white p-4 shadow-card">
+              <div className="flex flex-col gap-2 rounded-3xl border border-line bg-card p-4 shadow-card">
                 <button
                   type="button"
                   onClick={goToParticipants}
-                  className="inline-flex items-center justify-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
                   Kişilere dağıt
                 </button>
                 {splitError === null ? (
-                  <p className="text-xs leading-relaxed text-slate-400">
+                  <p className="text-xs leading-relaxed text-ink-faint">
                     Ürünleri kişilere dağıtmadan önce tutarları kontrol et.
                   </p>
                 ) : (
                   <p
                     role="alert"
-                    className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+                    className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
                   >
                     {splitError}
                   </p>

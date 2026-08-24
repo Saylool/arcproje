@@ -74,7 +74,7 @@ type FlowStatus =
   | "done";
 
 const LINK_CLASS =
-  "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+  "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /**
  * Dış kabuk: sorgu parametresini okur ve talebe ÖZEL oturumu `key` ile
@@ -601,7 +601,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   if (verifyState.status === "loading") {
     return (
       <section aria-label="Ödeme talebi" className={cardClass}>
-        <p className="text-sm text-slate-500">Ödeme talebi doğrulanıyor…</p>
+        <p className="text-sm text-ink-faint">Ödeme talebi doğrulanıyor…</p>
       </section>
     );
   }
@@ -609,16 +609,16 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   if (verifyState.status === "invalid") {
     return (
       <section aria-label="Ödeme talebi" className={cardClass}>
-        <h2 className="text-base font-semibold tracking-tight text-slate-900">
+        <h2 className="text-base font-semibold tracking-tight text-ink">
           Bu ödeme talebi geçersiz
         </h2>
         <p
           role="alert"
-          className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+          className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
           {verifyState.message}
         </p>
-        <p className="text-xs leading-relaxed text-slate-500">
+        <p className="text-xs leading-relaxed text-ink-faint">
           Güvenlik gereği geçersiz bir talep için cüzdan bağlama veya ödeme
           seçenekleri gösterilmez. Bağlantıyı sana gönderen kişiden yeni bir
           talep iste.
@@ -634,17 +634,17 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     <section aria-label="Ödeme talebi" className={cardClass}>
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold tracking-tight text-slate-900">
+          <h2 className="text-base font-semibold tracking-tight text-ink">
             Ödeme talebi
           </h2>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900">
+          <span className="rounded-full bg-warn-surface-strong px-2 py-0.5 text-[10px] font-semibold text-warn-ink">
             TEST AĞI
           </span>
-          <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-semibold text-violet-700">
+          <span className="rounded-full bg-brand-soft-strong px-2 py-0.5 text-[10px] font-semibold text-brand-ink">
             cüzdan imzası doğrulandı
           </span>
         </div>
-        <p className="text-xs leading-relaxed text-slate-500">
+        <p className="text-xs leading-relaxed text-ink-faint">
           Bu talep,{" "}
           <span className="font-mono">
             {shortenWalletAddress(payload.recipient)}
@@ -653,7 +653,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
           <strong className="font-semibold">kendi cüzdanında sen onaylarsın</strong>;
           kimse senin cüzdanından para çekemez.
         </p>
-        <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] leading-relaxed text-amber-900">
+        <p className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-[11px] leading-relaxed text-warn-ink">
           <strong className="font-semibold">İsimler kimlik kanıtı değildir.</strong>{" "}
           &quot;{payload.recipientLabel}&quot; ve &quot;{payload.debtorLabel}&quot;
           bu talebi oluşturan kişinin yazdığı etiketlerdir. İmza yalnızca{" "}
@@ -668,7 +668,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       </header>
 
       {/* Değiştirilemez inceleme */}
-      <dl className="flex flex-col gap-1 rounded-2xl border border-slate-200 p-3 text-xs">
+      <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
         <Row label="Borçlu / gönderen" value={payload.debtorLabel} />
         <Row label="Gönderen adresi" value={shortenWalletAddress(payload.debtor)} />
         <Row label="Fişi ödeyen / alıcı" value={payload.recipientLabel} />
@@ -705,7 +705,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
           address={payload.debtor}
         />
       </div>
-      <p className="text-[11px] leading-relaxed text-slate-400">
+      <p className="text-[11px] leading-relaxed text-ink-faint">
         Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler ve ağ talebi
         imzalayan kişi tarafından belirlenmiştir.{" "}
         <strong className="font-semibold">
@@ -716,8 +716,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       </p>
 
       {/* Cüzdan */}
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
           Kendi cüzdanını bağla
         </h3>
         {!walletsScanned ? (
@@ -725,14 +725,14 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             type="button"
             onClick={scanWallets}
             disabled={busy}
-            className="self-start rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
           >
             Cüzdanı bağla
           </button>
         ) : wallets.length === 0 ? (
           <p
             role="alert"
-            className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+            className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
           >
             Tarayıcında cüzdan bulunamadı. MetaMask gibi bir EIP-6963 cüzdanı
             kurup sayfayı yenile.
@@ -740,7 +740,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         ) : (
           <div className="flex flex-col gap-2">
             {wallets.length > 1 && (
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-ink-faint">
                 Birden fazla cüzdan bulundu, birini seç:
               </p>
             )}
@@ -760,7 +760,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                     }}
                     className="peer sr-only"
                   />
-                  <span className="inline-block rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors peer-checked:border-violet-600 peer-checked:bg-violet-600 peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-500">
+                  <span className="inline-block rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
                     {wallet.name}
                   </span>
                 </label>
@@ -771,7 +771,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 type="button"
                 onClick={connect}
                 disabled={selectedWalletUuid === null || busy}
-                className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Hesabı bağla
               </button>
@@ -780,23 +780,23 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   type="button"
                   onClick={switchNetwork}
                   disabled={busy}
-                  className="rounded-full bg-violet-600 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Arc Testnet&apos;e geç
                 </button>
               )}
             </div>
             {account !== null && (
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-ink-faint">
                 Bağlı hesap:{" "}
                 <span className="font-mono">{shortenWalletAddress(account)}</span>
                 {" · "}
                 {onArc ? (
-                  <span className="text-violet-700">
+                  <span className="text-brand-ink">
                     {ACTIVE_NETWORK_PROFILE.displayName}
                   </span>
                 ) : (
-                  <span className="text-amber-700">
+                  <span className="text-warn-ink-faint">
                     Arc Testnet değil (zincir {chainId ?? "bilinmiyor"})
                   </span>
                 )}
@@ -805,7 +805,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             {account !== null && !accountMatchesDebtor && (
               <p
                 role="alert"
-                className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900"
+                className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink"
               >
                 Bağlı hesap, talepteki borçlu adresiyle aynı değil. Bu talebi
                 yalnızca {payload.debtorLabel} ödeyebilir.
@@ -818,7 +818,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       {priorSubmission !== null && transaction === null && (
         <p
           role="alert"
-          className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+          className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
         >
           {priorSubmission === "success"
             ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
@@ -857,32 +857,32 @@ function RequestSession({ encoded }: { encoded: string | null }) {
 
       {/* Tahmin ve onay */}
       {!alreadyPaid && (
-        <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+        <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
           <button
             type="button"
             onClick={estimate}
             disabled={!canEstimate}
-            className="self-start rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+            className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
           >
             {status === "estimating" ? "Tahmin alınıyor…" : "İşlemi tahmin et"}
           </button>
 
           {estimateSummary !== null && status === "review" && (
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[11px] text-ink-faint">
               Tahmini ağ ücreti (gas, ayrı hesaplanır ve tutardan düşülmez):{" "}
               {estimateSummary}
             </p>
           )}
 
           {status === "review" && (
-            <div className="flex flex-col gap-2 rounded-2xl border border-violet-200 bg-violet-50 p-3">
-              <label className="flex items-start gap-2 text-[11px] leading-relaxed text-violet-900">
+            <div className="flex flex-col gap-2 rounded-2xl border border-brand-line-soft bg-brand-soft p-3">
+              <label className="flex items-start gap-2 text-[11px] leading-relaxed text-brand-ink">
                 <input
                   type="checkbox"
                   checked={confirmed}
                   disabled={busy}
                   onChange={(event) => setConfirmed(event.target.checked)}
-                  className="mt-0.5 accent-violet-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="mt-0.5 accent-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 />
                 <span>
                   Yukarıdaki imzalı talebi okudum. Kurun sunucu tarafından
@@ -894,7 +894,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 type="button"
                 onClick={submit}
                 disabled={!confirmed || busy}
-                className="self-start rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300"
+                className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled"
               >
                 Cüzdanda onayla
               </button>
@@ -902,13 +902,13 @@ function RequestSession({ encoded }: { encoded: string | null }) {
           )}
 
           {status === "verifying" && (
-            <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs text-violet-800">
+            <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs text-brand-ink">
               Talep ve kur yeniden doğrulanıyor…
             </p>
           )}
 
           {status === "sending" && (
-            <p className="rounded-2xl bg-violet-50 px-3 py-2.5 text-xs text-violet-800">
+            <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs text-brand-ink">
               İşlem cüzdanda bekleniyor…
             </p>
           )}
@@ -916,7 +916,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       )}
 
       {transaction !== null && (
-        <div className="flex flex-col gap-1 rounded-2xl border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900">
+        <div className="flex flex-col gap-1 rounded-2xl border border-brand-line-soft bg-brand-soft p-3 text-xs text-brand-ink">
           <p className="font-semibold">
             Ödeme gönderildi ({transaction.snapshot.displayAmount} USDC).
           </p>
@@ -931,7 +931,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
               ArcScan&apos;de görüntüle
             </a>
           )}
-          <p className="mt-1 text-[11px] leading-relaxed text-violet-800">
+          <p className="mt-1 text-[11px] leading-relaxed text-brand-ink">
             Bu sayfada aynı talep için tekrar gönderim kapatıldı. Ödeyen kişinin
             sayfası bu ödemeyi otomatik olarak öğrenmez; ona bilgi vermen
             gerekir.
@@ -942,7 +942,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       {errorMessage !== null && (
         <p
           role="alert"
-          className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+          className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
           {errorMessage}
         </p>
@@ -962,7 +962,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   : ""}
       </p>
 
-      <p className="border-t border-slate-100 pt-4 text-[11px] leading-relaxed text-slate-400">
+      <p className="border-t border-line-soft pt-4 text-[11px] leading-relaxed text-ink-faint">
         Test USDC için{" "}
         <a href={ARC_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
           Circle Faucet
@@ -979,7 +979,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
 }
 
 const cardClass =
-  "flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-card sm:p-5";
+  "flex flex-col gap-4 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5";
 
 function formatTry(minor: string): string {
   const value = BigInt(minor);
@@ -1021,22 +1021,22 @@ function AddressDisclosure({
   };
 
   return (
-    <details className="rounded-2xl border border-slate-200 px-3 py-2 text-xs">
-      <summary className="cursor-pointer text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500">
+    <details className="rounded-2xl border border-line px-3 py-2 text-xs">
+      <summary className="cursor-pointer text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         {title}
       </summary>
       <div className="mt-2 flex flex-col gap-2">
-        <code className="block overflow-x-auto break-all rounded-xl bg-slate-50 px-2 py-1.5 font-mono text-[11px] text-slate-800">
+        <code className="block overflow-x-auto break-all rounded-xl bg-muted px-2 py-1.5 font-mono text-[11px] text-ink">
           {address}
         </code>
         <button
           type="button"
           onClick={copy}
-          className="self-start rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+          className="self-start rounded-full border border-line bg-card px-3 py-1 text-[11px] font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           {copyState === "copied" ? "Kopyalandı" : "Adresi kopyala"}
         </button>
-        <p aria-live="polite" className="text-[11px] text-slate-500">
+        <p aria-live="polite" className="text-[11px] text-ink-faint">
           {copyState === "copied"
             ? "Adres panoya kopyalandı."
             : copyState === "failed"
@@ -1059,10 +1059,10 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-500">{label}</dt>
+      <dt className="text-ink-faint">{label}</dt>
       <dd
         className={`min-w-0 truncate text-right ${
-          strong ? "font-semibold text-slate-900" : "text-slate-700"
+          strong ? "font-semibold text-ink" : "text-ink-soft"
         }`}
       >
         {value}

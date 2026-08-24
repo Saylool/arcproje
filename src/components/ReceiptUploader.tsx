@@ -183,8 +183,8 @@ export function ReceiptUploader({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
-        className={`rounded-3xl border bg-white p-3 shadow-card transition-colors sm:p-4 ${
-          isDragging ? "border-violet-300" : "border-slate-200"
+        className={`rounded-3xl border bg-card p-3 shadow-card transition-colors sm:p-4 ${
+          isDragging ? "border-brand-line" : "border-line"
         }`}
       >
         <input
@@ -203,7 +203,7 @@ export function ReceiptUploader({
         {receipt ? (
           <div className="flex flex-col gap-3">
             <div className="flex gap-3 sm:gap-4">
-              <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 sm:h-28 sm:w-24">
+              <div className="h-24 w-20 shrink-0 overflow-hidden rounded-xl border border-line bg-muted-strong sm:h-28 sm:w-24">
                 {/* eslint-disable-next-line @next/next/no-img-element -- yerel object URL önizlemesi; next/image bir blob için değer katmıyor */}
                 <img
                   src={receipt.previewUrl}
@@ -215,12 +215,12 @@ export function ReceiptUploader({
               <div className="flex min-w-0 flex-1 flex-col gap-3">
                 <div className="min-w-0">
                   <p
-                    className="truncate text-sm font-semibold text-slate-900"
+                    className="truncate text-sm font-semibold text-ink"
                     title={receipt.file.name}
                   >
                     {receipt.file.name}
                   </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
+                  <p className="mt-0.5 text-xs text-ink-faint">
                     {formatFileSize(receipt.file.size)}
                   </p>
                 </div>
@@ -230,7 +230,7 @@ export function ReceiptUploader({
                     type="button"
                     onClick={openFilePicker}
                     disabled={disabled}
-                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
                     Değiştir
                   </button>
@@ -238,7 +238,7 @@ export function ReceiptUploader({
                     type="button"
                     onClick={removeReceipt}
                     disabled={disabled}
-                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
                     Kaldır
                   </button>
@@ -249,29 +249,29 @@ export function ReceiptUploader({
         ) : (
           <label
             htmlFor={inputId}
-            className={`flex cursor-pointer flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-colors peer-focus-visible:border-violet-400 peer-focus-visible:bg-violet-50 sm:px-6 sm:py-12 ${
+            className={`flex cursor-pointer flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-colors peer-focus-visible:border-brand-line peer-focus-visible:bg-brand-soft sm:px-6 sm:py-12 ${
               isDragging
-                ? "border-violet-400 bg-violet-50"
-                : "border-slate-200 bg-slate-50/70 hover:border-violet-300 hover:bg-violet-50/60"
+                ? "border-brand-line bg-brand-soft"
+                : "border-line bg-muted/70 hover:border-brand-line hover:bg-brand-soft/60"
             }`}
           >
             <span
               aria-hidden="true"
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-violet-100 text-violet-600"
+              className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft-strong text-brand-ink"
             >
               <UploadIcon />
             </span>
 
             <span className="flex flex-col gap-1">
-              <span className="text-base font-semibold text-slate-900">
+              <span className="text-base font-semibold text-ink">
                 Fişini buraya sürükle
               </span>
-              <span className="text-sm text-slate-500">
+              <span className="text-sm text-ink-faint">
                 ya da cihazından bir görsel seç
               </span>
             </span>
 
-            <span className="inline-flex items-center rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700">
+            <span className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong">
               Fiş görseli seç
             </span>
           </label>
@@ -281,14 +281,14 @@ export function ReceiptUploader({
       {error && (
         <p
           id={errorId}
-          className="flex items-start gap-2 rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700 sm:text-sm"
+          className="flex items-start gap-2 rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink sm:text-sm"
         >
           <AlertIcon />
           <span>{error}</span>
         </p>
       )}
 
-      <p id={hintId} className="px-1 text-xs text-slate-400">
+      <p id={hintId} className="px-1 text-xs text-ink-faint">
         JPG, PNG veya WEBP · en fazla 10 MB
       </p>
 

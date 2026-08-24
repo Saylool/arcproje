@@ -77,10 +77,10 @@ type GeneratedLink = {
 };
 
 const LINK_CLASS =
-  "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+  "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 const CARD_CLASS =
-  "flex flex-col gap-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm";
+  "flex flex-col gap-4 rounded-3xl border border-line bg-card p-5 shadow-sm";
 
 export function SharedBillCreator({
   receipt,
@@ -291,10 +291,10 @@ export function SharedBillCreator({
   if (!isTry) {
     return (
       <section aria-labelledby={headingId} className={CARD_CLASS}>
-        <h2 id={headingId} className="text-base font-semibold text-slate-900">
+        <h2 id={headingId} className="text-base font-semibold text-ink">
           Ortak odeme baglantisi
         </h2>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-ink-soft">
           Bu adim yalnizca TRY fisleri icin kullanilabilir.
         </p>
         <button type="button" onClick={onBack} className={LINK_CLASS}>
@@ -306,17 +306,17 @@ export function SharedBillCreator({
 
   return (
     <section aria-labelledby={headingId} className={CARD_CLASS}>
-      <h2 id={headingId} className="text-base font-semibold text-slate-900">
+      <h2 id={headingId} className="text-base font-semibold text-ink">
         Tek baglanti olustur
       </h2>
 
-      <p className="text-sm leading-relaxed text-slate-600">
+      <p className="text-sm leading-relaxed text-ink-soft">
         Fisi odeyen cuzdanini bir kez baglarsin, her borclu icin bir adres
         girersin ve <strong>tek bir imza</strong> atarsin.{" "}
         <strong>Butun borclular ayni baglantiyi alir.</strong>
       </p>
 
-      <p className="rounded-2xl border border-violet-100 bg-violet-50 px-3 py-2.5 text-xs leading-relaxed text-violet-900">
+      <p className="rounded-2xl border border-brand-line-soft bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink">
         Bu imza yalnizca bir <strong>talep olusturur</strong>. Kimsenin
         cuzdanindan para cekemez ve hicbir transfer yetkisi vermez. Transferi
         her borclu kendi cuzdaninda imzalar. Ag:{" "}
@@ -325,21 +325,21 @@ export function SharedBillCreator({
       </p>
 
       {/* Cuzdan */}
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-        <h3 className="text-sm font-semibold text-slate-800">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+        <h3 className="text-sm font-semibold text-ink">
           1. Fisi odeyen cuzdan
         </h3>
         {!walletsScanned && (
           <button
             type="button"
             onClick={scanWallets}
-            className="self-start rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
             Cuzdani bagla
           </button>
         )}
         {walletsScanned && wallets.length === 0 && (
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-ink-faint">
             Tarayicida cuzdan bulunamadi.{" "}
             <a
               href={ARC_TESTNET_DOCS_URL}
@@ -356,7 +356,7 @@ export function SharedBillCreator({
             <select
               value={selectedWalletUuid ?? ""}
               onChange={(event) => setSelectedWalletUuid(event.target.value)}
-              className="rounded-full border border-slate-200 px-3 py-1.5 text-sm"
+              className="rounded-full border border-line px-3 py-1.5 text-sm"
             >
               <option value="">Cuzdan sec</option>
               {wallets.map((wallet) => (
@@ -369,14 +369,14 @@ export function SharedBillCreator({
               type="button"
               onClick={connect}
               disabled={selectedWalletUuid === null}
-              className="rounded-full bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
             >
               Bagla
             </button>
           </div>
         )}
         {account !== null && (
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-ink-soft">
             Alici: <span className="font-mono">{shortenWalletAddress(account)}</span>
           </p>
         )}
@@ -384,7 +384,7 @@ export function SharedBillCreator({
           <button
             type="button"
             onClick={switchNetwork}
-            className="self-start rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900"
+            className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink"
           >
             {ACTIVE_NETWORK_PROFILE.displayName} agina gec
           </button>
@@ -392,19 +392,19 @@ export function SharedBillCreator({
       </div>
 
       {/* Borclu adresleri */}
-      <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-        <h3 className="text-sm font-semibold text-slate-800">
+      <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
+        <h3 className="text-sm font-semibold text-ink">
           2. Her borclu icin bir cuzdan adresi
         </h3>
         {rows.length === 0 && (
-          <p className="text-xs text-slate-500">Paylasilacak bir borc yok.</p>
+          <p className="text-xs text-ink-faint">Paylasilacak bir borc yok.</p>
         )}
         {rows.map((row) => {
           const invalid =
             !draft.ok && draft.participantId === row.participantId;
           return (
             <label key={row.participantId} className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-slate-700">
+              <span className="text-xs font-medium text-ink-soft">
                 {row.name} — {formatMinorForDisplay(row.amountMinor, receipt.currency)}
               </span>
               <input
@@ -422,36 +422,36 @@ export function SharedBillCreator({
                 }
                 aria-invalid={invalid}
                 className={`rounded-2xl border px-3 py-2 font-mono text-xs ${
-                  invalid ? "border-red-300 bg-red-50" : "border-slate-200"
+                  invalid ? "border-danger-line-strong bg-danger-surface" : "border-line"
                 }`}
               />
             </label>
           );
         })}
         {!draft.ok && rows.length > 0 && (
-          <p role="alert" className="text-xs text-red-700">
+          <p role="alert" className="text-xs text-danger-ink">
             {describeSharedBillDraftProblem(draft.problem)}
           </p>
         )}
       </div>
 
       {/* Olustur */}
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <button
           type="button"
           onClick={createLink}
           disabled={!canCreate}
-          className="self-start rounded-full bg-violet-600 px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           {busy ? "Imzalaniyor…" : "Imzala ve tek baglanti olustur"}
         </button>
         {errorMessage !== null && (
-          <p role="alert" className="text-xs leading-relaxed text-red-700">
+          <p role="alert" className="text-xs leading-relaxed text-danger-ink">
             {errorMessage}
           </p>
         )}
         {linkIsStale && (
-          <p role="alert" className="text-xs leading-relaxed text-amber-800">
+          <p role="alert" className="text-xs leading-relaxed text-warn-ink-soft">
             Girdiler degisti; onceki baglanti artik gecerli degil. Yeniden
             imzalayip yeni bir baglanti olustur.
           </p>
@@ -460,25 +460,25 @@ export function SharedBillCreator({
 
       {/* Tek baglanti */}
       {activeLink !== null && (
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-          <h3 className="text-sm font-semibold text-slate-800">
+        <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
+          <h3 className="text-sm font-semibold text-ink">
             3. Tek baglanti — herkese ayni
           </h3>
-          <p className="break-all rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-700">
+          <p className="break-all rounded-2xl border border-line bg-muted px-3 py-2 font-mono text-[11px] text-ink-soft">
             {activeLink.url}
           </p>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={copyLink}
-              className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-semibold text-slate-700"
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
             >
               {copied ? "Kopyalandi" : "Kopyala"}
             </button>
             <button
               type="button"
               onClick={shareLink}
-              className="rounded-full border border-slate-200 px-4 py-1.5 text-xs font-semibold text-slate-700"
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
             >
               Paylas
             </button>
@@ -490,13 +490,13 @@ export function SharedBillCreator({
               dangerouslySetInnerHTML={{ __html: qrSvg }}
             />
           )}
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-xs leading-relaxed text-ink-faint">
             Baglanti borc listesini, adresleri veya isimleri TASIMAZ; yalnizca
             tahmin edilemez bir kimlik icerir. Baglantiyi acan herkes hesabi
             gorebilir, bu yuzden yalnizca ilgili kisilerle paylas. En fazla{" "}
             {SHARED_BILL_MAX_LIFETIME_MS / (24 * 60 * 60 * 1000)} gun gecerlidir.
           </p>
-          <p className="text-xs leading-relaxed text-slate-500">
+          <p className="text-xs leading-relaxed text-ink-faint">
             Test USDC&apos;si icin{" "}
             <a
               href={ARC_TESTNET_FAUCET_URL}
@@ -514,7 +514,7 @@ export function SharedBillCreator({
       <button
         type="button"
         onClick={onBack}
-        className="self-start text-xs text-slate-500 underline underline-offset-2"
+        className="self-start text-xs text-ink-faint underline underline-offset-2"
       >
         Geri don
       </button>

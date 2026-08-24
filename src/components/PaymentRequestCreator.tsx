@@ -82,7 +82,7 @@ type QuoteState =
 const COINGECKO_ATTRIBUTION_URL = "https://www.coingecko.com/en/api";
 
 const LINK_CLASS =
-  "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+  "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 export function PaymentRequestCreator({
   receipt,
@@ -413,18 +413,18 @@ export function PaymentRequestCreator({
   return (
     <section
       aria-label="Ödeme talebi oluştur"
-      className="flex flex-col gap-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-card sm:p-5"
+      className="flex flex-col gap-5 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-base font-semibold tracking-tight text-slate-900">
+          <h2 className="text-base font-semibold tracking-tight text-ink">
             Ödeme talebi oluştur
           </h2>
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-900">
+          <span className="rounded-full bg-warn-surface-strong px-2 py-0.5 text-[10px] font-semibold text-warn-ink">
             TEST AĞI
           </span>
         </div>
-        <p className="text-xs leading-relaxed text-slate-500">
+        <p className="text-xs leading-relaxed text-ink-faint">
           Fişi sen ödedin, yani <strong className="font-semibold">alıcı</strong>{" "}
           sensin. Her borç için ayrı bir talep imzalarsın;{" "}
           <strong className="font-semibold">
@@ -437,7 +437,7 @@ export function PaymentRequestCreator({
       {!isTry ? (
         <p
           role="alert"
-          className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+          className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
           Bu fişin para birimi TRY değil ({receipt.currency}). Arc ödemesi şu an
           yalnızca TRY fişler için destekleniyor.
@@ -446,7 +446,7 @@ export function PaymentRequestCreator({
         <>
           {/* 1 — Alıcı cüzdanı */}
           <div className="flex flex-col gap-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
               1 · Fişi ödeyen / alıcı cüzdanı
             </h3>
             {!walletsScanned ? (
@@ -454,14 +454,14 @@ export function PaymentRequestCreator({
                 type="button"
                 onClick={scanWallets}
                 disabled={signing}
-                className="self-start rounded-full bg-violet-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Cüzdanı bağla
               </button>
             ) : wallets.length === 0 ? (
               <p
                 role="alert"
-                className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+                className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
               >
                 Tarayıcında cüzdan bulunamadı. MetaMask gibi bir EIP-6963 cüzdanı
                 kurup sayfayı yenile.
@@ -469,7 +469,7 @@ export function PaymentRequestCreator({
             ) : (
               <div className="flex flex-col gap-2">
                 {wallets.length > 1 && (
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-ink-faint">
                     Birden fazla cüzdan bulundu, birini seç:
                   </p>
                 )}
@@ -488,7 +488,7 @@ export function PaymentRequestCreator({
                         }}
                         className="peer sr-only"
                       />
-                      <span className="inline-block rounded-full border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors peer-checked:border-violet-600 peer-checked:bg-violet-600 peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet-500">
+                      <span className="inline-block rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
                         {wallet.name}
                       </span>
                     </label>
@@ -499,7 +499,7 @@ export function PaymentRequestCreator({
                     type="button"
                     onClick={connect}
                     disabled={selectedWalletUuid === null || signing}
-                    className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     Hesabı bağla
                   </button>
@@ -508,25 +508,25 @@ export function PaymentRequestCreator({
                       type="button"
                       onClick={switchNetwork}
                       disabled={signing}
-                      className="rounded-full bg-violet-600 px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       Arc Testnet&apos;e geç
                     </button>
                   )}
                 </div>
                 {recipientAddress !== null && (
-                  <p className="text-[11px] text-slate-500">
+                  <p className="text-[11px] text-ink-faint">
                     Alıcı (sen):{" "}
                     <span className="font-mono">
                       {shortenWalletAddress(recipientAddress)}
                     </span>
                     {" · "}
                     {onArc ? (
-                      <span className="text-violet-700">
+                      <span className="text-brand-ink">
                         {ACTIVE_NETWORK_PROFILE.displayName}
                       </span>
                     ) : (
-                      <span className="text-amber-700">
+                      <span className="text-warn-ink-faint">
                         Arc Testnet değil (zincir {chainId ?? "bilinmiyor"})
                       </span>
                     )}
@@ -538,32 +538,32 @@ export function PaymentRequestCreator({
 
           {/* 2 — Kur (sunucudan otomatik) */}
           <div
-            className="flex flex-col gap-2 border-t border-slate-100 pt-4"
+            className="flex flex-col gap-2 border-t border-line-soft pt-4"
             aria-labelledby={quoteHeadingId}
           >
             <h3
               id={quoteHeadingId}
-              className="text-xs font-semibold uppercase tracking-wide text-slate-400"
+              className="text-xs font-semibold uppercase tracking-wide text-ink-faint"
             >
               2 · Kur (otomatik)
             </h3>
 
             {quoteState.status === "loading" && (
-              <p className="text-xs text-slate-500">Kur alınıyor…</p>
+              <p className="text-xs text-ink-faint">Kur alınıyor…</p>
             )}
 
             {quoteState.status === "error" && (
               <div className="flex flex-col items-start gap-2">
                 <p
                   role="alert"
-                  className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+                  className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
                 >
                   {quoteState.message}
                 </p>
                 <button
                   type="button"
                   onClick={() => void loadQuote()}
-                  className="rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
                   Kuru yeniden dene
                 </button>
@@ -572,7 +572,7 @@ export function PaymentRequestCreator({
 
             {signedQuote !== null && (
               <div className="flex flex-col gap-2">
-                <dl className="flex flex-col gap-1 rounded-2xl border border-slate-200 p-3 text-xs">
+                <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
                   <Row
                     label="Kur"
                     value={`1 USDC = ${formatQuoteRate(signedQuote.quote)} TRY`}
@@ -597,13 +597,13 @@ export function PaymentRequestCreator({
                 {quoteExpired ? (
                   <p
                     role="alert"
-                    className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900"
+                    className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink"
                   >
                     Kur teklifinin süresi doldu. Talep oluşturmak için kuru
                     yenile.
                   </p>
                 ) : (
-                  <p className="text-[11px] leading-relaxed text-slate-500">
+                  <p className="text-[11px] leading-relaxed text-ink-faint">
                     Kur sunucuda alınır ve sunucu tarafından imzalanır; ödeme
                     talebine bu imzalı teklif yazılır. Borçlunun tarayıcısı kuru
                     ayrıca sunucuya doğrulatır.
@@ -614,14 +614,14 @@ export function PaymentRequestCreator({
                   type="button"
                   onClick={() => void loadQuote()}
                   disabled={signing}
-                  className="self-start rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Kuru yenile
                 </button>
               </div>
             )}
 
-            <p className="text-[11px] leading-relaxed text-slate-400">
+            <p className="text-[11px] leading-relaxed text-ink-faint">
               <a
                 href={COINGECKO_ATTRIBUTION_URL}
                 target="_blank"
@@ -634,12 +634,12 @@ export function PaymentRequestCreator({
           </div>
 
           {/* 3 — Borç ve borçlu adresi */}
-          <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+          <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
               3 · Borç ve borçlu / gönderen adresi
             </h3>
             {result.debts.length === 0 ? (
-              <p className="text-xs text-slate-500">Ödeme talebi gereken borç yok.</p>
+              <p className="text-xs text-ink-faint">Ödeme talebi gereken borç yok.</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {result.debts.map((debt, index) => {
@@ -651,7 +651,7 @@ export function PaymentRequestCreator({
                     <li
                       key={key}
                       className={`flex flex-col gap-2 rounded-2xl border p-3 ${
-                        selected ? "border-violet-300 bg-violet-50/40" : "border-slate-200"
+                        selected ? "border-brand-line bg-brand-soft/40" : "border-line"
                       }`}
                     >
                       <label className="flex cursor-pointer items-center gap-2">
@@ -664,10 +664,10 @@ export function PaymentRequestCreator({
                             setSelectedDebtIndex(index);
                             setCopied(false);
                           }}
-                          className="accent-violet-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                          className="accent-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                         />
-                        <span className="min-w-0 flex-1 text-xs text-slate-700">
-                          <strong className="font-semibold text-slate-900">
+                        <span className="min-w-0 flex-1 text-xs text-ink-soft">
+                          <strong className="font-semibold text-ink">
                             {nameOf(debt.fromParticipantId)}
                           </strong>{" "}
                           (borçlu), {toDativeName(nameOf(debt.toParticipantId))}{" "}
@@ -675,7 +675,7 @@ export function PaymentRequestCreator({
                           borçlu
                         </span>
                       </label>
-                      <label className="text-[11px] text-slate-600">
+                      <label className="text-[11px] text-ink-soft">
                         {nameOf(debt.fromParticipantId)} cüzdan adresi
                         <input
                           type="text"
@@ -687,15 +687,15 @@ export function PaymentRequestCreator({
                             setDebtorAddress(debt.fromParticipantId, event.target.value)
                           }
                           aria-invalid={raw.trim() !== "" && valid === null ? true : undefined}
-                          className={`mt-1 w-full rounded-xl border bg-white px-3 py-2 font-mono text-xs text-slate-900 transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:opacity-60 ${
+                          className={`mt-1 w-full rounded-xl border bg-card px-3 py-2 font-mono text-xs text-ink transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60 ${
                             raw.trim() !== "" && valid === null
-                              ? "border-red-300 bg-red-50/50"
-                              : "border-slate-200 focus:border-violet-300"
+                              ? "border-danger-line-strong bg-danger-surface/50"
+                              : "border-line focus:border-brand-line"
                           }`}
                         />
                       </label>
                       {raw.trim() !== "" && valid === null && (
-                        <p className="text-[11px] text-red-600">
+                        <p className="text-[11px] text-danger-ink-soft">
                           Geçerli bir cüzdan adresi değil.
                         </p>
                       )}
@@ -708,11 +708,11 @@ export function PaymentRequestCreator({
 
           {/* 4 — Önizleme ve imzalama */}
           {selectedDebt !== null && conversion !== null && conversion.ok && (
-            <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
                 4 · Talebi imzala
               </h3>
-              <dl className="flex flex-col gap-1 rounded-2xl border border-slate-200 p-3 text-xs">
+              <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
                 <Row label="Borç (TRY)" value={formatMinorForDisplay(selectedDebt.amountMinor, receipt.currency)} />
                 <Row
                   label="Kur"
@@ -745,11 +745,11 @@ export function PaymentRequestCreator({
                 type="button"
                 onClick={createRequest}
                 disabled={!canCreate}
-                className="self-start rounded-full bg-violet-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-violet-200 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:bg-violet-300"
+                className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled"
               >
                 {signing ? "Cüzdanda imzalanıyor…" : "Ödeme talebi oluştur"}
               </button>
-              <p className="text-[11px] leading-relaxed text-slate-400">
+              <p className="text-[11px] leading-relaxed text-ink-faint">
                 Cüzdanın yalnızca bir <strong className="font-semibold">imza</strong>{" "}
                 soracak. Bu imza para göndermez.
               </p>
@@ -758,11 +758,11 @@ export function PaymentRequestCreator({
 
           {/* 5 — Üretilen bağlantı */}
           {currentGenerated !== null && (
-            <div className="flex flex-col gap-3 border-t border-slate-100 pt-4">
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
                 5 · Talep bağlantısı
               </h3>
-              <p className="text-xs leading-relaxed text-slate-600">
+              <p className="text-xs leading-relaxed text-ink-soft">
                 Bu bağlantıyı{" "}
                 <strong className="font-semibold">
                   {nameOf(selectedDebt?.fromParticipantId ?? "")}
@@ -775,12 +775,12 @@ export function PaymentRequestCreator({
                 <div
                   aria-label="Talep bağlantısının QR kodu"
                   role="img"
-                  className="w-40 self-start rounded-2xl border border-slate-200 bg-white p-2 [&>svg]:h-auto [&>svg]:w-full"
+                  className="w-40 self-start rounded-2xl border border-line bg-card p-2 [&>svg]:h-auto [&>svg]:w-full"
                   dangerouslySetInnerHTML={{ __html: qrSvg }}
                 />
               )}
 
-              <p className="break-all rounded-2xl bg-slate-50 px-3 py-2 font-mono text-[11px] text-slate-600">
+              <p className="break-all rounded-2xl bg-muted px-3 py-2 font-mono text-[11px] text-ink-soft">
                 {currentGenerated.url}
               </p>
 
@@ -789,7 +789,7 @@ export function PaymentRequestCreator({
                   type="button"
                   onClick={copyLink}
                   disabled={generatedExpired}
-                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
                   {copied ? "Kopyalandı" : "Talep bağlantısını kopyala"}
                 </button>
@@ -797,13 +797,13 @@ export function PaymentRequestCreator({
                   type="button"
                   onClick={shareLink}
                   disabled={generatedExpired}
-                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500"
+                  className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
                   Paylaş
                 </button>
               </div>
 
-              <p className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+              <p className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink">
                 Bu bağlantı kişi adlarını, cüzdan adreslerini ve ödeme tutarını
                 içerir; yalnızca ilgili borçluyla paylaş.{" "}
                 <strong className="font-semibold">
@@ -825,7 +825,7 @@ export function PaymentRequestCreator({
               {generatedExpired && (
                 <p
                   role="alert"
-                  className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2 text-[11px] leading-relaxed text-red-700"
+                  className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2 text-[11px] leading-relaxed text-danger-ink"
                 >
                   Bu bağlantının süresi doldu ve artık ödenemez. Kuru yenileyip
                   yeni bir talep imzala.
@@ -837,7 +837,7 @@ export function PaymentRequestCreator({
           {errorMessage !== null && (
             <p
               role="alert"
-              className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+              className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
             >
               {errorMessage}
             </p>
@@ -855,16 +855,16 @@ export function PaymentRequestCreator({
               : ""}
       </p>
 
-      <div className="flex flex-col gap-2 border-t border-slate-100 pt-4">
+      <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <button
           type="button"
           onClick={onBack}
           disabled={signing}
-          className="self-start rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-violet-300 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500 disabled:cursor-not-allowed disabled:opacity-60"
+          className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
         >
           Paylara dön
         </button>
-        <p className="text-[11px] leading-relaxed text-slate-400">
+        <p className="text-[11px] leading-relaxed text-ink-faint">
           Test USDC için{" "}
           <a href={ARC_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
             Circle Faucet
@@ -891,10 +891,10 @@ function Row({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-500">{label}</dt>
+      <dt className="text-ink-faint">{label}</dt>
       <dd
         className={`min-w-0 truncate text-right ${
-          strong ? "font-semibold text-slate-900" : "text-slate-700"
+          strong ? "font-semibold text-ink" : "text-ink-soft"
         }`}
       >
         {value}

@@ -85,11 +85,11 @@ type Phase =
     }
   | { status: "error"; message: string };
 
-const CARD = "flex flex-col gap-3 border-t border-slate-100 pt-4";
+const CARD = "flex flex-col gap-3 border-t border-line-soft pt-4";
 const LINK =
-  "underline underline-offset-2 hover:text-violet-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-500";
+  "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 const NOTE =
-  "rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900";
+  "rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink";
 
 export function SharedBillPaymentPanel({
   billId,
@@ -397,7 +397,7 @@ export function SharedBillPaymentPanel({
    */
 
   const testnetWarning = (
-    <p className="text-xs leading-relaxed text-slate-500">
+    <p className="text-xs leading-relaxed text-ink-faint">
       Ağ: <strong>{ACTIVE_NETWORK_PROFILE.displayName}</strong>. Test
       USDC&apos;sinin <strong>gerçek parasal değeri yoktur</strong>. Test parası
       için{" "}
@@ -425,14 +425,14 @@ export function SharedBillPaymentPanel({
 
   return (
     <div className={CARD}>
-      <h2 className="text-sm font-semibold text-slate-800">Borcunu öde</h2>
+      <h2 className="text-sm font-semibold text-ink">Borcunu öde</h2>
 
       {(phase.status === "idle" || phase.status === "error") && (
         <>
           {phase.status === "error" && (
             <p
               role="alert"
-              className="rounded-2xl border border-red-100 bg-red-50 px-3 py-2.5 text-xs leading-relaxed text-red-700"
+              className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
             >
               {phase.message}
             </p>
@@ -440,7 +440,7 @@ export function SharedBillPaymentPanel({
           <button
             type="button"
             onClick={requestOffer}
-            className="self-start rounded-full bg-violet-600 px-5 py-2 text-sm font-semibold text-white"
+            className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
           >
             Güncel kuru al
           </button>
@@ -449,12 +449,12 @@ export function SharedBillPaymentPanel({
       )}
 
       {phase.status === "working" && (
-        <p className="text-xs text-slate-600">{phase.step}</p>
+        <p className="text-xs text-ink-soft">{phase.step}</p>
       )}
 
       {(phase.status === "offered" || phase.status === "reviewed") && (
         <>
-          <dl className="flex flex-col gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs text-slate-700">
+          <dl className="flex flex-col gap-1.5 rounded-2xl border border-line bg-muted px-3 py-2.5 text-xs text-ink-soft">
             <Row
               label="Borç (TRY)"
               // Gösterim de TAM SAYIDAN türer; `Number` kullanılmaz.
@@ -480,15 +480,15 @@ export function SharedBillPaymentPanel({
           </dl>
 
           <div className="flex flex-col gap-1">
-            <span className="text-xs font-medium text-slate-700">
+            <span className="text-xs font-medium text-ink-soft">
               Alıcı cüzdan adresi (tam)
             </span>
-            <p className="break-all rounded-2xl border border-slate-200 bg-white px-3 py-2 font-mono text-[11px] text-slate-700">
+            <p className="break-all rounded-2xl border border-line bg-card px-3 py-2 font-mono text-[11px] text-ink-soft">
               {phase.offer.recipient}
             </p>
           </div>
 
-          <p className="text-[11px] leading-relaxed text-slate-500">
+          <p className="text-[11px] leading-relaxed text-ink-faint">
             Kur kaynağı: <strong>CoinGecko</strong> (sunucu tarafından
             doğrulanmış teklif). Tutar, borcun ve bu kurun tam sayı
             aritmetiğiyle türetilmiştir.
@@ -498,7 +498,7 @@ export function SharedBillPaymentPanel({
             <button
               type="button"
               onClick={() => estimate(phase.offer)}
-              className="self-start rounded-full border border-violet-200 bg-violet-50 px-4 py-2 text-sm font-semibold text-violet-800"
+              className="self-start rounded-full border border-brand-line-soft bg-brand-soft px-4 py-2 text-sm font-semibold text-brand-ink"
             >
               İşlemi tahmin et
             </button>
@@ -512,7 +512,7 @@ export function SharedBillPaymentPanel({
               <button
                 type="button"
                 onClick={() => pay(phase.offer)}
-                className="self-start rounded-full bg-violet-600 px-5 py-2 text-sm font-semibold text-white"
+                className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
               >
                 Arc Testnet ile öde
               </button>
@@ -526,7 +526,7 @@ export function SharedBillPaymentPanel({
         <>
           <p
             role="status"
-            className="rounded-2xl border border-sky-200 bg-sky-50 px-3 py-2.5 text-xs leading-relaxed text-sky-900"
+            className="rounded-2xl border border-info-line bg-info-surface px-3 py-2.5 text-xs leading-relaxed text-info-ink"
           >
             <strong>Doğrulanıyor.</strong> {phase.note} Ödeme, sunucu zincirden
             makbuzu doğrulayana kadar <strong>tamamlanmış sayılmaz</strong>.
@@ -539,7 +539,7 @@ export function SharedBillPaymentPanel({
         <>
           <p
             role="status"
-            className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs leading-relaxed text-emerald-900"
+            className="rounded-2xl border border-ok-line bg-ok-surface px-3 py-2.5 text-xs leading-relaxed text-ok-ink"
           >
             <strong>Ödendi.</strong> Sunucu işlemi Arc Testnet üzerinde
             doğruladı: gönderen, alıcı ve tutar birebir eşleşti.
@@ -553,7 +553,7 @@ export function SharedBillPaymentPanel({
         <>
           <p
             role="alert"
-            className="rounded-2xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-900"
+            className="rounded-2xl border border-warn-line-strong bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
           >
             {phase.message}
           </p>
@@ -567,8 +567,8 @@ export function SharedBillPaymentPanel({
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-slate-500">{label}</dt>
-      <dd className="text-right font-medium text-slate-900">{value}</dd>
+      <dt className="text-ink-faint">{label}</dt>
+      <dd className="text-right font-medium text-ink">{value}</dd>
     </div>
   );
 }
@@ -586,7 +586,7 @@ function ExplorerLink({
   }
   const url = explorerUrl ?? buildArcExplorerTxUrl(txHash);
   return (
-    <p className="break-all text-[11px] text-slate-500">
+    <p className="break-all text-[11px] text-ink-faint">
       İşlem:{" "}
       {url === null ? (
         <span className="font-mono">{txHash}</span>
