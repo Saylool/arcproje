@@ -3,6 +3,8 @@
 import { useCallback, useRef, useState } from "react";
 
 import { PaymentRequestCreator } from "@/components/PaymentRequestCreator";
+import { SharedBillCreator } from "@/components/SharedBillCreator";
+import { SHARED_BILL_FLOW_ENABLED } from "@/lib/arc/shared-bill-feature";
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
 import { DebtSummaryView } from "@/components/DebtSummary";
 import { ParticipantAssignment } from "@/components/ParticipantAssignment";
@@ -376,13 +378,28 @@ export function ReceiptFlow() {
         />
       )}
 
+      {/*
+        ORTAK HESAP KAPISI: `SHARED_BILL_FLOW_ENABLED` ACIK oldugu icin
+        olusturma ekraninda TEK BAGLANTILI ortak hesap olusturucusu gosterilir.
+        Bayrak kapatilirsa ESKI, borclu basina ayri baglanti ureten akis geri
+        doner; iki yol da derlenir ve test edilir.
+      */}
       {screen === "payment" && receipt !== null && debtResult !== null && (
-        <PaymentRequestCreator
-          receipt={receipt}
-          participants={assignment.participants}
-          result={debtResult}
-          onBack={() => setScreen("debts")}
-        />
+        SHARED_BILL_FLOW_ENABLED ? (
+          <SharedBillCreator
+            receipt={receipt}
+            participants={assignment.participants}
+            result={debtResult}
+            onBack={() => setScreen("debts")}
+          />
+        ) : (
+          <PaymentRequestCreator
+            receipt={receipt}
+            participants={assignment.participants}
+            result={debtResult}
+            onBack={() => setScreen("debts")}
+          />
+        )
       )}
 
       <p aria-live="polite" className="sr-only">

@@ -119,7 +119,7 @@ function snapshotFromPayload(payload: PaymentRequestPayload) {
     recipientParticipantId: payload.recipientLabel,
     debtorAddress: payload.debtor,
     recipientAddress: payload.recipient,
-    tryMinor: Number(payload.tryMinor),
+    tryMinor: payload.tryMinor,
     rateNumerator: payload.rateNumerator,
     rateDenominator: payload.rateDenominator,
     microUsdc: payload.microUsdc,

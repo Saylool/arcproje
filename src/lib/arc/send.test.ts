@@ -38,7 +38,7 @@ function buildSnapshot(over: Partial<ArcPaymentSnapshot>): ArcPaymentSnapshot {
     recipientParticipantId: "a",
     debtorAddress: DEBTOR,
     recipientAddress: RECIPIENT,
-    tryMinor: 20000,
+    tryMinor: "20000",
     rateNumerator: "40",
     rateDenominator: "1",
     microUsdc: "5000000",
@@ -174,15 +174,11 @@ describe("validatePaymentSnapshot", () => {
   });
 
   it("geçersiz TRY borcunu reddeder", () => {
-    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: 0 }), NOW)).toBe(
-      "invalidAmount",
-    );
-    expect(validatePaymentSnapshot(snapshotOf({ tryMinor: -5 }), NOW)).toBe(
-      "invalidAmount",
-    );
-    expect(
-      validatePaymentSnapshot(snapshotOf({ tryMinor: Number.MAX_SAFE_INTEGER + 2 }), NOW),
-    ).toBe("invalidAmount");
+    for (const bad of ["0", "-5", "1.5", " 20000", "020000", "1e5", "abc", ""]) {
+      expect(validatePaymentSnapshot(snapshotOf({ tryMinor: bad }), NOW)).toBe(
+        "invalidAmount",
+      );
+    }
   });
 
   it("her hata kodu için Türkçe mesaj üretir", () => {
@@ -274,7 +270,7 @@ describe("snapshot sınırı tutarı kurdan yeniden türetir", () => {
   it("yarım yukarı yuvarlama sınırını üretimle aynı uygular", () => {
     // 1 kuruş, 1 USDC = 32 TRY -> 312,5 mikro USDC -> yarım yukarı -> 313.
     const halfUp = {
-      tryMinor: 1,
+      tryMinor: "1",
       rateNumerator: "32",
       rateDenominator: "1",
     } as const;

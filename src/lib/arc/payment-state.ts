@@ -5,6 +5,8 @@
  * kur, borçlu, alıcı adresi veya tutar değiştiğinde önceki tahmin geçersizdir.
  * Bu saf fonksiyonlar UI'dan bağımsız test edilebilir.
  */
+import { toCanonicalMinorUnits } from "./minor-units";
+
 export type PaymentInputs = {
   accountAddress: string | null;
   chainId: number | null;
@@ -43,13 +45,19 @@ export function debtIdentityKey(debt: {
 }
 
 type CompletedPaymentLike = {
-  snapshot: { debtKey: string; tryMinor: number };
+  /** `tryMinor` KANONİK ondalık metindir; bkz. `./minor-units`. */
+  snapshot: { debtKey: string; tryMinor: string };
 };
 
 /**
  * Bir borcu "ödendi" gösterebilmek için başarılı işlemin snapshot'ı o borçla
  * BİREBİR eşleşmelidir: hem borç kimliği hem TRY tutarı. Form sonradan değişse
  * bile eski bir işlem başka bir ödemenin kanıtı gibi kullanılamaz.
+ *
+ * Karşılaştırma KANONİK METİN üzerinden yapılır: fiş katmanından gelen
+ * sayısal tutar burada — sınırda — kanonik metne çevrilir, snapshot'ın metni
+ * `number`a DARALTILMAZ. Güvenli tam sayı aralığının dışındaki bir borç
+ * kanonikleştirilemez ve hiçbir ödemeyle eşleşmez (fail-closed).
  */
 export function findPaymentForDebt<T extends CompletedPaymentLike>(
   payments: readonly T[],
@@ -59,12 +67,16 @@ export function findPaymentForDebt<T extends CompletedPaymentLike>(
     amountMinor: number;
   },
 ): T | null {
+  const canonicalAmount = toCanonicalMinorUnits(debt.amountMinor);
+  if (canonicalAmount === null) {
+    return null;
+  }
   const key = debtIdentityKey(debt);
   return (
     payments.find(
       (payment) =>
         payment.snapshot.debtKey === key &&
-        payment.snapshot.tryMinor === debt.amountMinor,
+        payment.snapshot.tryMinor === canonicalAmount,
     ) ?? null
   );
 }

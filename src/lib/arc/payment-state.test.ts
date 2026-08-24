@@ -85,7 +85,7 @@ describe("işlem kaydının borca bağlanması", () => {
   };
   const payment = {
     txHash: `0x${"a".repeat(64)}`,
-    snapshot: { debtKey: "b->a", tryMinor: 20000 },
+    snapshot: { debtKey: "b->a", tryMinor: "20000" },
   };
 
   it("borç kimliğini yönüyle birlikte üretir", () => {
@@ -119,7 +119,7 @@ describe("işlem kaydının borca bağlanması", () => {
   it("form değişse bile önceki kayıtları kaybetmez", () => {
     const second = {
       txHash: `0x${"b".repeat(64)}`,
-      snapshot: { debtKey: "c->a", tryMinor: 500 },
+      snapshot: { debtKey: "c->a", tryMinor: "500" },
     };
     const kayitlar = [payment, second];
     expect(findPaymentForDebt(kayitlar, debt)).toBe(payment);

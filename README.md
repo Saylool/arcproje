@@ -29,9 +29,14 @@ cp .env.example .env.local
 | `OPENAI_RECEIPT_MODEL` | hayır | Kullanılacak model. Varsayılan: `gpt-5.6-luna` |
 | `COINGECKO_DEMO_API_KEY` | evet | USDC/TRY kuru için CoinGecko Demo anahtarı. **Yalnızca sunucuda okunur.** |
 | `RATE_QUOTE_SECRET` | evet | Kur teklifini imzalayan HMAC sırrı. **Yalnızca sunucuda okunur.** |
+| `DATABASE_URL` | hayır (Part 1) | Neon Postgres bağlantısı; paylaşılan ortak hesap deposu. **Yalnızca sunucuda okunur.** |
 
-Bu üç değişkenin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
+Bu değişkenlerin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
 paketine girmez.
+
+`DATABASE_URL` tanımlı olmasa bile uygulama ve testler derlenir; yalnızca
+`POST /api/shared-bills` kontrollü bir 503 döner. Şema ve geçiş için
+"Tek bağlantılı ortak hesap" bölümüne bak.
 
 Anahtar tanımlı olmasa bile uygulama açılır ve fiş yükleme ekranı çalışır; yalnızca
 analiz isteği kontrollü bir "servis yapılandırılmamış" hatası döner.
@@ -342,13 +347,457 @@ Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
 - `OPENAI_API_KEY`
 - `COINGECKO_DEMO_API_KEY`
 - `RATE_QUOTE_SECRET`
+- `DATABASE_URL` (paylaşılan ortak hesap deposu; Part 2'de zorunlu olacak)
 
-Üçü de `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+Hepsi `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+Neon veritabanı **bu bölümde sağlanmadı**; Marketplace kurulumu, geçişin
+uygulanması ve `DATABASE_URL`'in tanımlanması ayrı bir adımdır.
 
 Ayrıca bir **dağıtım gereksinimi** vardır ve kod tarafında karşılanamaz:
 CoinGecko kotasını örnekler arasında koruyacak paylaşılan bir sayaç/oran
 sınırlayıcı (Redis/KV) ya da Vercel firewall/rate limiting yapılandırması.
 Uygulamadaki soğuma **süreç içidir** ve tek başına yeterli **değildir**.
+
+## Tek bağlantılı ortak hesap (Part 1 — temel)
+
+Bugünkü akışta fişi ödeyen kişi **her borçlu için ayrı** bir talep imzalar ve
+**ayrı** bir bağlantı üretir. Hedef mimari tek bağlantıdır: ödeyen cüzdanını bir
+kez bağlar, her borçlu için bir adres girer, **tek bir EIP-712 manifest** imzalar
+ve **herkes aynı** `/pay/<billId>` bağlantısını alır.
+
+> **Part 1 yalnızca TEMELİ kurar.** İmzalı manifest, kalıcı depo, katı
+> doğrulama, oluşturma API'si ve oluşturucu arayüzü hazırdır. **Borçlu tarafı
+> henüz yoktur**: `/pay/<billId>` rotası, ödeme rezervasyonu ve işlem
+> kesinleştirme Part 2'dedir. Bu yüzden yeni akış
+> `SHARED_BILL_FLOW_ENABLED` bayrağıyla **kapalıdır** ve üretimde eski,
+> borçlu başına ayrı bağlantı üreten akış çalışmaya devam eder.
+
+### Neden bir veritabanı gerekiyor
+
+Tek bağlantı, borç listesini URL'ye gömemez: aksi hâlde bağlantıyı eline geçiren
+herkes **bütün borçluları, adresleri ve tutarları** görürdü ve bağlantı
+kilometrelerce uzun olurdu. Bu yüzden liste sunucuda saklanır ve URL yalnızca
+**tahmin edilemez bir kimlik** taşır. Üretimde **Neon Postgres** (Vercel
+Marketplace üzerinden) kullanılır; sunucu değişkeni `DATABASE_URL`'dir.
+
+### Ne saklanır, ne saklanmaz
+
+| Saklanır | Saklanmaz |
+| --- | --- |
+| Genel hesap kimliği (0x + 64 hex) | Fiş görseli |
+| Şema sürümü, Arc chainId | Ürün satırları, vergi/servis/indirim |
+| Alıcı adresi ve etiketi | OpenAI çıktısı |
+| Borç listesinin **kriptografik taahhüdü** | API anahtarları, HMAC etiketi |
+| Borç sayısı, veriliş/bitiş anı | **Kur teklifi** (bilerek) |
+| Alıcının EIP-712 imzası | İlgisiz katılımcılar |
+| Borç satırları: adres, etiket, borç kimliği, TRY minor tutar | |
+
+**Kur bilerek saklanmaz.** Alıcı yalnızca TRY minor unit borçları imzalar; USDC
+tutarı, borçlu ödediği anda alınan **taze ve sunucu kimliklendirmeli** bir
+USDC/TRY teklifinden türetilir (Part 2). Böylece günlerce yaşayan bir bağlantı,
+dakikalar ömürlü bir kura çakılmaz.
+
+### İmzalanan manifest
+
+Ayrı bir EIP-712 alanı kullanılır (`Hesabi Bol Shared Bill`); ödeme talebi
+imzası paylaşılan hesap imzası olarak **kullanılamaz**. İmza şunları kapsar:
+
+`schemaVersion`, `billId`, `chainId`, `recipient`, `recipientLabel`,
+`debtsRoot`, `debtCount`, `issuedAt`, `expiresAt`.
+
+Borç **listesi** manifeste gömülmez; yerine kanonik bir taahhüt imzalanır:
+
+1. Her satır alan ayrılmış bir **yaprak** özetine indirgenir.
+2. Satırlar **kanonik sıraya** dizilir: borçlu adresine göre (küçük harf) artan.
+   Borçlu adresi hesap başına benzersiz olduğu için bu sıra tamdır — girdi
+   sırası ne olursa olsun **aynı** manifest üretilir.
+3. Yapraklar konumsal bir **Merkle ağacıyla** tek bir köke çıkarılır; kök
+   ayrıca şema sürümü, `chainId`, `billId` ve satır sayısını bağlar.
+
+> Ayrıntı ve gerekçe için aşağıdaki **Merkle gizlilik modeli** bölümüne bak.
+> Part 1'deki toplu (aggregate) hash, bir borçlunun kendi satırını diğerlerini
+> görmeden doğrulamasına izin vermediği için **değiştirildi**.
+
+`JSON.stringify` çıktısı taahhüt olarak **kullanılmaz**: anahtar sırası ve
+Unicode kaçışları uygulamadan uygulamaya değişir. Sunucu, gönderilen satırlardan
+taahhüdü **yeniden hesaplar**; istemcinin bildirdiği `debtsRoot`a güvenilmez.
+
+### API sözleşmesi
+
+`POST /api/shared-bills` — `Content-Type: application/json`, `Cache-Control: no-store`.
+
+İstek: `{ manifest, debts, signature }`. Yanıt (201 yeni / 200 idempotent):
+
+```json
+{ "billId": "0x…", "path": "/pay/0x…", "expiresAt": 1700000000 }
+```
+
+Borç listesi, adresler, etiketler, taahhüt ve imza **dönmez**. Hata kodları:
+`INVALID_CONTENT_TYPE`, `BODY_TOO_LARGE`, `MALFORMED_JSON`, `DUPLICATE_FIELD`,
+`INVALID_SHARED_BILL`, `INVALID_SIGNATURE`, `BILL_ID_UNAVAILABLE`,
+`STORAGE_REJECTED`, `SERVICE_NOT_CONFIGURED`, `SERVICE_UNAVAILABLE`.
+
+Sıra kritiktir: gövde sınırlanır → yinelenen anahtar taranır → manifest, satırlar
+ve taahhüt doğrulanır → alıcı imzası doğrulanır → **ancak ondan sonra**
+veritabanı işlemi açılır. Hesap ve tüm borç satırları **atomik** yazılır; kısmi
+bir hesap kalmaz.
+
+**Idempotency:** aynı `billId` ile gelen tekrar, yalnızca depodaki **taahhüt,
+alıcı ve imza birebir eşleşirse** güvenli sayılır ve yeniden yazılmaz. Aksi hâlde
+üzerine yazılmaz, `BILL_ID_UNAVAILABLE` döner.
+
+#### Ödeme uç noktaları (Part 3)
+
+Hepsi `HttpOnly` oturum çerezi ister ve `Cache-Control: private, no-store`
+döner. Hiçbiri istemciden **tutar, kur, alıcı veya borç** kabul etmez.
+
+| Uç nokta | Gövde | Ne yapar |
+| --- | --- | --- |
+| `POST …/payment/prepare` | *(yok)* | Taze sunucu kuruyla **yetkili teklif** basar. Borcu **rezerve etmez**, cüzdan çağırmaz. |
+| `POST …/payment/claim` | `{ offerId }` | Borcu **atomik rezerve eder**, tek deneme yaratır, gönderim snapshot'ını döner. |
+| `POST …/payment/outcome` | `{ attemptId, outcome, txHash? }` | İstemci sonucunu **katı enum** ile alır. `success` **kabul edilmez**. |
+| `POST …/payment/finalize` | `{ attemptId, txHash }` | Arc Testnet'ten **makbuzu doğrular**; borcu yalnızca kanıt varsa `paid` yapar. |
+| `GET  …/payment/status` | *(yok)* | Yalnızca **kimliği doğrulanmış borçlunun kendi** ödeme durumu. |
+
+Yanıtlar başka bir borç satırı, başka bir katılımcı, tam manifest listesi, ham
+oturum jetonu, HMAC etiketi ya da veritabanı ayrıntısı **taşımaz**.
+
+### Veritabanı yapılandırması ve geçiş
+
+`.env.local` içine (bu dosya asla commit edilmez):
+
+```bash
+DATABASE_URL=
+```
+
+Şema **elle** uygulanır; tablolar istek işleyicisi içinde tembel oluşturulmaz:
+
+```bash
+psql "$DATABASE_URL" -f migrations/0001_shared_bills.sql
+```
+
+`DATABASE_URL` yoksa uygulama ve testler yine derlenir; depo gerektiren rota
+kontrollü **503 `SERVICE_NOT_CONFIGURED`** döner ve bellek içi bir yedeğe
+**asla** düşmez.
+
+Geçiş dosyası **hiç uygulanmadığı için** Part 3'ün ödeme tabloları (teklif,
+deneme ve borç ödeme durumu) **ayrı bir dosya yerine aynı `0001` geçişine**
+eklenmiştir. Uygulanmış bir şemaya sonradan `ALTER TABLE` çalıştırmak
+gerekmez.
+
+### Gizlilik sınırı
+
+> Bağlantıyı **eline geçiren herkes hesabı açabilir.** Bağlantı borç listesini
+> taşımaz, ama sayfayı açmak listeyi getirir (Part 2). Bu yüzden bağlantı
+> yalnızca ilgili kişilerle paylaşılmalıdır. Adresler, etiketler, imzalar,
+> manifestler ve üretilen bağlantılar **loglanmaz**; hata mesajları belirli bir
+> cüzdanın bir hesapta olup olmadığını açığa vurmaz.
+
+### Hesap ömrü
+
+Hesaplar sonludur: üst sınır **yedi gündür**
+(`SHARED_BILL_MAX_LIFETIME_MS`). Süresi dolmuş bir hesap, fiziksel olarak
+silinmemiş olsa bile **kullanılamaz sayılır**; sorgular her hâlükârda bitiş anını
+filtreler. **Fiziksel temizlik (cleanup job) Part 2'ye ertelenmiştir**: bugün
+süresi dolmuş satırlar tabloda kalmaya devam eder.
+
+### Borçlu erişimi: aynı bağlantı, yalnızca kendi borcun (Part 2)
+
+Herkes **aynı** `/pay/<billId>` bağlantısını alır. Bir borçlunun yalnızca
+**kendi** borcunu görebilmesi için bağlı cüzdanın kontrolünü kanıtlaması
+gerekir:
+
+1. Cüzdanını bağlar, Arc Testnet'e geçer.
+2. Sunucudan bir **erişim meydan okuması** ister.
+3. İşlem **olmayan** bir EIP-712 mesajı imzalar.
+4. Sunucu imzayı doğrular, nonce'u tüketir ve kısa ömürlü bir oturum kurar.
+5. `/me` yalnızca o borçlunun **tek satırını** ve Merkle kanıtını döner.
+6. Tarayıcı manifesti, alıcı imzasını ve kanıtı **bağımsız** doğrular.
+
+#### Bu imza ne yapar, ne YAPMAZ
+
+| Yapar | Yapmaz |
+| --- | --- |
+| Adresin kontrolünü kanıtlar | Token **onaylamaz** (approve değildir) |
+| Tek bir hesap için görüntüleme yetkisi verir | Transfer **yetkisi vermez** |
+| Beş dakika geçerlidir | İşlem **göndermez** |
+| | Ödeme talebi/hesap **oluşturamaz** |
+
+> İmza bir **kimlik veya KYC kanıtı değildir** ve borcun gerçek dünyada meşru
+> olduğunu **kanıtlamaz**. Yalnızca "bu adresi kontrol eden kişi buradayım"
+> der.
+
+Erişim imzası **ayrı bir EIP-712 alanındadır** (`Hesabi Bol Shared Bill
+Access`). Ne paylaşılan hesap manifesti ne de ödeme talebi imzası buraya
+geçebilir; bu imza da oralarda kullanılamaz.
+
+#### Merkle gizlilik modeli
+
+Part 1'de borç taahhüdü tüm satırların tek bir toplu (aggregate) hash'iydi. Bu,
+bir borçlunun kendi satırını doğrulayabilmesi için ona **tüm** borç satırlarını
+vermeyi gerektirirdi — yani herkes herkesin adresini, adını ve tutarını
+görürdü. Bu, tek bağlantının gizlilik hedefiyle doğrudan çelişiyordu.
+
+Bu yüzden taahhüt bir **Merkle kökü** oldu (`debtsRoot`) ve şema sürümü 2'ye
+yükseltildi; **sürüm 1 manifestleri fail-closed reddedilir**. Sürüm 1 hiçbir
+yerde yayımlanmadı ve hiçbir veritabanına yazılmadı.
+
+- **Yaprak**: alan ayrılmış etiket + şema sürümü + chainId + billId + borçlu
+  adresi + `keccak256(etiket)` + `keccak256(borç kimliği)` + TRY minor tutar.
+- **Sıra**: borçlu adresi (küçük harf) artan. Adres hesap başına benzersiz
+  olduğu için sıra tamdır; **girdi sırası değişse de aynı kök** çıkar.
+- **İç düğüm**: **konumsal** (sol, sağ) — sıralanmış çift kullanılmaz.
+- **Tek sayıda düğüm**: son düğüm bir üst seviyeye **taşınır** (kopyalanmaz);
+  kopyalama aynı yaprağın iki kez sayılmasına izin verirdi.
+- **Kök**: ağaç kökü + şema + chainId + billId + **borç sayısı**.
+- **Kanıt**: yalnızca `leafIndex` ve kardeş **özetleri**. Yön ve kardeş varlığı
+  kanıttan okunmaz, `leafIndex` + `debtCount`tan **türetilir**; bu yüzden yön
+  çevrilemez, kanıt uzatılamaz veya kısaltılamaz.
+
+Bir borçlu böylece kendi satırını doğrular ama başka hiçbir satırın adresini,
+etiketini, borç kimliğini veya tutarını **öğrenemez**.
+
+#### Uç nokta sözleşmeleri
+
+Hepsi `Cache-Control: no-store`; hiçbiri hesap kimliği, adres, nonce, imza,
+oturum jetonu veya etiket **loglamaz**.
+
+| Uç nokta | Ne yapar | Ne döner |
+| --- | --- | --- |
+| `POST /api/shared-bills/[billId]/challenge` | Meydan okuma üretir. Hesabın var olup olmadığına **bakmaz**, veritabanına **dokunmaz** | `{ challenge, tag }` — hiçbir hesap verisi yok |
+| `POST /api/shared-bills/[billId]/resolve` | Etiketi + EIP-712 imzayı doğrular, nonce'u **atomik** tüketir, oturum kurar | `{ authenticated: true }` + **HttpOnly** çerez |
+| `GET /api/shared-bills/[billId]/me` | Oturumu doğrular | manifest, alıcı adresi/etiketi, **tek** borç satırı, Merkle kanıtı, bitiş, durum |
+
+**Hedef (audience)** yalnızca sunucudaki `APP_ORIGIN`dan gelir. `Host`,
+`Origin`, `Referer` ve `X-Forwarded-Host` başlıklarına **asla** güvenilmez.
+
+**Üyelik sızdırılmaz:** hesabın olmaması, kapalı olması, süresinin dolması ve
+cüzdanın o hesapta bulunmaması **aynı** genel yanıtı üretir.
+
+#### Oturum ve süreler
+
+| Şey | Süre |
+| --- | --- |
+| Erişim meydan okuması | **5 dakika** (üst sınır) |
+| Oturum | **15 dakika** (üst sınır; veritabanı kısıtı da uygular) |
+| Paylaşılan hesap | **7 gün** (üst sınır) |
+
+Ham oturum jetonu **yalnızca** `HttpOnly; SameSite=Strict; Path=/` çerezinde
+taşınır (üretimde ayrıca `Secure`). Depoda **yalnızca SHA-256 özeti** saklanır:
+veritabanını okuyan biri geçerli bir çerez üretemez. Jeton URL'de, JSON
+gövdesinde, tarayıcı deposunda, logda, React state'inde veya HTML'de **hiç**
+yer almaz.
+
+Nonce **tek kullanımlıktır** ve atomik olarak tüketilir; eşzamanlı iki
+çözümleme denemesinden **en fazla biri** başarılı olur.
+
+#### Yeni sunucu değişkenleri
+
+```bash
+SHARED_BILL_AUTH_SECRET=
+APP_ORIGIN=
+```
+
+- `SHARED_BILL_AUTH_SECRET` — meydan okuma zarfının HMAC sırrı (en az 32
+  karakter). **`RATE_QUOTE_SECRET` ile paylaşılmaz**: birini ele geçiren
+  diğerinin etiketlerini üretemez.
+- `APP_ORIGIN` — güvenilen üretim origin'i (`https://…`, yol/sorgu içermez).
+
+Üretimde ikisinden biri eksik veya bozuksa erişim uçları kontrollü
+**503 `SERVICE_NOT_CONFIGURED`** döner. Geliştirmede (`NODE_ENV !== "production"`)
+`APP_ORIGIN` için **açık** `http://localhost:3000` yedeği kullanılır; üretimde
+bu yedeğe **asla** düşülmez.
+
+#### Ne saklanır (Part 2 ekleri)
+
+| Tablo | Saklanır | Saklanmaz |
+| --- | --- | --- |
+| `shared_bill_auth_nonces` | billId, nonce, borçlu adresi, tüketim/bitiş anı | — |
+| `shared_bill_sessions` | jetonun **SHA-256 özeti**, billId, borçlu adresi, chainId, bitiş | **ham jeton**, fiş, ürün, API anahtarı |
+
+Süresi dolmuş satırlar **fiziksel olarak silinmemiş olsalar bile kullanılamaz
+sayılır**; sorgular her hâlükârda bitiş anını filtreler. Sınırlı ve fırsatçı
+bir temizlik vardır (çağrı başına en fazla 50 satır); **sınırsız silme yapan
+bir istek yolu yoktur**.
+
+#### Part 2'de YAPILMAYANLAR
+
+- **Ödeme yok**: kur çekilmez, tahmin alınmaz, App Kit çağrılmaz, hiçbir işlem
+  gönderilmez.
+- Ödeme rezervasyonu, işlem kesinleştirme ve "ödendi" durumu yok.
+- Neon/Vercel sağlanmadı; geçiş uygulanmadı.
+- Oluşturucu akışı hâlâ `SHARED_BILL_FLOW_ENABLED = false` ile **kapalı**;
+  üretimde eski, borçlu başına bağlantı üreten akış çalışmaya devam ediyor.
+
+> Bir **veritabanı satırı**, zincir üstünde yinelenen transferleri
+> **engellemez** ve kriptografik bir tek-kullanım garantisi değildir. Cüzdan
+> imzası borcun **meşruluğunu kanıtlamaz**. Bir istemcinin "başarılı" demesi
+> ödemenin yapıldığını **kanıtlamaz**. Bu sürüm **Arc Testnet** içindir ve
+> **mainnet'e hazır değildir**.
+
+### Ortak hesap ödemesi (Part 3)
+
+Part 3, kimliği doğrulanmış borçlu sayfasına **tam Arc Testnet ödeme yaşam
+döngüsünü** ekler: taze sunucu kuru → tam sayı tutar türetme → tahmin →
+inceleme → **sunucu rezervasyonu** → mevcut gönderim sınırı → **sunucunun
+zincirden makbuz doğrulaması** → ancak o zaman "ödendi".
+
+#### Durum makinesi
+
+Borç (`shared_bill_debts.payment_status`):
+
+```
+unpaid ──claim──> reserved ──onaylı makbuz──> paid          (SON)
+  ^                  │
+  │                  ├── KANITLI yayın öncesi hata ──> unpaid
+  │                  ├── onaylı REVERT makbuzu ──────> unpaid
+  └──────────────────┘
+                     └── belirsiz sonuç ────────> review_required
+
+review_required ── OTOMATİK ──/──> paid       (ASLA; elle mutabakat)
+review_required ── OTOMATİK ──/──> unpaid     (ASLA; elle mutabakat)
+paid ──/──> herhangi bir durum                (ASLA geri dönmez)
+```
+
+Deneme (`shared_bill_payment_attempts.status`):
+
+```
+reserved ── istemci hash bildirdi ──────> submitted
+reserved ── KANITLI yayın öncesi hata ──> released    (SON)
+reserved | submitted ── onaylı makbuz ──> confirmed   (SON)
+reserved | submitted ── revert makbuzu ─> reverted    (SON)
+reserved | submitted ── çözülemedi ─────> unknown     (SON)
+```
+
+`confirmed`, `reverted`, `unknown` ve `released` **son** durumlardır.
+`submitted` durumundan **serbest bırakma yoktur**: `kit.send` çağrıldıktan
+sonra rezervasyon açılmaz. `unknown` da rezervasyonu **tutar** — belirsiz bir
+deneme kendiliğinden yeniden denenebilir hâle gelmez.
+
+Veritabanı kısıtları: borçlu başına **en fazla bir aktif deneme** (kısmi
+benzersiz indeks), **küresel olarak benzersiz işlem hash'i**, teklif başına en
+fazla bir deneme, `numeric(30, 0)` tam sayı tutarlar, kanonik kur paydası
+(10^0..10^6) ve `paid` satırın **doğrulanmış hash + zaman** taşıma zorunluluğu.
+Tüm geçişler **karşılaştır-ve-yaz**'dır; son yazan kazanan güncelleme yoktur.
+
+#### Kur ne zaman alınır
+
+Kur **manifeste gömülmez**. Borçlu ödemeye başladığında sunucu **taze** bir
+USDC/TRY teklifi basar (`POST /api/shared-bills/<billId>/payment/prepare`).
+Sunucu bunu **kendi kur servisinden doğrudan** alır; uygulamanın kendi
+`/api/rates` rotasına HTTP isteği yapmaz. Mevcut CoinGecko önbelleği, soğuma,
+doğrulama, HMAC ve altı ondalık kanonikleştirme aynen kullanılır. **Elle
+girilen bir kura asla düşülmez**: kur servisi çalışmıyorsa teklif basılmaz.
+
+Teklif ne kurdan ne de bağlantıdan **uzun yaşar** (`min` alınır) ve gönderim
+için gereken **60 saniyelik pay**dan kısa ömürlü bir teklif hiç üretilmez.
+
+#### Rezervasyon
+
+`POST /api/shared-bills/<billId>/payment/claim` gövdesi **yalnızca teklif
+kimliğini** taşır. Tutar, kur, alıcı ve borç istemciden **kabul edilmez**;
+hepsi saklanan hesaptan okunur ve mikro USDC bu adımda **yeniden türetilip**
+teklifle birebir karşılaştırılır. Rezervasyon başarılı olana kadar `kit.send`
+**erişilemezdir**. Yanıt, mevcut gönderim sınırının beklediği **değişmez
+snapshot**'tır; istemci onu incelediği teklifle birebir karşılaştırır ve tek
+bir alan bile farklıysa **göndermez**.
+
+#### Zincir üstü doğrulama
+
+`POST /api/shared-bills/<billId>/payment/finalize` yalnızca **deneme kimliği ve
+aday işlem hash'i** alır. Tüm ekonomik alanlar saklanan denemeden gelir.
+Sunucu Arc Testnet'e **kendisi** bağlanır ve şunların **hepsini** arar:
+
+1. zincir kimliği Arc Testnet,
+2. makbuz var ve durumu **başarılı**,
+3. **en az 1 onay** (`ARC_MIN_CONFIRMATIONS`),
+4. kayıtlar **tam olarak** Arc Testnet USDC ERC-20 sözleşmesinden,
+5. `Transfer(address,address,uint256)` **katı** çözümleme (üç konu, adres
+   konularının üst 12 baytı sıfır, veri tam 32 bayt),
+6. gönderen = kimliği doğrulanmış borçlu, alıcı = imzalı manifestteki alıcı,
+7. eşleşen **tüm** borçlu→alıcı transferlerinin **BigInt toplamı**, beklenen
+   mikro USDC'ye **birebir eşit**.
+
+"En az bir eşleşen olay" **yetmez**: toplam beklenenden az da fazla da olamaz.
+Borç yalnızca bu doğrulama geçerse `paid` olur; hesap ise **her borç bağımsız
+olarak onaylandığında** kapanır.
+
+Makbuz yoksa veya onay yetersizse: kontrollü **beklemede** durumu, rezervasyon
+korunur, **sınırlı** yoklamaya izin verilir, ödendi denmez. Revert: kanıt
+saklanır, hash ArcScan için korunur, borç ödenmemiş kalır. Sonuç
+çözülemiyorsa: `unknown` / `review_required`, kilit korunur, **otomatik tekrar
+yoktur**.
+
+`unknown` bir deneme **son** durumdur: sonradan gelen bir makbuz doğrulaması
+bile onu otomatik olarak `confirmed`e taşımaz ve `review_required` bir borcu
+`paid` yapmaz. Bu bilerek katıdır — belirsiz bir denemenin hash'ine bağlanmış
+herhangi bir makbuz, kilidi tek başına açabilirdi. Bu durumdan çıkış, insan
+tarafından yürütülen açık bir mutabakat gerektirir (ArcScan + cüzdan geçmişi).
+
+#### Onay gereksinimi ve sınırı
+
+Bu Arc Testnet MVP'si **bir onayı** yeterli sayar: makbuz bir bloğa girmiştir.
+**Bu, derin bir yeniden düzenleme (reorg) karşısında kesinlik değildir.** Test
+USDC'sinin gerçek parasal değeri olmadığı için bu denge kabul edilmiştir;
+gerçek değer taşıyan bir ağda bu sayı yükseltilmelidir.
+
+#### İstemci sonucu bildirimi
+
+`POST /api/shared-bills/<billId>/payment/outcome` **katı bir enum** kabul eder:
+`rejected`, `insufficientFunds`, `preflightFailed`, `submitted`, `ambiguous`.
+**`success` yoktur**: istemci bir ödemeyi başarılı ilan edemez. Elinde bir hash
+varsa `submitted` bildirir ve mutabakatı sunucu yapar. Serbest bırakan üç
+sonuç hash **taşıyamaz** ve yalnızca mevcut sınıflandırıcının yayın öncesi
+olduğunu **kanıtladığı** hâllerde üretilir.
+
+> **Kötü niyetli bir istemci "reddedildi" diye yalan söyleyebilir** ve
+> uygulama düzeyindeki rezervasyonu açtırabilir. Bu **zincir üstü bir garanti
+> değildir**; cüzdan her transfer için borçlunun **kendi onayını** istemeye
+> devam eder, dolayısıyla bu yalan kimseye para harcatamaz — yalnızca ikinci
+> bir denemeye izin verir.
+
+#### Tam sayı gösterimi
+
+Gönderim sınırındaki `ArcPaymentSnapshot.tryMinor` artık **`number` değil,
+kanonik ondalık metin**tir. Gösterilen, tahmin edilen, rezerve edilen,
+gönderilen ve mutabakatı yapılan tutarın hepsi **aynı tam sayıdan** türer;
+hiçbir aşamada `parseFloat`, `Number(...)` veya kayan nokta para aritmetiği
+kullanılmaz. Eski (borçlu başına ayrı bağlantılı) ödeme talebi akışı
+davranışını korur: imzalı gövde zaten kanonik ondalık metin taşıdığı için
+sınırda **daraltma yapılmadan** aktarılır.
+
+**Manifest katmanının kendi sınırı korunmuştur:** `canonicalizeSharedBillDebts`
+borç tutarlarını bilerek `Number.MAX_SAFE_INTEGER` ile sınırlar ve bu görevde
+**gevşetilmemiştir**. Ödeme yolunun tamamının daraltma yapmadığı, satırı
+doğrudan depoya yerleştiren ayrı regresyon testleriyle ölçülür.
+
+### Bu sürümün SINIRLARI
+
+- **Sunucu veritabanı bir akıllı sözleşme değildir.** Rezervasyon, aynı borcun
+  **uygulama üzerinden** iki cihazdan/oturumdan ödenmesini engeller;
+  kullanıcının kendi cüzdanından, **uygulamanın dışında** ikinci bir ERC-20
+  transferi göndermesini **engelleyemez**.
+- **Tarayıcı tarafındaki doğrulamalar zincir üstü güvenlik değildir.**
+- Bir bağlantının varlığı gerçek dünyada bir borcun var olduğunu
+  **kanıtlamaz**; cüzdan imzası bir kimlik/KYC kanıtı değildir.
+- **Arc Testnet** içindir ve **mainnet'e hazır değildir**; test USDC'sinin
+  **gerçek parasal değeri yoktur**.
+- Kur servisinin **örnekler arası** kota koruması yoktur (bkz. yukarıdaki
+  "Demo plan ve önbellek sınırları").
+
+### Part 4'e ERTELENENLER
+
+- Neon **sağlama (provisioning) yapılmadı**; `migrations/0001_shared_bills.sql`
+  **hiç uygulanmadı**.
+- `DATABASE_URL`, `SHARED_BILL_AUTH_SECRET` ve `APP_ORIGIN` **yerelde
+  tanımlanmadı**; Vercel ortam değişkenleri **değiştirilmedi**.
+- **Dağıtım yapılmadı**, PR açılmadı/birleştirilmedi.
+- **Gerçek cüzdanla canlı bir işlem denenmedi**: tüm doğrulama enjekte edilmiş
+  belirlenimci sahtelerle yapıldı.
+- Oluşturucu akışı hâlâ **`SHARED_BILL_FLOW_ENABLED = false`** ile kapalıdır;
+  çalışan bir ortak bağlantı **paylaşılmadı**.
+- Örnekler arası oran sınırlama (Redis/KV veya Vercel firewall) hâlâ bir
+  **dağıtım gereksinimidir** ve bu depoda karşılanmamıştır.
 
 ## Fiş analizi nasıl çalışıyor
 
@@ -402,23 +851,36 @@ bir kalem `unknown` ise yanlış bir uyuşmazlık iddiası üretilmez; sonuç
 değiştirebilir ve toplam kontrolü anında güncellenir; hiçbir değer otomatik
 olarak değiştirilmez.
 
-## Bu adımda tamamlananlar
+## Şu anda çalışan özellikler
 
-- "Fişini yükle" ekranı: sürükle-bırak, dosya doğrulama (JPG/PNG/WEBP, en fazla 10 MB),
-  önizleme, değiştirme ve kaldırma
-- "Fişi analiz et" akışı: yükleme durumu, tekrar deneme, Türkçe hata mesajları
-- Analiz sonucunun düzenlenebilir gösterimi: ürün adı/tutarı değiştirme, ürün ekleme
-  ve silme, vergi / servis / indirim / genel toplam düzenleme
-- `320,50` ve `320.50` gibi girdilerin güvenli biçimde minor unit'e çevrilmesi;
-  geçersiz girdilerde sessiz yuvarlama yerine açık doğrulama hatası
-- Vergi / servis / indirim için "ürün fiyatlarına dahil mi, ayrı mı" seçimi ve
-  buna göre doğru genel toplam kontrolü (KDV'nin iki kez eklenmesini önler)
-- Ürün toplamı ile genel toplam uyuşmadığında değerleri değiştirmeden uyarı gösterme
-- Zod tabanlı ortak veri sözleşmesi ve API anahtarı gerektirmeyen birim testleri
+- **Fiş yükleme ve analiz**: sürükle-bırak, dosya doğrulama (JPG/PNG/WEBP, en
+  fazla 10 MB), OpenAI Responses API ile ürün çıkarımı, düzenlenebilir sonuç.
+- **Vergi / servis / indirim** için "fiyatlara dahil mi, ayrı mı" seçimi ve
+  buna göre doğru genel toplam kontrolü.
+- **Ürünleri kişilere atama** ve **borç hesabı**: tam sayı minor unit ile,
+  kayan nokta kullanmadan.
+- **Arc Testnet USDC ödemesi** iki akışta:
+  1. **Borçlu başına ayrı bağlantı** (imzalı ödeme talebi, EIP-712 şema 2).
+  2. **Tek bağlantılı ortak hesap**: alıcı tek bir manifest imzalar, herkes
+     aynı bağlantıyı alır, her borçlu cüzdanıyla kimliğini doğrulayıp yalnızca
+     kendi borcunu görür ve öder.
+- **Otomatik USDC/TRY kuru**: CoinGecko'dan alınan, sunucu tarafından HMAC ile
+  kimliklendirilen taze teklif; elle kur girişi yoktur.
+- **Sunucu tarafı ödeme yaşam döngüsü**: yetkili teklif, atomik rezervasyon,
+  zincir üstü makbuz doğrulaması ve ancak ondan sonra "ödendi".
+- **Kalıcı depo**: Neon Postgres; şema gözden geçirilmiş bir SQL geçişiyle
+  **elle** uygulanır.
 
-## Henüz yapılmadı
+## Sınırlar ve bilinen eksikler
 
-- **Ürünleri kişilere atama** ekranı yok (ilerleme göstergesinde 2. adım).
-- **Borç hesaplama** yok.
-- **Arc Testnet ve USDC ödeme entegrasyonu** yok (3. adım).
-- Backend veritabanı, kullanıcı hesabı ve kimlik doğrulama yok.
+- **Yalnızca Arc Testnet.** Mainnet'e hazır **değildir** ve mainnet/Ethereum
+  Sepolia desteklenmez. Test USDC'sinin **gerçek parasal değeri yoktur**.
+- **Sunucu veritabanı bir akıllı sözleşme değildir**: rezervasyon yalnızca
+  uygulama üzerinden yinelenen denemeyi engeller, kullanıcının uygulama
+  dışından ikinci bir transfer göndermesini engelleyemez.
+- **Kullanıcı hesabı / oturum sistemi yoktur**: kimlik doğrulama yalnızca
+  cüzdan sahipliği kanıtıdır, KYC değildir.
+- **Kur servisinde örnekler arası kota koruması yoktur**; oran sınırlama bir
+  dağıtım gereksinimidir (Vercel Firewall ile karşılanır).
+- Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
+  görülebilir ama bağlantının kendisi gizli sayılmalıdır.

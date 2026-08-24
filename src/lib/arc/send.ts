@@ -7,6 +7,7 @@ import {
   convertTryMinorBigIntToMicroUsdc,
   parseSignedRate,
 } from "./conversion";
+import { parsePositiveMinorUnits } from "./minor-units";
 import {
   ARC_TESTNET_APP_KIT_CHAIN,
   ARC_TESTNET_CHAIN_ID,
@@ -55,8 +56,15 @@ export type ArcPaymentSnapshot = Readonly<{
   debtorAddress: string;
   /** Checksum'lı alıcı adresi. */
   recipientAddress: string;
-  /** TRY minor unit cinsinden borç. */
-  tryMinor: number;
+  /**
+   * TRY minor unit cinsinden borç — KANONİK ONDALIK METİN.
+   *
+   * `number` DEĞİLDİR: paylaşılan hesap borçları güvenli tam sayı aralığının
+   * ötesine çıkabilir ve `numeric(30, 0)` olarak saklanır. Metin taşımak,
+   * gösterilen / tahmin edilen / rezerve edilen / gönderilen / mutabakatı
+   * yapılan tutarın AYNI tam sayıdan türemesini garanti eder.
+   */
+  tryMinor: string;
   /** Kurun tam rasyonel gösterimi (BigInt metin olarak). */
   rateNumerator: string;
   rateDenominator: string;
@@ -991,12 +999,27 @@ export function classifySendException(error: unknown): SendExceptionClass {
  * sınıflandırıcının kendisi çöktüğü için düşülen `sendFailed` — yeniden
  * denenebilir sayılamaz; aynı ödeme ikinci kez gidebilirdi.
  */
-const POST_SEND_CODES: ReadonlySet<ArcSendErrorCode> = new Set([
+export const POST_SEND_CODES: ReadonlySet<ArcSendErrorCode> = new Set([
   "rejected",
   "insufficientFunds",
   "reverted",
   "submissionUnknown",
 ]);
+
+/**
+ * Bu hata `kit.send` ÇAĞRILMADAN ÖNCE mi doğdu?
+ *
+ * `sendArcUsdc`in emniyet ağı, `kit.send` çağrıldıktan sonra üretilen HER
+ * kodu `POST_SEND_CODES` içine çeker. Dolayısıyla listede OLMAYAN bir kod,
+ * cüzdan akışının HİÇ açılmadığının KANITIDIR ve rezervasyon güvenle serbest
+ * bırakılabilir.
+ *
+ * Bu karar burada, sınıflandırıcının YANINDA durur; çağıranlar kendi
+ * kopyalarını tutmaz.
+ */
+export function isProvablyPreBroadcast(code: ArcSendErrorCode): boolean {
+  return !POST_SEND_CODES.has(code);
+}
 
 /** Kurulum payı tükettiğinde cüzdan akışı açılmaz. */
 export class SendMarginError extends Error {
@@ -1112,7 +1135,8 @@ export function validatePaymentSnapshot(
   if (declared !== micro || declared <= BIG_ZERO) {
     return "invalidAmount";
   }
-  if (!Number.isSafeInteger(snapshot.tryMinor) || snapshot.tryMinor <= 0) {
+  const tryMinor = parsePositiveMinorUnits(snapshot.tryMinor);
+  if (tryMinor === null) {
     return "invalidAmount";
   }
 
@@ -1126,10 +1150,7 @@ export function validatePaymentSnapshot(
   if (!rate.ok) {
     return "invalidRate";
   }
-  const recomputed = convertTryMinorBigIntToMicroUsdc(
-    BigInt(snapshot.tryMinor),
-    rate.rate,
-  );
+  const recomputed = convertTryMinorBigIntToMicroUsdc(tryMinor, rate.rate);
   if (!recomputed.ok || recomputed.microUsdc !== declared) {
     return "inconsistentAmount";
   }
