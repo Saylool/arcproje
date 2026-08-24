@@ -246,6 +246,14 @@ const AMOUNT_FAILURE = paymentFailure(
   "Ödenecek USDC tutarı güvenle hesaplanamadı; ödeme başlatılmadı.",
 );
 
+/**
+ * Her teklif basımında EN FAZLA bu kadar bayat satır süpürülür.
+ *
+ * Sınırsız silme yapan bir istek yolu YARATILMAZ; temizlik fırsatçıdır ve
+ * erişim tarafındaki nonce/oturum temizliğiyle aynı sınırı kullanır.
+ */
+export const PAYMENT_CLEANUP_LIMIT = 50;
+
 const MARGIN_FAILURE = paymentFailure(
   409,
   "INSUFFICIENT_TIME",
@@ -401,6 +409,22 @@ export async function prepareSharedBillPaymentOffer(
     }
     return PAYMENT_NOT_AVAILABLE;
   }
+
+  /*
+   * FIRSATÇI ve SINIRLI temizlik.
+   *
+   * YALNIZCA süresi dolmuş ve HİÇ KULLANILMAMIŞ teklifler ile KESİN olarak
+   * serbest bırakılmış denemeler silinir. `confirmed`, `reverted` ve
+   * `unknown` denemelerin — ve onlara bağlı TÜKETİLMİŞ tekliflerin — kanıtı
+   * ASLA otomatik silinmez.
+   *
+   * Erişim tarafındaki nonce/oturum temizliğiyle aynı desen: depo çağrısı
+   * kendi içinde hata yutar, bu yüzden ödeme yolunu düşüremez.
+   */
+  await input.repository.cleanupExpiredPaymentRecords({
+    nowMs: input.nowMs,
+    limit: PAYMENT_CLEANUP_LIMIT,
+  });
 
   return {
     ok: true,

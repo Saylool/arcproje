@@ -231,6 +231,83 @@ describe("teklif FAIL-CLOSED reddedilir", () => {
   });
 });
 
+describe("SINIRLI temizlik gerçekten çalışır", () => {
+  /*
+   * `cleanupExpiredPaymentRecords` iki depoda da uygulanmış ve belgelenmişti
+   * ama HİÇBİR üretim yolundan çağrılmıyordu: süresi dolmuş, hiç
+   * kullanılmamış teklifler sonsuza kadar birikiyordu. Erişim tarafındaki
+   * nonce/oturum temizliği zaten `resolveAccess` içinden çağrılıyor; ödeme
+   * tarafında karşılığı yoktu.
+   */
+  it("teklif basımı, süresi dolmuş KULLANILMAMIŞ teklifleri süpürür", async () => {
+    const seeded = await seedPaidBill();
+
+    // Borçlu B için, o an geçerli bir teklif bas.
+    const stale = await prepareSharedBillPaymentOffer({
+      sessionToken: seeded.sessionTokens[1],
+      pathBillId: PAYMENT_BILL_ID,
+      repository: seeded.repository,
+      nowMs: PAYMENT_NOW,
+      mintQuote: fakeMint(),
+      offerId: `0x${"e1".repeat(32)}`,
+    });
+    if (!stale.ok) throw new Error(`ilk teklif basilamadi: ${stale.code}`);
+    expect(seeded.repository.offers.size).toBe(1);
+
+    // On dakika sonra: o teklifin süresi doldu ve HİÇ kullanılmadı.
+    const later = PAYMENT_NOW + 10 * 60 * 1000;
+    const fresh = await prepareSharedBillPaymentOffer({
+      sessionToken: seeded.sessionTokens[0],
+      pathBillId: PAYMENT_BILL_ID,
+      repository: seeded.repository,
+      nowMs: later,
+      mintQuote: fakeMint({}, later),
+      offerId: `0x${"e2".repeat(32)}`,
+    });
+    if (!fresh.ok) throw new Error(`ikinci teklif basilamadi: ${fresh.code}`);
+
+    // Bayat teklif süpürüldü; yalnızca taze olan kaldı.
+    expect(seeded.repository.offers.has(`0x${"e1".repeat(32)}`)).toBe(false);
+    expect(seeded.repository.offers.has(`0x${"e2".repeat(32)}`)).toBe(true);
+  });
+
+  it("KULLANILMIŞ teklifin kanıtı silinmez", async () => {
+    const seeded = await seedPaidBill();
+    const offerId = `0x${"e3".repeat(32)}`;
+    const made = await prepareSharedBillPaymentOffer({
+      sessionToken: seeded.sessionTokens[1],
+      pathBillId: PAYMENT_BILL_ID,
+      repository: seeded.repository,
+      nowMs: PAYMENT_NOW,
+      mintQuote: fakeMint(),
+      offerId,
+    });
+    if (!made.ok) throw new Error("teklif basilamadi");
+
+    // Teklifi TÜKETİLMİŞ işaretle (bir denemeye dönüşmüş gibi).
+    const offers = seeded.repository.offers as Map<
+      string,
+      NonNullable<ReturnType<typeof seeded.repository.offers.get>>
+    >;
+    const row = offers.get(offerId);
+    if (row === undefined) throw new Error("teklif yok");
+    offers.set(offerId, { ...row, consumedAt: Math.floor(PAYMENT_NOW / 1000) });
+
+    const later = PAYMENT_NOW + 10 * 60 * 1000;
+    await prepareSharedBillPaymentOffer({
+      sessionToken: seeded.sessionTokens[0],
+      pathBillId: PAYMENT_BILL_ID,
+      repository: seeded.repository,
+      nowMs: later,
+      mintQuote: fakeMint({}, later),
+      offerId: `0x${"e4".repeat(32)}`,
+    });
+
+    // Kullanılmış teklif KORUNUR: bir denemenin kanıtına bağlıdır.
+    expect(seeded.repository.offers.has(offerId)).toBe(true);
+  });
+});
+
 describe("teklif GİZLİLİĞİ", () => {
   it("yanıt yalnızca KENDİ borcunu taşır", async () => {
     /*
