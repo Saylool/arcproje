@@ -2,9 +2,14 @@ import {
   describeQuoteProblem,
   validateRateQuote,
   isValidQuoteTagFormat,
+  type QuoteProblem,
   type RateQuote,
   type SignedRateQuote,
 } from "./quote";
+import { isKnownApiErrorCode, localizeApiError, readApiErrorCode } from "../i18n/api-errors";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+import { tr } from "../i18n/tr";
 
 /**
  * Tarayıcı tarafının kur servisi istemcisi.
@@ -14,30 +19,53 @@ import {
  * doğrulamasından geçer; sunucu yanıtına körü körüne güvenilmez.
  */
 
-const NETWORK_ERROR =
-  "Kur servisine ulaşılamadı. Bağlantını kontrol edip tekrar dene.";
-const MALFORMED_ERROR = "Kur servisinden beklenmeyen bir yanıt geldi.";
+const networkError = (locale: Locale) => translate(locale, "errors.rateService");
+const malformedError = (locale: Locale) =>
+  translate(locale, "errors.rateMalformed");
 
+/** `/api/rates/*` bir kur sorununu KOD olarak dondurur. */
+const QUOTE_PROBLEMS: ReadonlySet<string> = new Set(Object.keys(tr.errors.quote));
+
+/**
+ * Sunucu hatasinin GOSTERILECEK karsiligini secer.
+ *
+ * Sunucunun hazir metni KULLANILMAZ: yalnizca KARARLI KOD okunur ve cumle
+ * sozlukten, etkin dilde alinir. Taninmayan kod guvenli genel karsiliga duser.
+ */
+function failureFromPayload(
+  body: unknown,
+  locale: Locale,
+): { ok: false; message: string; code?: string } {
+  const code = readApiErrorCode(body);
+  const message = messageForPayload(body, locale);
+  return code === null ? { ok: false, message } : { ok: false, message, code };
+}
+
+function messageForPayload(body: unknown, locale: Locale): string {
+  const code = readApiErrorCode(body);
+  if (code !== null && QUOTE_PROBLEMS.has(code)) {
+    return describeQuoteProblem(code as QuoteProblem, locale);
+  }
+  if (isKnownApiErrorCode(code)) {
+    return localizeApiError(locale, code);
+  }
+  return malformedError(locale);
+}
+
+/**
+ * `code` KARARLI sunucu kodudur (kur sorunu veya genel API kodu). Arayüz
+ * gösterilecek cümleyi ondan seçer; `message` yalnızca geriye dönük
+ * uyumluluk içindir.
+ */
 export type QuoteFetchResult =
   | { ok: true; signed: SignedRateQuote }
-  | { ok: false; message: string };
-
-function readErrorMessage(body: unknown): string | null {
-  if (typeof body !== "object" || body === null) {
-    return null;
-  }
-  const error = (body as { error?: unknown }).error;
-  if (typeof error !== "object" || error === null) {
-    return null;
-  }
-  const message = (error as { message?: unknown }).message;
-  return typeof message === "string" && message.trim() !== "" ? message : null;
-}
+  | { ok: false; message: string; code?: string };
 
 /** Sunucudan taze, kimliklendirilmiş bir teklif ister. */
 export async function fetchQuoteFromServer(
   nowMs: number = Date.now(),
   fetchImpl: typeof fetch = fetch,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<QuoteFetchResult> {
   let response: Response;
   try {
@@ -47,43 +75,50 @@ export async function fetchQuoteFromServer(
       cache: "no-store",
     });
   } catch {
-    return { ok: false, message: NETWORK_ERROR };
+    return { ok: false, message: networkError(locale) };
   }
 
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return { ok: false, message: MALFORMED_ERROR };
+    return { ok: false, message: malformedError(locale) };
   }
 
   if (!response.ok) {
-    return { ok: false, message: readErrorMessage(body) ?? MALFORMED_ERROR };
+    return failureFromPayload(body, locale);
   }
   if (typeof body !== "object" || body === null) {
-    return { ok: false, message: MALFORMED_ERROR };
+    return { ok: false, message: malformedError(locale) };
   }
 
   const { quote, tag } = body as { quote?: unknown; tag?: unknown };
   if (!isValidQuoteTagFormat(tag)) {
-    return { ok: false, message: MALFORMED_ERROR };
+    return { ok: false, message: malformedError(locale) };
   }
   // Sunucudan gelse bile teklif yerelde katı biçimde doğrulanır.
   const validated = validateRateQuote(quote, nowMs);
   if (!validated.ok) {
-    return { ok: false, message: describeQuoteProblem(validated.problem) };
+    return {
+      ok: false,
+      message: describeQuoteProblem(validated.problem, locale),
+      code: validated.problem,
+    };
   }
 
   return { ok: true, signed: { quote: validated.quote, tag } };
 }
 
-export type QuoteVerifyResult = { ok: true } | { ok: false; message: string };
+export type QuoteVerifyResult =
+  | { ok: true }
+  | { ok: false; message: string; code?: string };
 
 /** Teklifin sunucu kimliklendirmesini ve güncel geçerliliğini doğrulatır. */
 export async function verifyQuoteWithServer(
   quote: RateQuote,
   tag: string,
   fetchImpl: typeof fetch = fetch,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<QuoteVerifyResult> {
   let response: Response;
   try {
@@ -94,25 +129,25 @@ export async function verifyQuoteWithServer(
       cache: "no-store",
     });
   } catch {
-    return { ok: false, message: NETWORK_ERROR };
+    return { ok: false, message: networkError(locale) };
   }
 
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    return { ok: false, message: MALFORMED_ERROR };
+    return { ok: false, message: malformedError(locale) };
   }
 
   if (!response.ok) {
-    return { ok: false, message: readErrorMessage(body) ?? MALFORMED_ERROR };
+    return failureFromPayload(body, locale);
   }
   if (
     typeof body !== "object" ||
     body === null ||
     (body as { valid?: unknown }).valid !== true
   ) {
-    return { ok: false, message: readErrorMessage(body) ?? MALFORMED_ERROR };
+    return failureFromPayload(body, locale);
   }
   return { ok: true };
 }

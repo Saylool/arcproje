@@ -3,13 +3,18 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { renderSVG } from "uqr";
 
+import { useTranslator } from "@/lib/i18n/context";
+import { formatDateTime, formatUsdcAmount } from "@/lib/i18n/format";
+import {
+  messageKey,
+  messageRate,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import { normalizeWalletAddress, shortenWalletAddress } from "@/lib/arc/address";
-import {
-  convertTryMinorToMicroUsdc,
-  formatMicroUsdcForDisplay,
-} from "@/lib/arc/conversion";
+import { convertTryMinorToMicroUsdc } from "@/lib/arc/conversion";
 import { fetchQuoteFromServer, verifyQuoteWithServer } from "@/lib/rates/client";
 import {
   QUOTE_SOURCE,
@@ -26,15 +31,11 @@ import { prepareLabel } from "@/lib/arc/labels";
 import {
   MAX_LABEL_LENGTH,
   createPaymentRequestPayload,
-  describePaymentRequestProblem,
 } from "@/lib/arc/payment-request";
 import { ensureSignedRequestPublishable } from "@/lib/arc/request-publication";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { buildShareUrl, encodeSignedRequest } from "@/lib/arc/request-codec";
-import {
-  describeRequestSigningError,
-  signPaymentRequest,
-} from "@/lib/arc/request-signing";
+import { signPaymentRequest } from "@/lib/arc/request-signing";
 import {
   discoverWallets,
   getChainId,
@@ -45,7 +46,10 @@ import {
 } from "@/lib/arc/wallet";
 import { debtIdentityKey } from "@/lib/arc/payment-state";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
-import type { Participant } from "@/lib/split/participants";
+import {
+  UNKNOWN_PARTICIPANT_LABEL,
+  type Participant,
+} from "@/lib/split/participants";
 import { toDativeName } from "@/lib/split/turkish";
 
 /**
@@ -76,7 +80,8 @@ type GeneratedRequest = {
 type QuoteState =
   | { status: "loading" }
   | { status: "ready"; signed: SignedRateQuote }
-  | { status: "error"; message: string };
+  /* Metin degil TARIF saklanir; dil degisince cumle de degisir. */
+  | { status: "error"; message: MessageDescriptor };
 
 /** CoinGecko atıf bağlantısı — sağlayıcı görünür biçimde belirtilir. */
 const COINGECKO_ATTRIBUTION_URL = "https://www.coingecko.com/en/api";
@@ -90,6 +95,7 @@ export function PaymentRequestCreator({
   result,
   onBack,
 }: Props) {
+  const { t, locale } = useTranslator();
   const quoteHeadingId = useId();
 
   const [debtorAddresses, setDebtorAddresses] = useState<Record<string, string>>({});
@@ -105,14 +111,28 @@ export function PaymentRequestCreator({
   const [chainId, setChainId] = useState<number | null>(null);
 
   const [signing, setSigning] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] =
+    useState<MessageDescriptor | null>(null);
+  /** Yayim kapisi dustuyse mesaja "kuru yenile" ipucu eklenir. */
+  const [needsRefreshHint, setNeedsRefreshHint] = useState(false);
   const [generated, setGenerated] = useState<GeneratedRequest[]>([]);
   const [copied, setCopied] = useState(false);
 
   const nameOf = useCallback(
     (id: string) =>
       participants.find((participant) => participant.id === id)?.name ??
-      "Bilinmeyen kişi",
+      t("common.unknownParticipant"),
+    [participants, t],
+  );
+
+  /**
+   * IMZALANACAK etiket icin yedek ad DILDEN BAGIMSIZDIR: imzali talep hicbir
+   * kosulda arayuz diline gore degismemelidir.
+   */
+  const signingNameOf = useCallback(
+    (id: string) =>
+      participants.find((participant) => participant.id === id)?.name ??
+      UNKNOWN_PARTICIPANT_LABEL,
     [participants],
   );
 
@@ -204,32 +224,32 @@ export function PaymentRequestCreator({
    */
   const loadQuote = useCallback(async () => {
     setQuoteState({ status: "loading" });
-    const result = await fetchQuoteFromServer();
+    const result = await fetchQuoteFromServer(Date.now(), fetch, locale);
     setQuoteState(
       result.ok
         ? { status: "ready", signed: result.signed }
-        : { status: "error", message: result.message },
+        : { status: "error", message: messageKey("errors.rateService") },
     );
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const result = await fetchQuoteFromServer();
+      const result = await fetchQuoteFromServer(Date.now(), fetch, locale);
       if (cancelled) {
         return;
       }
       setQuoteState(
         result.ok
           ? { status: "ready", signed: result.signed }
-          : { status: "error", message: result.message },
+          : { status: "error", message: messageKey("errors.rateService") },
       );
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [locale]);
 
   /** Geri sayım ve süre dolumu için saniyelik saat. */
   useEffect(() => {
@@ -252,9 +272,11 @@ export function PaymentRequestCreator({
     const accounts = await requestAccounts(selectedWalletUuid);
     if (!accounts.ok) {
       setErrorMessage(
-        accounts.code === "rejected"
-          ? "Cüzdan bağlantısı reddedildi."
-          : "Cüzdana bağlanılamadı.",
+        messageKey(
+          accounts.code === "rejected"
+            ? "wallet.connectRejected"
+            : "wallet.connectFailed",
+        ),
       );
       return;
     }
@@ -269,9 +291,11 @@ export function PaymentRequestCreator({
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
       setErrorMessage(
-        switched.code === "rejected"
-          ? "Ağ değişikliği reddedildi."
-          : "Arc Testnet'e geçilemedi.",
+        messageKey(
+          switched.code === "rejected"
+            ? "wallet.switchRejected"
+            : "wallet.switchFailed",
+        ),
       );
       return;
     }
@@ -321,21 +345,22 @@ export function PaymentRequestCreator({
       // İsimler kanonik biçime (NFC) indirgenip kod noktası sınırında kesilir;
       // katı doğrulama yine createPaymentRequestPayload içinde yapılır.
       recipientLabel: prepareLabel(
-        nameOf(selectedDebt.toParticipantId),
+        signingNameOf(selectedDebt.toParticipantId),
         MAX_LABEL_LENGTH,
       ),
       debtorLabel: prepareLabel(
-        nameOf(selectedDebt.fromParticipantId),
+        signingNameOf(selectedDebt.fromParticipantId),
         MAX_LABEL_LENGTH,
       ),
     });
     if (!built.ok) {
-      setErrorMessage(describePaymentRequestProblem(built.problem));
+      setErrorMessage(messageKey(`errors.paymentRequest.${built.problem}`));
       return;
     }
 
     setSigning(true);
     setErrorMessage(null);
+    setNeedsRefreshHint(false);
     setCopied(false);
     // Önceki denemeden kalan bağlantı, yeni deneme sırasında gösterilmemeli.
     const debtKeyForRun = debtIdentityKey(selectedDebt);
@@ -346,7 +371,7 @@ export function PaymentRequestCreator({
     setSigning(false);
 
     if (!signed.ok) {
-      setErrorMessage(describeRequestSigningError(signed.code));
+      setErrorMessage(messageKey(`errors.requestSigning.${signed.code}`));
       return;
     }
 
@@ -358,10 +383,22 @@ export function PaymentRequestCreator({
      */
     const publishable = await ensureSignedRequestPublishable(
       signed.request,
-      verifyQuoteWithServer,
+      (quote, tag) => verifyQuoteWithServer(quote, tag, fetch, locale),
+      Date.now,
+      locale,
     );
     if (!publishable.ok) {
-      setErrorMessage(publishable.message);
+      /*
+       * Sunucunun ya da dogrulayicinin hazir metni tasinmaz: KARARLI KOD
+       * saklanir ve cumle her render'da etkin dilde kurulur. Ipuc cumlesi
+       * gosterim sirasinda eklenir.
+       */
+      setErrorMessage(
+        publishable.problem !== undefined
+          ? messageKey(`errors.paymentRequest.${publishable.problem}`)
+          : messageRate(publishable.quoteCode),
+      );
+      setNeedsRefreshHint(true);
       return;
     }
 
@@ -384,7 +421,7 @@ export function PaymentRequestCreator({
       await navigator.clipboard.writeText(currentGenerated.url);
       setCopied(true);
     } catch {
-      setErrorMessage("Bağlantı kopyalanamadı. Elle seçip kopyalayabilirsin.");
+      setErrorMessage(messageKey("common.linkCopyFailed"));
     }
   };
 
@@ -396,8 +433,8 @@ export function PaymentRequestCreator({
     }
     try {
       await navigator.share({
-        title: "Ödeme talebi",
-        text: "Hesabı Böl ödeme talebi",
+        title: t("request.shareTitle"),
+        text: t("request.shareText"),
         url: currentGenerated.url,
       });
     } catch {
@@ -412,25 +449,26 @@ export function PaymentRequestCreator({
 
   return (
     <section
-      aria-label="Ödeme talebi oluştur"
+      aria-label={t("request.sectionLabel")}
       className="flex flex-col gap-5 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold tracking-tight text-ink">
-            Ödeme talebi oluştur
+            {t("request.title")}
           </h2>
           <span className="rounded-full bg-warn-surface-strong px-2 py-0.5 text-[10px] font-semibold text-warn-ink">
-            TEST AĞI
+            {t("common.testNetworkBadge")}
           </span>
         </div>
         <p className="text-xs leading-relaxed text-ink-faint">
-          Fişi sen ödedin, yani <strong className="font-semibold">alıcı</strong>{" "}
-          sensin. Her borç için ayrı bir talep imzalarsın;{" "}
+          {t("request.introPrefix")}
+          <strong className="font-semibold">{t("request.introRecipient")}</strong>
+          {t("request.introMiddle")}
           <strong className="font-semibold">
-            borçlu bu bağlantıyı açıp ödemeyi kendi cüzdanında onaylar.
-          </strong>{" "}
-          İmzan yalnızca talebi oluşturur, kimsenin cüzdanından para çekmez.
+            {t("request.introDebtorOpens")}
+          </strong>
+          {t("request.introSuffix")}
         </p>
       </header>
 
@@ -439,15 +477,14 @@ export function PaymentRequestCreator({
           role="alert"
           className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
-          Bu fişin para birimi TRY değil ({receipt.currency}). Arc ödemesi şu an
-          yalnızca TRY fişler için destekleniyor.
+          {t("request.notTry", { currency: receipt.currency })}
         </p>
       ) : (
         <>
           {/* 1 — Alıcı cüzdanı */}
           <div className="flex flex-col gap-2">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              1 · Fişi ödeyen / alıcı cüzdanı
+              {t("request.stepWallet")}
             </h3>
             {!walletsScanned ? (
               <button
@@ -456,21 +493,20 @@ export function PaymentRequestCreator({
                 disabled={signing}
                 className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Cüzdanı bağla
+                {t("wallet.connect")}
               </button>
             ) : wallets.length === 0 ? (
               <p
                 role="alert"
                 className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
               >
-                Tarayıcında cüzdan bulunamadı. MetaMask gibi bir EIP-6963 cüzdanı
-                kurup sayfayı yenile.
+                {t("wallet.notFoundInstall")}
               </p>
             ) : (
               <div className="flex flex-col gap-2">
                 {wallets.length > 1 && (
                   <p className="text-[11px] text-ink-faint">
-                    Birden fazla cüzdan bulundu, birini seç:
+                    {t("wallet.multipleFound")}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">
@@ -501,7 +537,7 @@ export function PaymentRequestCreator({
                     disabled={selectedWalletUuid === null || signing}
                     className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    Hesabı bağla
+                    {t("wallet.connectAccount")}
                   </button>
                   {account !== null && !onArc && (
                     <button
@@ -510,13 +546,13 @@ export function PaymentRequestCreator({
                       disabled={signing}
                       className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      Arc Testnet&apos;e geç
+                      {t("wallet.switchToArc")}
                     </button>
                   )}
                 </div>
                 {recipientAddress !== null && (
                   <p className="text-[11px] text-ink-faint">
-                    Alıcı (sen):{" "}
+                    {t("wallet.recipientIsYou")}{" "}
                     <span className="font-mono">
                       {shortenWalletAddress(recipientAddress)}
                     </span>
@@ -527,7 +563,9 @@ export function PaymentRequestCreator({
                       </span>
                     ) : (
                       <span className="text-warn-ink-faint">
-                        Arc Testnet değil (zincir {chainId ?? "bilinmiyor"})
+                        {t("wallet.notArcWithChain", {
+                          chainId: chainId ?? t("common.unknownChain"),
+                        })}
                       </span>
                     )}
                   </p>
@@ -545,11 +583,11 @@ export function PaymentRequestCreator({
               id={quoteHeadingId}
               className="text-xs font-semibold uppercase tracking-wide text-ink-faint"
             >
-              2 · Kur (otomatik)
+              {t("request.stepRate")}
             </h3>
 
             {quoteState.status === "loading" && (
-              <p className="text-xs text-ink-faint">Kur alınıyor…</p>
+              <p className="text-xs text-ink-faint">{t("request.rateLoading")}</p>
             )}
 
             {quoteState.status === "error" && (
@@ -558,14 +596,14 @@ export function PaymentRequestCreator({
                   role="alert"
                   className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
                 >
-                  {quoteState.message}
+                  {resolveMessage(locale, quoteState.message)}
                 </p>
                 <button
                   type="button"
                   onClick={() => void loadQuote()}
                   className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
-                  Kuru yeniden dene
+                  {t("request.rateRetry")}
                 </button>
               </div>
             )}
@@ -574,22 +612,23 @@ export function PaymentRequestCreator({
               <div className="flex flex-col gap-2">
                 <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
                   <Row
-                    label="Kur"
+                    label={t("request.rowRate")}
                     value={`1 USDC = ${formatQuoteRate(signedQuote.quote)} TRY`}
                     strong
                   />
                   <Row
-                    label="Güncelleme"
-                    value={new Date(
-                      signedQuote.quote.observedAt * 1000,
-                    ).toLocaleString("tr-TR")}
+                    label={t("request.rowUpdated")}
+                    value={formatDateTime(signedQuote.quote.observedAt, locale)}
                   />
                   <Row
-                    label="Geçerlilik"
+                    label={t("request.rowValidity")}
                     value={
                       quoteExpired
-                        ? "süresi doldu"
-                        : `${Math.floor(quoteSecondsLeft / 60)} dk ${quoteSecondsLeft % 60} sn`
+                        ? t("request.rateExpiredShort")
+                        : t("request.rateCountdown", {
+                            minutes: Math.floor(quoteSecondsLeft / 60),
+                            seconds: quoteSecondsLeft % 60,
+                          })
                     }
                   />
                 </dl>
@@ -599,14 +638,11 @@ export function PaymentRequestCreator({
                     role="alert"
                     className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink"
                   >
-                    Kur teklifinin süresi doldu. Talep oluşturmak için kuru
-                    yenile.
+                    {t("request.rateExpired")}
                   </p>
                 ) : (
                   <p className="text-[11px] leading-relaxed text-ink-faint">
-                    Kur sunucuda alınır ve sunucu tarafından imzalanır; ödeme
-                    talebine bu imzalı teklif yazılır. Borçlunun tarayıcısı kuru
-                    ayrıca sunucuya doğrulatır.
+                    {t("request.rateExplains")}
                   </p>
                 )}
 
@@ -616,7 +652,7 @@ export function PaymentRequestCreator({
                   disabled={signing}
                   className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Kuru yenile
+                  {t("request.rateRefresh")}
                 </button>
               </div>
             )}
@@ -628,7 +664,7 @@ export function PaymentRequestCreator({
                 rel="noreferrer"
                 className={LINK_CLASS}
               >
-                Data provided by CoinGecko
+                {t("request.coingeckoAttribution")}
               </a>
             </p>
           </div>
@@ -636,10 +672,10 @@ export function PaymentRequestCreator({
           {/* 3 — Borç ve borçlu adresi */}
           <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-              3 · Borç ve borçlu / gönderen adresi
+              {t("request.stepDebt")}
             </h3>
             {result.debts.length === 0 ? (
-              <p className="text-xs text-ink-faint">Ödeme talebi gereken borç yok.</p>
+              <p className="text-xs text-ink-faint">{t("request.noDebts")}</p>
             ) : (
               <ul className="flex flex-col gap-2">
                 {result.debts.map((debt, index) => {
@@ -670,17 +706,27 @@ export function PaymentRequestCreator({
                           <strong className="font-semibold text-ink">
                             {nameOf(debt.fromParticipantId)}
                           </strong>{" "}
-                          (borçlu), {toDativeName(nameOf(debt.toParticipantId))}{" "}
-                          {formatMinorForDisplay(debt.amountMinor, receipt.currency)}{" "}
-                          borçlu
+                          {t("request.debtOptionSuffix", {
+                            to:
+                              locale === "tr"
+                                ? toDativeName(nameOf(debt.toParticipantId))
+                                : nameOf(debt.toParticipantId),
+                            amount: formatMinorForDisplay(
+                              debt.amountMinor,
+                              receipt.currency,
+                              locale,
+                            ),
+                          })}
                         </span>
                       </label>
                       <label className="text-[11px] text-ink-soft">
-                        {nameOf(debt.fromParticipantId)} cüzdan adresi
+                        {t("request.debtorAddressLabel", {
+                          name: nameOf(debt.fromParticipantId),
+                        })}
                         <input
                           type="text"
                           value={raw}
-                          placeholder="0x…"
+                          placeholder={t("common.addressPlaceholder")}
                           spellCheck={false}
                           disabled={signing}
                           onChange={(event) =>
@@ -696,7 +742,7 @@ export function PaymentRequestCreator({
                       </label>
                       {raw.trim() !== "" && valid === null && (
                         <p className="text-[11px] text-danger-ink-soft">
-                          Geçerli bir cüzdan adresi değil.
+                          {t("request.invalidAddress")}
                         </p>
                       )}
                     </li>
@@ -710,35 +756,60 @@ export function PaymentRequestCreator({
           {selectedDebt !== null && conversion !== null && conversion.ok && (
             <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-                4 · Talebi imzala
+                {t("request.stepSign")}
               </h3>
               <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
-                <Row label="Borç (TRY)" value={formatMinorForDisplay(selectedDebt.amountMinor, receipt.currency)} />
                 <Row
-                  label="Kur"
+                  label={t("request.rowDebtTry")}
+                  value={formatMinorForDisplay(
+                    selectedDebt.amountMinor,
+                    receipt.currency,
+                    locale,
+                  )}
+                />
+                <Row
+                  label={t("request.rowRate")}
                   value={
                     signedQuote === null
-                      ? "—"
+                      ? t("common.dash")
                       : `1 USDC = ${formatQuoteRate(signedQuote.quote)} TRY`
                   }
                 />
-                <Row label="Kur kaynağı" value={QUOTE_SOURCE} />
+                <Row label={t("request.rowRateSource")} value={QUOTE_SOURCE} />
                 <Row
-                  label="İstenecek tutar"
-                  value={`${formatMicroUsdcForDisplay(conversion.microUsdc)} USDC`}
+                  label={t("request.rowAmountRequested")}
+                  /* Gosterim kanonik tam sayidan turer; protokol metni degismez. */
+                  value={`${formatUsdcAmount(conversion.microUsdc, locale)} USDC`}
                   strong
                 />
-                <Row label="Borçlu / gönderen" value={nameOf(selectedDebt.fromParticipantId)} />
                 <Row
-                  label="Borçlu adresi"
-                  value={debtorAddress === null ? "Girilmedi" : shortenWalletAddress(debtorAddress)}
+                  label={t("request.rowDebtor")}
+                  value={nameOf(selectedDebt.fromParticipantId)}
                 />
-                <Row label="Fişi ödeyen / alıcı" value={nameOf(selectedDebt.toParticipantId)} />
                 <Row
-                  label="Alıcı adresi"
-                  value={recipientAddress === null ? "Bağlanmadı" : shortenWalletAddress(recipientAddress)}
+                  label={t("request.rowDebtorAddress")}
+                  value={
+                    debtorAddress === null
+                      ? t("common.notEntered")
+                      : shortenWalletAddress(debtorAddress)
+                  }
                 />
-                <Row label="Ağ" value={ACTIVE_NETWORK_PROFILE.displayName} />
+                <Row
+                  label={t("request.rowPayer")}
+                  value={nameOf(selectedDebt.toParticipantId)}
+                />
+                <Row
+                  label={t("request.rowRecipientAddress")}
+                  value={
+                    recipientAddress === null
+                      ? t("common.notConnected")
+                      : shortenWalletAddress(recipientAddress)
+                  }
+                />
+                <Row
+                  label={t("request.rowNetwork")}
+                  value={ACTIVE_NETWORK_PROFILE.displayName}
+                />
               </dl>
 
               <button
@@ -747,11 +818,14 @@ export function PaymentRequestCreator({
                 disabled={!canCreate}
                 className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled"
               >
-                {signing ? "Cüzdanda imzalanıyor…" : "Ödeme talebi oluştur"}
+                {signing ? t("request.signing") : t("request.create")}
               </button>
               <p className="text-[11px] leading-relaxed text-ink-faint">
-                Cüzdanın yalnızca bir <strong className="font-semibold">imza</strong>{" "}
-                soracak. Bu imza para göndermez.
+                {t("request.signaturePrefix")}
+                <strong className="font-semibold">
+                  {t("request.signatureWord")}
+                </strong>
+                {t("request.signatureSuffix")}
               </p>
             </div>
           )}
@@ -760,20 +834,19 @@ export function PaymentRequestCreator({
           {currentGenerated !== null && (
             <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-                5 · Talep bağlantısı
+                {t("request.stepLink")}
               </h3>
               <p className="text-xs leading-relaxed text-ink-soft">
-                Bu bağlantıyı{" "}
+                {t("request.sendToPrefix")}
                 <strong className="font-semibold">
                   {nameOf(selectedDebt?.fromParticipantId ?? "")}
-                </strong>{" "}
-                kişisine gönder. Borçlu bu bağlantıyı açıp ödemeyi kendi
-                cüzdanında onaylar.
+                </strong>
+                {t("request.sendToSuffix")}
               </p>
 
               {qrSvg !== null && (
                 <div
-                  aria-label="Talep bağlantısının QR kodu"
+                  aria-label={t("request.qrLabel")}
                   role="img"
                   className="w-40 self-start rounded-2xl border border-line bg-card p-2 [&>svg]:h-auto [&>svg]:w-full"
                   dangerouslySetInnerHTML={{ __html: qrSvg }}
@@ -791,7 +864,7 @@ export function PaymentRequestCreator({
                   disabled={generatedExpired}
                   className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
-                  {copied ? "Kopyalandı" : "Talep bağlantısını kopyala"}
+                  {copied ? t("common.copied") : t("request.copyLink")}
                 </button>
                 <button
                   type="button"
@@ -799,27 +872,25 @@ export function PaymentRequestCreator({
                   disabled={generatedExpired}
                   className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
-                  Paylaş
+                  {t("common.share")}
                 </button>
               </div>
 
               <p className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink">
-                Bu bağlantı kişi adlarını, cüzdan adreslerini ve ödeme tutarını
-                içerir; yalnızca ilgili borçluyla paylaş.{" "}
+                {t("request.linkWarningPrefix")}
                 <strong className="font-semibold">
-                  Bağlantı yalnızca kur teklifi geçerli olduğu sürece —
-                  en fazla 5 dakika — kullanılabilir.
-                </strong>{" "}
-                Bitiş:{" "}
-                {new Date(currentGenerated.expiresAt * 1000).toLocaleString(
-                  "tr-TR",
-                )}
+                  {t("request.linkWarningStrong")}
+                </strong>
+                {t("request.linkWarningEndsAt", {
+                  date: formatDateTime(currentGenerated.expiresAt, locale),
+                })}
                 {generatedExpired
-                  ? " (süresi doldu)"
-                  : ` (${Math.floor(generatedSecondsLeft / 60)} dk ${generatedSecondsLeft % 60} sn kaldı)`}
-                . Bağlantı teknik olarak tekrar açılabilir — aynı borç için
-                ikinci bir ödeme yapılmasını engelleyen bir sunucu veya zincir
-                üstü kayıt yoktur.
+                  ? t("request.linkWarningExpired")
+                  : t("request.linkWarningRemaining", {
+                      minutes: Math.floor(generatedSecondsLeft / 60),
+                      seconds: generatedSecondsLeft % 60,
+                    })}
+                {t("request.linkWarningSuffix")}
               </p>
 
               {generatedExpired && (
@@ -827,8 +898,7 @@ export function PaymentRequestCreator({
                   role="alert"
                   className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2 text-[11px] leading-relaxed text-danger-ink"
                 >
-                  Bu bağlantının süresi doldu ve artık ödenemez. Kuru yenileyip
-                  yeni bir talep imzala.
+                  {t("request.linkExpired")}
                 </p>
               )}
             </div>
@@ -839,7 +909,8 @@ export function PaymentRequestCreator({
               role="alert"
               className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
             >
-              {errorMessage}
+              {resolveMessage(locale, errorMessage)}
+              {needsRefreshHint ? ` ${t("request.refreshHint")}` : ""}
             </p>
           )}
         </>
@@ -847,11 +918,11 @@ export function PaymentRequestCreator({
 
       <p aria-live="polite" className="sr-only">
         {signing
-          ? "Ödeme talebi cüzdanda imzalanıyor."
+          ? t("request.liveSigning")
           : currentGenerated !== null
-            ? "Ödeme talebi bağlantısı hazır."
+            ? t("request.liveReady")
             : errorMessage !== null
-              ? errorMessage
+              ? resolveMessage(locale, errorMessage)
               : ""}
       </p>
 
@@ -862,16 +933,16 @@ export function PaymentRequestCreator({
           disabled={signing}
           className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
         >
-          Paylara dön
+          {t("request.backToShares")}
         </button>
         <p className="text-[11px] leading-relaxed text-ink-faint">
-          Test USDC için{" "}
+          {t("request.faucetPrefix")}
           <a href={ARC_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-            Circle Faucet
+            {t("common.faucet")}
           </a>
-          , ağ kurulumu için{" "}
+          {t("request.faucetMiddle")}
           <a href={ARC_TESTNET_DOCS_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-            Arc dokümanı
+            {t("common.arcDocs")}
           </a>
           .
         </p>

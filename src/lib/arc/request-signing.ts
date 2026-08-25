@@ -10,6 +10,8 @@ import {
   type SignedPaymentRequest,
 } from "./payment-request";
 import { withProvider } from "./wallet";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * Ödeme talebinin imzalanması ve doğrulanması.
@@ -41,27 +43,18 @@ export type RequestSigningErrorCode =
   | "signerMismatch"
   | "signFailed";
 
-const MESSAGES: Record<RequestSigningErrorCode, string> = {
-  noProvider: "Cüzdan bağlantısı bulunamadı. Cüzdanı yeniden bağla.",
-  rejected: "İmza cüzdanda reddedildi.",
-  noAccount: "Cüzdanda açık bir hesap yok.",
-  accountChanged:
-    "Cüzdandaki aktif hesap, talebin alıcısı değil. Fişi ödeyen hesaba geçip tekrar dene.",
-  networkChanged:
-    "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
-  invalidPayload:
-    "Ödeme talebi kendi doğrulamamızdan geçmedi; cüzdana hiçbir şey gönderilmedi. Tutarı, kuru ve adresleri kontrol edip tekrar dene.",
-  invalidRecipient: "Alıcı cüzdan adresi geçersiz.",
-  signatureFormat: "Cüzdan beklenen biçimde bir imza döndürmedi.",
-  signerMismatch:
-    "İmzayı atan hesap talebin alıcısıyla eşleşmiyor. Talep oluşturulmadı.",
-  signFailed: "Ödeme talebi imzalanamadı. Lütfen tekrar dene.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeRequestSigningError(
   code: RequestSigningErrorCode,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return MESSAGES[code];
+  return translate(locale, `errors.requestSigning.${code}`);
 }
 
 export type RequestSigningResult =

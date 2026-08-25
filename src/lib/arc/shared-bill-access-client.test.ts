@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 
+import { translate, type TranslationKey } from "../i18n/dictionary";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
 import {
   buildSharedBillTypedData,
@@ -16,6 +17,23 @@ import {
   submitAccessResolution,
   verifyAuthenticatedView,
 } from "./shared-bill-access-client";
+
+/**
+ * METİN ARTIK BİLEŞENDE DEĞİL SÖZLÜKTEDİR.
+ *
+ * Sözleşme iki parçada doğrulanır: bileşen doğru ANAHTARI kullanıyor mu ve
+ * sözlük o anahtar altında beklenen TÜRKÇE cümleyi taşıyor mu. İngilizce
+ * karşılığın boş olmadığı da kontrol edilir.
+ */
+function expectShows(
+  source: string,
+  key: TranslationKey,
+  expectedTurkish: string,
+): void {
+  expect(source, key).toContain(key);
+  expect(translate("tr", key), key).toContain(expectedTurkish);
+  expect(translate("en", key), key).not.toBe("");
+}
 import {
   SHARED_BILL_SESSION_COOKIE,
 } from "@/lib/db/shared-bill-access-service";
@@ -308,13 +326,13 @@ describe("API istemcisi yanitlari KATI dogrular", () => {
     }
   });
 
-  it("sunucu hata mesaji kullaniciya tasinir", async () => {
+  it("sunucunun KARARLI KODU tasinir; metni arayuz kendi secer", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({ error: { code: "NOT_AVAILABLE", message: "Bulunamadi." } }, 404),
     );
     expect(
       await requestAccessChallenge(BILL_ID, "0xabc", fetchImpl as never),
-    ).toEqual({ ok: false, message: "Bulunamadi." });
+    ).toEqual({ ok: false, message: "Bulunamadi.", code: "NOT_AVAILABLE" });
   });
 
   it("ag hatasi genel mesaja duser", async () => {
@@ -428,13 +446,19 @@ describe("borclu arayuzu sozlesmesi", () => {
   });
 
   it("imzanin transfer yetkisi VERMEDIGI acikca yazilir", () => {
-    expect(view).toContain("işlem değildir");
-    expect(view).toContain("hiçbir transfer yetkisi vermez");
-    expect(view).toContain("Kimlik doğrulaması değil");
+    expectShows(view, "sharedPay.noticeNotATransaction", "işlem değildir");
+    expectShows(
+      view,
+      "sharedPay.noticeSuffix",
+      "hiçbir transfer yetkisi vermez",
+    );
+    expect(translate("tr", "sharedPay.noticeSuffix")).toContain(
+      "Kimlik doğrulaması değil",
+    );
   });
 
   it("herkesin AYNI baglantiyi aldigi soylenir", () => {
-    expect(view).toContain("herkese aynı");
+    expectShows(view, "sharedPay.introEveryone", "herkese aynı");
   });
 
   it("hesap veya ag degisince cozulmus borc TEMIZLENIR", () => {
@@ -445,7 +469,8 @@ describe("borclu arayuzu sozlesmesi", () => {
 
   it("dogrulama duserse borc GOSTERILMEZ", () => {
     expect(view).toContain("verifyAuthenticatedView");
-    expect(view).toContain("describeViewProblem");
+    // Dogrulama duserse gosterilen metin `errors.view.*` sozlugunden gelir.
+    expect(view).toContain("errors.view.");
   });
 
   it("sayfa SUNUCUDA hesap verisi okumaz ve varligi sizdirmaz", () => {
@@ -455,8 +480,12 @@ describe("borclu arayuzu sozlesmesi", () => {
   });
 
   it("Arc Testnet uyarisi ve tam alici adresi gosterilir", () => {
-    expect(view).toContain("gerçek parasal değeri yoktur");
+    expectShows(
+      view,
+      "sharedPay.networkNoteStrong",
+      "gerçek parasal değeri yoktur",
+    );
     expect(view).toContain("stage.view.recipient.address");
-    expect(view).toContain("Adresi kopyala");
+    expectShows(view, "common.copyAddress", "Adresi kopyala");
   });
 });

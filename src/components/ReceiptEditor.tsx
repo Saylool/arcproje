@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
+import { useTranslator } from "@/lib/i18n/context";
 import {
   checkTotals,
   describeMoneyParseFailure,
@@ -19,16 +20,17 @@ import {
   type ReceiptItem,
 } from "@/lib/receipt/schema";
 
-const TREATMENT_LABELS: Record<AdjustmentTreatment, string> = {
-  included_in_items: "Ürün fiyatlarına dahil",
-  separate: "Ayrı uygula",
-  unknown: "Belirsiz",
+/** Kod -> sozluk anahtari. Kodlar veri sozlesmesidir ve cevrilmez. */
+const TREATMENT_KEYS: Record<AdjustmentTreatment, "editor.treatmentIncluded" | "editor.treatmentSeparate" | "editor.treatmentUnknown"> = {
+  included_in_items: "editor.treatmentIncluded",
+  separate: "editor.treatmentSeparate",
+  unknown: "editor.treatmentUnknown",
 };
 
-const ADJUSTMENT_LABELS: Record<AdjustmentKind, string> = {
-  tax: "vergi",
-  serviceCharge: "servis ücreti",
-  discount: "indirim",
+const ADJUSTMENT_KEYS: Record<AdjustmentKind, "editor.adjustmentTax" | "editor.adjustmentServiceCharge" | "editor.adjustmentDiscount"> = {
+  tax: "editor.adjustmentTax",
+  serviceCharge: "editor.adjustmentServiceCharge",
+  discount: "editor.adjustmentDiscount",
 };
 
 type ReceiptEditorProps = {
@@ -54,9 +56,36 @@ function MoneyInput({
   onValidChange,
   className,
 }: MoneyInputProps) {
+  const { locale } = useTranslator();
   const errorId = useId();
-  const [text, setText] = useState(() => formatMinorForInput(minor));
+  const [text, setText] = useState(() => formatMinorForInput(minor, locale));
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * DIL DEGISINCE AYRAC DA DEGISIR — ama YALNIZCA kullanicinin DOKUNMADIGI
+   * alanlarda.
+   *
+   * Alan "el degmemis" sayilir ancak icindeki metin, ONCEKI dilde ayni tam
+   * sayidan uretilmis metnin BIREBIR aynisiysa. Kullanici tek bir karakter
+   * bile yazdiysa metin oldugu gibi birakilir: dil degistirmek kimsenin
+   * yazdigi degeri silmemelidir.
+   *
+   * Her iki durumda da TUTAR degismez: `parseMoneyToMinor` hem "," hem "."
+   * ayracini kabul eder ve iki dilde de AYNI tam sayiyi geri okur.
+   */
+  const previousLocale = useRef(locale);
+  useEffect(() => {
+    const previous = previousLocale.current;
+    if (previous === locale) {
+      return;
+    }
+    previousLocale.current = locale;
+    setText((current) =>
+      current === formatMinorForInput(minor, previous)
+        ? formatMinorForInput(minor, locale)
+        : current,
+    );
+  }, [locale, minor]);
 
   const handleChange = (value: string) => {
     setText(value);
@@ -67,7 +96,7 @@ function MoneyInput({
       onValidChange(result.minor);
       return;
     }
-    setError(describeMoneyParseFailure(result.reason));
+    setError(describeMoneyParseFailure(result.reason, locale));
   };
 
   return (
@@ -96,9 +125,15 @@ function MoneyInput({
 }
 
 export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
+  const { t, locale } = useTranslator();
   const totals = checkTotals(receipt);
+  /** Para birimi KODU veridir; yalnizca "bilinmiyor" durumu cevrilir. */
   const currencyLabel =
-    receipt.currency === UNKNOWN_CURRENCY ? "belirlenemedi" : receipt.currency;
+    receipt.currency === UNKNOWN_CURRENCY
+      ? t("editor.unknownCurrency")
+      : receipt.currency;
+  const money = (minor: number) =>
+    formatMinorForDisplay(minor, receipt.currency, locale);
 
   const updateItem = (
     id: string,
@@ -131,22 +166,23 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
 
   return (
     <section
-      aria-label="Fiş içeriği"
+      aria-label={t("editor.sectionLabel")}
       className="flex flex-col gap-4 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-1">
         <h2 className="text-base font-semibold tracking-tight text-ink">
-          {receipt.merchantName ?? "Satıcı adı okunamadı"}
+          {receipt.merchantName ?? t("editor.unknownMerchant")}
         </h2>
         <p className="text-xs text-ink-faint">
-          Para birimi: {currencyLabel} · Analiz sonucunu kontrol edip
-          düzeltebilirsin.
+          {t("editor.currencyLine", { currency: currencyLabel })}
         </p>
       </header>
 
       {receipt.warnings.length > 0 && (
         <div className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5">
-          <p className="text-xs font-semibold text-warn-ink">Analiz notları</p>
+          <p className="text-xs font-semibold text-warn-ink">
+            {t("editor.analysisNotes")}
+          </p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-warn-ink-soft">
             {receipt.warnings.map((warning, index) => (
               <li key={`${index}-${warning}`}>{warning}</li>
@@ -157,12 +193,12 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
 
       <div className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-          Ürünler
+          {t("editor.items")}
         </h3>
 
         {receipt.items.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line px-3 py-4 text-center text-xs text-ink-faint">
-            Ürün listesi boş. Aşağıdan ürün ekleyebilirsin.
+            {t("editor.emptyItems")}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -174,8 +210,8 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                 <input
                   type="text"
                   value={item.name}
-                  placeholder="Ürün adı"
-                  aria-label={`${index + 1}. ürünün adı`}
+                  placeholder={t("editor.itemNamePlaceholder")}
+                  aria-label={t("editor.itemNameLabel", { index: index + 1 })}
                   onChange={(event) =>
                     updateItem(item.id, { name: event.target.value })
                   }
@@ -185,7 +221,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                 <div className="flex items-start gap-2">
                   <MoneyInput
                     minor={item.totalMinor}
-                    ariaLabel={`${index + 1}. ürünün tutarı`}
+                    ariaLabel={t("editor.itemAmountLabel", { index: index + 1 })}
                     onValidChange={(minor) =>
                       updateItem(item.id, { totalMinor: minor })
                     }
@@ -194,10 +230,10 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                   <button
                     type="button"
                     onClick={() => removeItem(item.id)}
-                    aria-label={`${index + 1}. ürünü sil`}
+                    aria-label={t("editor.itemDeleteLabel", { index: index + 1 })}
                     className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
-                    Sil
+                    {t("common.delete")}
                   </button>
                 </div>
               </li>
@@ -210,33 +246,33 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           onClick={addItem}
           className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
-          + Ürün ekle
+          {t("editor.addItem")}
         </button>
       </div>
 
       <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-ink-faint">Ürünler toplamı</span>
+          <span className="text-sm text-ink-faint">{t("editor.itemsSubtotal")}</span>
           <span className="text-sm tabular-nums text-ink-faint">
-            {formatMinorForDisplay(totals.itemsSubtotalMinor, receipt.currency)}
+            {money(totals.itemsSubtotalMinor)}
           </span>
         </div>
 
         <SummaryRow
-          label="Vergi (KDV)"
+          label={t("editor.tax")}
           minor={receipt.taxMinor}
           treatment={receipt.taxTreatment}
-          treatmentHint="Ayrı uygula seçilirse genel toplama eklenir."
+          treatmentHint={t("editor.addsToTotal")}
           onTreatmentChange={(taxTreatment) =>
             onChange({ ...receipt, taxTreatment })
           }
           onValidChange={(taxMinor) => onChange({ ...receipt, taxMinor })}
         />
         <SummaryRow
-          label="Servis ücreti"
+          label={t("editor.serviceCharge")}
           minor={receipt.serviceChargeMinor}
           treatment={receipt.serviceChargeTreatment}
-          treatmentHint="Ayrı uygula seçilirse genel toplama eklenir."
+          treatmentHint={t("editor.addsToTotal")}
           onTreatmentChange={(serviceChargeTreatment) =>
             onChange({ ...receipt, serviceChargeTreatment })
           }
@@ -245,10 +281,10 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           }
         />
         <SummaryRow
-          label="İndirim"
+          label={t("editor.discount")}
           minor={receipt.discountMinor}
           treatment={receipt.discountTreatment}
-          treatmentHint="Ayrı uygula seçilirse genel toplamdan düşülür."
+          treatmentHint={t("editor.subtractsFromTotal")}
           onTreatmentChange={(discountTreatment) =>
             onChange({ ...receipt, discountTreatment })
           }
@@ -257,7 +293,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           }
         />
         <SummaryRow
-          label="Genel toplam"
+          label={t("editor.total")}
           minor={receipt.totalMinor}
           emphasized
           onValidChange={(totalMinor) => onChange({ ...receipt, totalMinor })}
@@ -269,16 +305,15 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           role="status"
           className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
         >
-          Ürünler ve ayrı uygulanan kalemler{" "}
+          {t("editor.mismatchPrefix")}
           <strong className="font-semibold tabular-nums">
-            {formatMinorForDisplay(totals.expectedTotalMinor, receipt.currency)}
-          </strong>{" "}
-          ediyor ama fişteki genel toplam{" "}
-          <strong className="font-semibold tabular-nums">
-            {formatMinorForDisplay(totals.statedTotalMinor, receipt.currency)}
+            {money(totals.expectedTotalMinor)}
           </strong>
-          . Değerleri senin onayın olmadan değiştirmiyoruz; kontrol edip
-          düzeltebilirsin.
+          {t("editor.mismatchMiddle")}
+          <strong className="font-semibold tabular-nums">
+            {money(totals.statedTotalMinor)}
+          </strong>
+          {t("editor.mismatchSuffix")}
         </p>
       )}
 
@@ -287,14 +322,13 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           role="status"
           className="rounded-2xl border border-line bg-muted px-3 py-2.5 text-xs leading-relaxed text-ink-soft"
         >
-          Bazı ücretlerin ürün fiyatlarına dahil olup olmadığı belirsiz:{" "}
+          {t("editor.indeterminatePrefix")}
           <strong className="font-semibold">
             {totals.uncertainAdjustments
-              .map((kind) => ADJUSTMENT_LABELS[kind])
+              .map((kind) => t(ADJUSTMENT_KEYS[kind]))
               .join(", ")}
           </strong>
-          . Bu yüzden genel toplamı doğrulamıyoruz. Yukarıdaki seçimleri
-          güncelleyerek netleştirebilirsin.
+          {t("editor.indeterminateSuffix")}
         </p>
       )}
     </section>
@@ -321,6 +355,7 @@ function SummaryRow({
   onTreatmentChange,
   onValidChange,
 }: SummaryRowProps) {
+  const { t } = useTranslator();
   return (
     <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
       <span
@@ -335,9 +370,14 @@ function SummaryRow({
         {treatment !== undefined && onTreatmentChange !== undefined && (
           <select
             value={treatment}
-            aria-label={`${label} nasıl uygulanacak${
-              treatmentHint === undefined ? "" : `. ${treatmentHint}`
-            }`}
+            aria-label={
+              treatmentHint === undefined
+                ? t("editor.treatmentLabel", { label })
+                : t("editor.treatmentLabelWithHint", {
+                    label,
+                    hint: treatmentHint,
+                  })
+            }
             onChange={(event) =>
               onTreatmentChange(event.target.value as AdjustmentTreatment)
             }
@@ -345,7 +385,7 @@ function SummaryRow({
           >
             {ADJUSTMENT_TREATMENTS.map((option) => (
               <option key={option} value={option}>
-                {TREATMENT_LABELS[option]}
+                {t(TREATMENT_KEYS[option])}
               </option>
             ))}
           </select>

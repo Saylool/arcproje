@@ -2,9 +2,12 @@ import {
   describePaymentRequestProblem,
   extractQuoteFromPayload,
   validatePaymentRequestPayload,
+  type PaymentRequestProblem,
   type SignedPaymentRequest,
 } from "./payment-request";
 import type { RateQuote } from "@/lib/rates/quote";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * İmzalı talebin YAYIMLANMADAN önceki son kapısı.
@@ -25,24 +28,40 @@ import type { RateQuote } from "@/lib/rates/quote";
 export type QuoteVerifier = (
   quote: RateQuote,
   tag: string,
-) => Promise<{ ok: true } | { ok: false; message: string }>;
+) => Promise<{ ok: true } | { ok: false; message: string; code?: string }>;
 
+/**
+ * `problem` / `quoteCode` KARARLI kodlardır: arayüz cümleyi bunlardan ve
+ * ETKİN DİLDEN kurar. `message` varsayılan/verilen dildeki hazır metindir ve
+ * geriye dönük uyumluluk için korunur.
+ */
 export type PublicationCheck =
   | { ok: true }
-  | { ok: false; message: string };
+  | {
+      ok: false;
+      message: string;
+      problem?: PaymentRequestProblem;
+      quoteCode?: string;
+    };
 
-const REFRESH_HINT = "Kuru yenileyip talebi yeniden imzala.";
-
+/**
+ * Dil, çağıranın etkin dilidir; verilmezse Türkçedir. Yalnızca GÖSTERİLECEK
+ * metni etkiler — hangi kontrolün düştüğünü ve fail-closed davranışı
+ * değiştirmez.
+ */
 export async function ensureSignedRequestPublishable(
   request: SignedPaymentRequest,
   verifyQuote: QuoteVerifier,
   now: () => number = Date.now,
+  locale: Locale = DEFAULT_LOCALE,
 ): Promise<PublicationCheck> {
+  const refreshHint = translate(locale, "request.refreshHint");
   const revalidated = validatePaymentRequestPayload(request.payload, now());
   if (!revalidated.ok) {
     return {
       ok: false,
-      message: `${describePaymentRequestProblem(revalidated.problem)} ${REFRESH_HINT}`,
+      message: `${describePaymentRequestProblem(revalidated.problem, locale)} ${refreshHint}`,
+      problem: revalidated.problem,
     };
   }
 
@@ -51,7 +70,11 @@ export async function ensureSignedRequestPublishable(
     request.payload.quoteTag,
   );
   if (!quoteCheck.ok) {
-    return { ok: false, message: `${quoteCheck.message} ${REFRESH_HINT}` };
+    return {
+      ok: false,
+      message: `${quoteCheck.message} ${refreshHint}`,
+      quoteCode: quoteCheck.code,
+    };
   }
 
   /*
@@ -63,7 +86,8 @@ export async function ensureSignedRequestPublishable(
   if (!stillValid.ok) {
     return {
       ok: false,
-      message: `${describePaymentRequestProblem(stillValid.problem)} ${REFRESH_HINT}`,
+      message: `${describePaymentRequestProblem(stillValid.problem, locale)} ${refreshHint}`,
+      problem: stillValid.problem,
     };
   }
 

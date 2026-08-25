@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 
+import { useTranslator } from "@/lib/i18n/context";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import {
@@ -14,6 +15,7 @@ import {
   removeParticipant,
   setParticipantName,
   setPayer,
+  summarizeAssignments,
   toggleItemParticipant,
   type AssignmentState,
   type ParticipantNameError,
@@ -34,6 +36,7 @@ export function ParticipantAssignment({
   onBack,
   onComplete,
 }: ParticipantAssignmentProps) {
+  const { t, tp, locale } = useTranslator();
   const payerGroupName = useId();
   const newNameInputId = useId();
   const newNameErrorId = useId();
@@ -48,6 +51,19 @@ export function ParticipantAssignment({
     ]),
   );
   const completion = checkAssignmentsComplete(state, receipt.items);
+  /*
+   * Engel METNI burada, etkin dilde kurulur: kutuphane yalnizca NEDENI
+   * (`reason`) bildirir, cumleyi degil.
+   */
+  const unassignedCount = summarizeAssignments(state, receipt.items)
+    .unassignedItemIds.length;
+  const completionMessage = completion.ok
+    ? tp("allAssigned", MIN_PARTICIPANTS)
+    : completion.reason === "notEnoughParticipants"
+      ? tp("needParticipants", MIN_PARTICIPANTS)
+      : completion.reason === "invalidParticipantName"
+        ? t("participants.namesInvalid")
+        : tp("itemsUnassigned", unassignedCount);
 
   const handleAdd = () => {
     const result = addParticipant(state, newName);
@@ -62,28 +78,27 @@ export function ParticipantAssignment({
 
   return (
     <section
-      aria-label="Kişiler ve ürün atamaları"
+      aria-label={t("participants.sectionLabel")}
       className="flex flex-col gap-5 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-1">
         <h2 className="text-base font-semibold tracking-tight text-ink">
-          Kişileri ekle, ürünleri dağıt
+          {t("participants.title")}
         </h2>
         <p className="text-xs leading-relaxed text-ink-faint">
-          Bir ürünü birden fazla kişiye atarsan o ürün seçtiğin kişiler arasında
-          eşit bölünür.
+          {t("participants.description")}
         </p>
       </header>
 
       {/* --- Kişiler --- */}
       <div className="flex flex-col gap-2">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-          Kişiler
+          {t("participants.heading")}
         </h3>
 
         {state.participants.length === 0 ? (
           <p className="rounded-2xl border border-dashed border-line px-3 py-4 text-center text-xs text-ink-faint">
-            Hiç kişi yok. Aşağıdan kişi ekle.
+            {t("participants.empty")}
           </p>
         ) : (
           <ul className="flex flex-col gap-2">
@@ -95,8 +110,8 @@ export function ParticipantAssignment({
                     <input
                       type="text"
                       value={participant.name}
-                      placeholder="İsim"
-                      aria-label={`${index + 1}. kişinin adı`}
+                      placeholder={t("participants.namePlaceholder")}
+                      aria-label={t("participants.nameLabel", { index: index + 1 })}
                       aria-invalid={issue === undefined ? undefined : true}
                       onChange={(event) =>
                         onChange(
@@ -127,15 +142,19 @@ export function ParticipantAssignment({
                       onClick={() =>
                         onChange(removeParticipant(state, participant.id))
                       }
-                      aria-label={`${participant.name || `${index + 1}. kişi`} kişisini sil`}
+                      aria-label={t("participants.deleteLabel", {
+                        name:
+                          participant.name ||
+                          t("participants.positionalName", { index: index + 1 }),
+                      })}
                       className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     >
-                      Sil
+                      {t("common.delete")}
                     </button>
                   </div>
                   {issue !== undefined && (
                     <p className="text-[11px] leading-snug text-danger-ink-soft">
-                      {describeParticipantNameError(issue)}
+                      {describeParticipantNameError(issue, locale)}
                     </p>
                   )}
                 </li>
@@ -150,8 +169,8 @@ export function ParticipantAssignment({
               id={newNameInputId}
               type="text"
               value={newName}
-              placeholder="Yeni kişi adı"
-              aria-label="Yeni kişi adı"
+              placeholder={t("participants.newNamePlaceholder")}
+              aria-label={t("participants.newNameLabel")}
               aria-invalid={addError === null ? undefined : true}
               aria-describedby={addError === null ? undefined : newNameErrorId}
               onChange={(event) => {
@@ -175,7 +194,7 @@ export function ParticipantAssignment({
               onClick={handleAdd}
               className="shrink-0 rounded-full border border-line bg-card px-3.5 py-2 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
-              + Kişi ekle
+              {t("participants.add")}
             </button>
           </div>
           {addError !== null && (
@@ -184,7 +203,7 @@ export function ParticipantAssignment({
               role="alert"
               className="text-[11px] leading-snug text-danger-ink-soft"
             >
-              {describeParticipantNameError(addError)}
+              {describeParticipantNameError(addError, locale)}
             </p>
           )}
         </div>
@@ -194,7 +213,7 @@ export function ParticipantAssignment({
       {state.participants.length > 0 && (
         <fieldset className="flex flex-col gap-2 border-t border-line-soft pt-4">
           <legend className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-            Fişi kim ödedi?
+            {t("participants.payerLegend")}
           </legend>
           <div className="flex flex-wrap gap-2">
             {state.participants.map((participant) => (
@@ -212,7 +231,7 @@ export function ParticipantAssignment({
                   className="peer sr-only"
                 />
                 <span className="inline-block max-w-[10rem] truncate rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
-                  {participant.name || "(isimsiz)"}
+                  {participant.name || t("common.unnamed")}
                 </span>
               </label>
             ))}
@@ -223,7 +242,7 @@ export function ParticipantAssignment({
       {/* --- Ürün atamaları --- */}
       <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-          Ürünler
+          {t("participants.itemsHeading")}
         </h3>
 
         <ul className="flex flex-col gap-2">
@@ -249,13 +268,17 @@ export function ParticipantAssignment({
                       {item.name}
                     </span>
                     <span className="shrink-0 text-sm tabular-nums text-ink-faint">
-                      {formatMinorForDisplay(item.totalMinor, receipt.currency)}
+                      {formatMinorForDisplay(
+                        item.totalMinor,
+                        receipt.currency,
+                        locale,
+                      )}
                     </span>
                   </legend>
 
                   {state.participants.length === 0 ? (
                     <p className="text-xs text-ink-faint">
-                      Önce kişi ekle.
+                      {t("participants.addPeopleFirst")}
                     </p>
                   ) : (
                     <div className="flex flex-wrap gap-2">
@@ -280,7 +303,7 @@ export function ParticipantAssignment({
                             className="peer sr-only"
                           />
                           <span className="inline-block max-w-[10rem] truncate rounded-full border border-line px-3 py-1.5 text-xs font-medium text-ink-soft transition-colors peer-checked:border-brand peer-checked:bg-brand peer-checked:text-white peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
-                            {participant.name || "(isimsiz)"}
+                            {participant.name || t("common.unnamed")}
                           </span>
                         </label>
                       ))}
@@ -289,12 +312,12 @@ export function ParticipantAssignment({
 
                   {isUnassigned && (
                     <p className="text-[11px] leading-snug text-warn-ink-soft">
-                      Bu ürün henüz kimseye atanmadı.
+                      {t("participants.itemUnassigned")}
                     </p>
                   )}
                   {assignedIds.length > 1 && (
                     <p className="text-[11px] leading-snug text-ink-faint">
-                      {assignedIds.length} kişi arasında eşit bölünecek.
+                      {tp("sharedBetween", assignedIds.length)}
                     </p>
                   )}
                 </fieldset>
@@ -313,21 +336,19 @@ export function ParticipantAssignment({
             disabled={!completion.ok}
             className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled disabled:shadow-none"
           >
-            Atamaları kaydet
+            {t("participants.save")}
           </button>
           <button
             type="button"
             onClick={onBack}
             className="inline-flex items-center justify-center rounded-full border border-line bg-card px-4 py-2.5 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            Fişe dön
+            {t("participants.backToReceipt")}
           </button>
         </div>
 
         <p aria-live="polite" className="text-xs leading-relaxed text-ink-faint">
-          {completion.ok
-            ? `Her ürün atandı. ${MIN_PARTICIPANTS} veya daha fazla kişiyle devam edebilirsin.`
-            : completion.message}
+          {completionMessage}
         </p>
       </div>
     </section>

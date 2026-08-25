@@ -13,6 +13,9 @@ import {
 } from "./shared-bill-merkle";
 import { verifySharedBillSignature } from "./shared-bill-signing";
 import type { SharedBillAccessChallenge } from "./shared-bill-access";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+import { readApiErrorCode } from "../i18n/api-errors";
 
 /**
  * Borçlu tarafının SUNUCUYA GÜVENMEYEN doğrulaması.
@@ -37,9 +40,14 @@ const BYTES32 = /^0x[0-9a-f]{64}$/i;
 
 const GENERIC_FAILURE = "Borç görüntülenemedi. Lütfen tekrar dene.";
 
+/**
+ * `code` SUNUCUNUN kararlı hata kodudur ve arayüz gösterilecek metni ONDAN
+ * seçer. `message` sunucunun hazır metnidir; geriye dönük uyumluluk ve
+ * günlükleme içindir, EKRANA BASILMAZ.
+ */
 export type AccessFetchResult<T> =
   | { ok: true; value: T }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: string };
 
 async function readJson(response: Response): Promise<unknown> {
   try {
@@ -47,6 +55,13 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** Sunucu hatasını koduyla birlikte taşır; kod yoksa alan hiç eklenmez. */
+function apiFailure(payload: unknown): { ok: false; message: string; code?: string } {
+  const code = readApiErrorCode(payload);
+  const message = messageOf(payload);
+  return code === null ? { ok: false, message } : { ok: false, message, code };
 }
 
 function messageOf(payload: unknown): string {
@@ -85,7 +100,7 @@ export async function requestAccessChallenge(
   }
   const payload = await readJson(response);
   if (!response.ok) {
-    return { ok: false, message: messageOf(payload) };
+    return apiFailure(payload);
   }
   if (typeof payload !== "object" || payload === null) {
     return { ok: false, message: GENERIC_FAILURE };
@@ -132,7 +147,7 @@ export async function submitAccessResolution(
     return { ok: false, message: GENERIC_FAILURE };
   }
   if (!response.ok) {
-    return { ok: false, message: messageOf(await readJson(response)) };
+    return apiFailure(await readJson(response));
   }
   return { ok: true, value: true };
 }
@@ -164,7 +179,7 @@ export async function fetchAuthenticatedDebt(
   }
   const payload = await readJson(response);
   if (!response.ok) {
-    return { ok: false, message: messageOf(payload) };
+    return apiFailure(payload);
   }
   return { ok: true, value: payload };
 }
@@ -185,22 +200,18 @@ export type ViewProblem =
   | "wrongChain"
   | "notOpen";
 
-const VIEW_MESSAGES: Record<ViewProblem, string> = {
-  malformedResponse: "Sunucudan beklenmeyen bir yanıt geldi. Borç gösterilmiyor.",
-  invalidManifest:
-    "Paylaşılan hesap doğrulanamadı veya süresi dolmuş. Borç gösterilmiyor.",
-  invalidRecipientSignature:
-    "Hesabın alıcı imzası doğrulanamadı. Bu bağlantıya güvenme; borç gösterilmiyor.",
-  invalidProof:
-    "Borcun imzalanan hesaba ait olduğu kanıtlanamadı. Borç gösterilmiyor.",
-  walletMismatch:
-    "Bu borç bağlı cüzdana ait değil. Doğru cüzdana geçip tekrar dene.",
-  wrongChain: "Cüzdan Arc Testnet'te değil. Borç gösterilmiyor.",
-  notOpen: "Bu paylaşılan hesap artık açık değil.",
-};
-
-export function describeViewProblem(problem: ViewProblem): string {
-  return VIEW_MESSAGES[problem];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeViewProblem(
+  problem: ViewProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.view.${problem}`);
 }
 
 export type VerifyViewResult =

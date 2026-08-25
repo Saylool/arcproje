@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { translate, type TranslationKey } from "../i18n/dictionary";
+
 import { SHARED_BILL_FLOW_ENABLED } from "./shared-bill-feature";
 import {
   describeSharedBillDraftProblem,
@@ -40,6 +42,23 @@ function rowsOf(over: Partial<SharedBillDraftRow>[] = []): SharedBillDraftRow[] 
     },
   ];
   return base.map((row, index) => ({ ...row, ...(over[index] ?? {}) }));
+}
+
+/**
+ * METİN ARTIK BİLEŞENDE DEĞİL SÖZLÜKTEDİR.
+ *
+ * Sözleşme iki parçada doğrulanır: bileşen doğru ANAHTARI kullanıyor mu ve
+ * sözlük o anahtar altında beklenen TÜRKÇE cümleyi taşıyor mu. İngilizce
+ * karşılığın boş olmadığı da kontrol edilir.
+ */
+function expectShows(
+  source: string,
+  key: TranslationKey,
+  expectedTurkish: string,
+): void {
+  expect(source, key).toContain(key);
+  expect(translate("tr", key), key).toContain(expectedTurkish);
+  expect(translate("en", key), key).not.toBe("");
 }
 
 describe("taslak dogrulamasi", () => {
@@ -227,7 +246,7 @@ describe("API istemcisi yaniti KATI dogrular", () => {
     }
   });
 
-  it("sunucu hatasinin mesaji kullaniciya tasinir", async () => {
+  it("sunucunun KARARLI KODU tasinir; metni arayuz kendi secer", async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse(
         { error: { code: "SERVICE_NOT_CONFIGURED", message: "Yapilandirilmamis." } },
@@ -237,6 +256,7 @@ describe("API istemcisi yaniti KATI dogrular", () => {
     expect(await createSharedBillOnServer(body, fetchImpl as never)).toEqual({
       ok: false,
       message: "Yapilandirilmamis.",
+      code: "SERVICE_NOT_CONFIGURED",
     });
   });
 
@@ -275,12 +295,16 @@ describe("ortak hesap kapisi", () => {
   it("olusturucu TEK imza ve TEK baglanti sozu verir", () => {
     expect(creator).toContain("signSharedBillManifest");
     expect(creator).toContain("createSharedBillOnServer");
-    expect(creator).toContain("Butun borclular ayni baglantiyi alir");
+    expectShows(
+      creator,
+      "sharedBill.introAllSame",
+      "Butun borclular ayni baglantiyi alir",
+    );
   });
 
   it("imzanin para cekemeyecegi acikca yazilir", () => {
-    expect(creator).toContain("talep olusturur");
-    expect(creator).toContain("para cekemez");
+    expectShows(creator, "sharedBill.noticeRequest", "talep olusturur");
+    expectShows(creator, "sharedBill.noticeSuffix", "para cekemez");
   });
 
   it("girdi degisince baglanti gecersiz sayilir", () => {

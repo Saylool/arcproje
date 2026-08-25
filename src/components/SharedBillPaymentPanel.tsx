@@ -8,18 +8,12 @@ import {
   isArcTestnet,
 } from "@/lib/arc/network";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
-import {
-  describeArcSendError,
-  estimateArcSend,
-  sendArcUsdc,
-} from "@/lib/arc/send";
+import { estimateArcSend, sendArcUsdc } from "@/lib/arc/send";
 import {
   RECONCILE_MAX_ATTEMPTS,
   RECONCILE_POLL_INTERVAL_MS,
   buildOfferSnapshot,
   claimPayment,
-  describeClaimProblem,
-  describeOfferProblem,
   finalizePayment,
   outcomeForSendFailure,
   readFinalizeReport,
@@ -32,6 +26,14 @@ import {
 } from "@/lib/arc/shared-bill-payment-client";
 import type { VerifiedView } from "@/lib/arc/shared-bill-access-client";
 import { formatMinorUnitsAsTry } from "@/lib/arc/minor-units";
+import { useTranslator } from "@/lib/i18n/context";
+import { formatTime, formatUsdcAmount } from "@/lib/i18n/format";
+import {
+  messageApi,
+  messageKey,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 
 /**
  * ORTAK HESAP — BORÇLUNUN ÖDEME PANELİ.
@@ -60,9 +62,13 @@ type Props = {
   chainId: number | null;
 };
 
+/*
+ * Adim, not ve hata metinleri durumda TARIF olarak tutulur (bkz.
+ * `@/lib/i18n/messages`): dil degistiginde ekrandaki cumle de degisir.
+ */
 type Phase =
   | { status: "idle" }
-  | { status: "working"; step: string }
+  | { status: "working"; step: MessageDescriptor }
   /** Teklif alındı ve doğrulandı; tahmin henüz yok. */
   | { status: "offered"; offer: VerifiedOffer }
   /** Tahmin alındı; kullanıcının AÇIK onayı bekleniyor. */
@@ -72,18 +78,18 @@ type Phase =
       status: "confirming";
       txHash: string | null;
       explorerUrl: string | null;
-      note: string;
+      note: MessageDescriptor;
     }
   /** SUNUCU makbuzu doğruladı. */
   | { status: "paid"; txHash: string | null; explorerUrl: string | null }
   /** Elle mutabakat gerekiyor; OTOMATİK TEKRAR YOK. */
   | {
       status: "blocked";
-      message: string;
+      message: MessageDescriptor;
       txHash: string | null;
       explorerUrl: string | null;
     }
-  | { status: "error"; message: string };
+  | { status: "error"; message: MessageDescriptor };
 
 const CARD = "flex flex-col gap-3 border-t border-line-soft pt-4";
 const LINK =
@@ -98,6 +104,7 @@ export function SharedBillPaymentPanel({
   account,
   chainId,
 }: Props) {
+  const { t, locale } = useTranslator();
   const [phase, setPhase] = useState<Phase>({ status: "idle" });
   /** Yoklama döngüsü bileşen sökülünce durur. */
   const alive = useRef(true);
@@ -139,10 +146,11 @@ export function SharedBillPaymentPanel({
    * -------------------------------------------------------------------------
    */
   const requestOffer = async () => {
-    commit({ status: "working", step: "Güncel kur alınıyor…" });
+    commit({ status: "working", step: messageKey("sharedPay.stepRate") });
     const fetched = await requestPaymentOffer(billId);
     if (!fetched.ok) {
-      commit({ status: "error", message: fetched.message });
+      // Sunucunun hazir metni degil, KARARLI KODU gosterilir.
+      commit({ status: "error", message: messageApi(fetched.code) });
       return;
     }
     // SUNUCUYA GÜVENİLMEZ: her ekonomik alan burada yeniden doğrulanır.
@@ -158,7 +166,7 @@ export function SharedBillPaymentPanel({
     if (!verified.ok) {
       commit({
         status: "error",
-        message: describeOfferProblem(verified.problem),
+        message: messageKey(`errors.offer.${verified.problem}`),
       });
       return;
     }
@@ -171,13 +179,13 @@ export function SharedBillPaymentPanel({
    * -------------------------------------------------------------------------
    */
   const estimate = async (offer: VerifiedOffer) => {
-    commit({ status: "working", step: "İşlem tahmini alınıyor…" });
+    commit({ status: "working", step: messageKey("sharedPay.stepEstimate") });
     const snapshot = buildOfferSnapshot(offer, labels);
     const result = await estimateArcSend(walletUuid, snapshot);
     if (!result.ok) {
       commit({
         status: "error",
-        message: describeArcSendError(result.code),
+        message: messageKey(`errors.send.${result.code}`),
       });
       return;
     }
@@ -198,7 +206,7 @@ export function SharedBillPaymentPanel({
         if (!response.ok) {
           commit({
             status: "blocked",
-            message: response.message,
+            message: messageApi(response.code),
             txHash,
             explorerUrl,
           });
@@ -208,8 +216,7 @@ export function SharedBillPaymentPanel({
         if (report === null) {
           commit({
             status: "blocked",
-            message:
-              "Sunucudan beklenmeyen bir mutabakat yanıtı geldi. İşlemi ArcScan'de kontrol et.",
+            message: messageKey("sharedPay.unexpectedReconcile"),
             txHash,
             explorerUrl,
           });
@@ -228,8 +235,7 @@ export function SharedBillPaymentPanel({
         if (report.state === "reverted") {
           commit({
             status: "blocked",
-            message:
-              "İşlem zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı; gas harcanmış olabilir. Ayrıntıyı ArcScan'de gör.",
+            message: messageKey("sharedPay.reverted"),
             txHash: report.txHash ?? txHash,
             explorerUrl: report.explorerUrl ?? explorerUrl,
           });
@@ -238,8 +244,7 @@ export function SharedBillPaymentPanel({
         if (report.state === "review_required") {
           commit({
             status: "blocked",
-            message:
-              "İşlem doğrulandı ama BEKLENEN transferi kanıtlamıyor (tutar, taraf veya token uyuşmuyor). Borç ödenmiş SAYILMADI ve otomatik tekrar KAPALIDIR. ArcScan'den kontrol edip hesabı oluşturan kişiyle görüş.",
+            message: messageKey("sharedPay.reviewRequired"),
             txHash: report.txHash ?? txHash,
             explorerUrl: report.explorerUrl ?? explorerUrl,
           });
@@ -253,8 +258,11 @@ export function SharedBillPaymentPanel({
           explorerUrl,
           note:
             report.state === "unavailable"
-              ? "Ağ yanıtı alınamadı; yeniden deneniyor…"
-              : `Zincirde onay bekleniyor (${report.confirmations ?? 0}/${report.requiredConfirmations})…`,
+              ? messageKey("sharedPay.noteNetworkRetry")
+              : messageKey("sharedPay.noteWaitingConfirmations", {
+                  seen: report.confirmations ?? 0,
+                  required: report.requiredConfirmations,
+                }),
         });
         await new Promise((resolve) =>
           setTimeout(resolve, RECONCILE_POLL_INTERVAL_MS),
@@ -264,8 +272,7 @@ export function SharedBillPaymentPanel({
       // YOKLAMA SINIRI DOLDU. Ödendi denmez; kilit korunur.
       commit({
         status: "blocked",
-        message:
-          "İşlemin sonucu ayrılan sürede doğrulanamadı. TEKRAR DENEME: aynı ödeme iki kez gidebilir. Aşağıdaki bağlantıdan ArcScan'de kontrol et; daha sonra bu sayfayı yenileyip durumu yeniden sorgulayabilirsin.",
+        message: messageKey("sharedPay.reconcileTimeout"),
         txHash,
         explorerUrl,
       });
@@ -291,16 +298,16 @@ export function SharedBillPaymentPanel({
     if (!onArc) {
       commit({
         status: "error",
-        message: "Cüzdan Arc Testnet'te değil. Gönderim başlatılmadı.",
+        message: messageKey("sharedPay.notOnArcNotSent"),
       });
       return;
     }
 
-    commit({ status: "working", step: "Ödeme rezerve ediliyor…" });
+    commit({ status: "working", step: messageKey("sharedPay.stepReserve") });
     const claimed = await claimPayment(billId, offer.offerId);
     if (!claimed.ok) {
       // Rezervasyon yapılamadı: CÜZDAN HİÇ AÇILMADI.
-      commit({ status: "error", message: claimed.message });
+      commit({ status: "error", message: messageApi(claimed.code) });
       return;
     }
 
@@ -326,13 +333,13 @@ export function SharedBillPaymentPanel({
       }
       commit({
         status: "error",
-        message: describeClaimProblem(checked.problem),
+        message: messageKey(`errors.claim.${checked.problem}`),
       });
       return;
     }
     const { attemptId, snapshot } = checked.claim;
 
-    commit({ status: "working", step: "Cüzdanda onay bekleniyor…" });
+    commit({ status: "working", step: messageKey("sharedPay.stepWalletConfirm") });
     const sent = await sendArcUsdc(walletUuid, snapshot);
 
     if (sent.ok) {
@@ -344,7 +351,7 @@ export function SharedBillPaymentPanel({
         status: "confirming",
         txHash: sent.value.txHash,
         explorerUrl: sent.value.explorerUrl,
-        note: "İşlem gönderildi; sunucu zincirden doğruluyor…",
+        note: messageKey("sharedPay.noteSubmitted"),
       });
       await report(attemptId, "submitted", sent.value.txHash);
       await reconcile(attemptId, sent.value.txHash);
@@ -363,7 +370,7 @@ export function SharedBillPaymentPanel({
         status: "confirming",
         txHash: decision.txHash,
         explorerUrl: sent.explorerUrl ?? buildArcExplorerTxUrl(decision.txHash),
-        note: "Sonuç belirsiz; sunucu zincirden doğruluyor…",
+        note: messageKey("sharedPay.noteAmbiguous"),
       });
       await reconcile(attemptId, decision.txHash);
       return;
@@ -371,7 +378,7 @@ export function SharedBillPaymentPanel({
     if (decision.outcome === "ambiguous") {
       commit({
         status: "blocked",
-        message: describeArcSendError(sent.code),
+        message: messageKey(`errors.send.${sent.code}`),
         txHash: sent.txHash ?? null,
         explorerUrl: sent.explorerUrl ?? null,
       });
@@ -387,7 +394,7 @@ export function SharedBillPaymentPanel({
      * baştan başlar. Bayat bir teklifi elde tutup tekrar denemek, süresi
      * dolmuş bir kurla gönderim riski yaratırdı.
      */
-    commit({ status: "error", message: describeArcSendError(sent.code) });
+    commit({ status: "error", message: messageKey(`errors.send.${sent.code}`) });
   };
 
   /*
@@ -398,16 +405,18 @@ export function SharedBillPaymentPanel({
 
   const testnetWarning = (
     <p className="text-xs leading-relaxed text-ink-faint">
-      Ağ: <strong>{ACTIVE_NETWORK_PROFILE.displayName}</strong>. Test
-      USDC&apos;sinin <strong>gerçek parasal değeri yoktur</strong>. Test parası
-      için{" "}
+      {t("sharedPay.networkNotePrefix", {
+        network: ACTIVE_NETWORK_PROFILE.displayName,
+      })}
+      <strong>{t("sharedPay.networkNoteStrong")}</strong>
+      {t("sharedPay.networkNoteSuffix")}
       <a
         href={ARC_TESTNET_FAUCET_URL}
         target="_blank"
         rel="noreferrer"
         className={LINK}
       >
-        Circle Faucet
+        {t("common.faucet")}
       </a>
       .
     </p>
@@ -417,7 +426,9 @@ export function SharedBillPaymentPanel({
     return (
       <div className={CARD}>
         <p className={NOTE}>
-          Ödeme için cüzdanın <strong>Arc Testnet</strong> ağında olmalı.
+          {t("sharedPay.notOnArcPrefix")}
+          <strong>{t("sharedPay.notOnArcNetwork")}</strong>
+          {t("sharedPay.notOnArcSuffix")}
         </p>
       </div>
     );
@@ -425,7 +436,7 @@ export function SharedBillPaymentPanel({
 
   return (
     <div className={CARD}>
-      <h2 className="text-sm font-semibold text-ink">Borcunu öde</h2>
+      <h2 className="text-sm font-semibold text-ink">{t("sharedPay.payTitle")}</h2>
 
       {(phase.status === "idle" || phase.status === "error") && (
         <>
@@ -434,7 +445,7 @@ export function SharedBillPaymentPanel({
               role="alert"
               className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
             >
-              {phase.message}
+              {resolveMessage(locale, phase.message)}
             </p>
           )}
           <button
@@ -442,46 +453,54 @@ export function SharedBillPaymentPanel({
             onClick={requestOffer}
             className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
           >
-            Güncel kuru al
+            {t("sharedPay.getRate")}
           </button>
           {testnetWarning}
         </>
       )}
 
       {phase.status === "working" && (
-        <p className="text-xs text-ink-soft">{phase.step}</p>
+        <p className="text-xs text-ink-soft">
+          {resolveMessage(locale, phase.step)}
+        </p>
       )}
 
       {(phase.status === "offered" || phase.status === "reviewed") && (
         <>
           <dl className="flex flex-col gap-1.5 rounded-2xl border border-line bg-muted px-3 py-2.5 text-xs text-ink-soft">
             <Row
-              label="Borç (TRY)"
+              label={t("sharedPay.rowDebtTry")}
               // Gösterim de TAM SAYIDAN türer; `Number` kullanılmaz.
-              value={formatMinorUnitsAsTry(phase.offer.tryMinor) ?? "—"}
+              value={
+                formatMinorUnitsAsTry(phase.offer.tryMinor, locale) ??
+                t("common.dash")
+              }
             />
             <Row
-              label="Kur (1 USDC)"
+              label={t("sharedPay.rowRate")}
               value={`${phase.offer.rateDisplay} TRY`}
             />
             <Row
-              label="Gönderilecek"
-              value={`${phase.offer.displayAmount} USDC`}
+              label={t("sharedPay.rowToSend")}
+              /*
+               * PROTOKOL metni (`displayAmount`) DEGISTIRILMEZ; gosterim
+               * kanonik tam sayidan, dile gore yeniden turetilir. Turkcede
+               * sonuc birebir aynidir.
+               */
+              value={`${formatUsdcAmount(BigInt(phase.offer.microUsdc), locale)} USDC`}
             />
             <Row
-              label="Kur teklifi biter"
-              value={new Date(phase.offer.expiresAt * 1000).toLocaleTimeString(
-                "tr-TR",
-              )}
+              label={t("sharedPay.rowRateExpires")}
+              value={formatTime(phase.offer.expiresAt, locale)}
             />
             {phase.status === "reviewed" && phase.fee !== null && (
-              <Row label="Tahmini ücret" value={phase.fee} />
+              <Row label={t("sharedPay.rowEstimatedFee")} value={phase.fee} />
             )}
           </dl>
 
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium text-ink-soft">
-              Alıcı cüzdan adresi (tam)
+              {t("sharedPay.recipientAddressFull")}
             </span>
             <p className="break-all rounded-2xl border border-line bg-card px-3 py-2 font-mono text-[11px] text-ink-soft">
               {phase.offer.recipient}
@@ -489,9 +508,9 @@ export function SharedBillPaymentPanel({
           </div>
 
           <p className="text-[11px] leading-relaxed text-ink-faint">
-            Kur kaynağı: <strong>CoinGecko</strong> (sunucu tarafından
-            doğrulanmış teklif). Tutar, borcun ve bu kurun tam sayı
-            aritmetiğiyle türetilmiştir.
+            {t("sharedPay.rateSourcePrefix")}
+            <strong>{t("sharedPay.rateSourceName")}</strong>
+            {t("sharedPay.rateSourceSuffix")}
           </p>
 
           {phase.status === "offered" ? (
@@ -500,21 +519,23 @@ export function SharedBillPaymentPanel({
               onClick={() => estimate(phase.offer)}
               className="self-start rounded-full border border-brand-line-soft bg-brand-soft px-4 py-2 text-sm font-semibold text-brand-ink"
             >
-              İşlemi tahmin et
+              {t("sharedPay.estimateButton")}
             </button>
           ) : (
             <>
               <p className={NOTE}>
-                Gönderen, alıcı, tutar ve ağı yukarıdan <strong>tek tek</strong>{" "}
-                kontrol et. Onaya bastığında cüzdanın açılacak ve transferi{" "}
-                <strong>yalnızca sen</strong> imzalayacaksın.
+                {t("sharedPay.reviewNoticePrefix")}
+                <strong>{t("sharedPay.reviewNoticeOneByOne")}</strong>
+                {t("sharedPay.reviewNoticeMiddle")}
+                <strong>{t("sharedPay.reviewNoticeOnlyYou")}</strong>
+                {t("sharedPay.reviewNoticeSuffix")}
               </p>
               <button
                 type="button"
                 onClick={() => pay(phase.offer)}
                 className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
               >
-                Arc Testnet ile öde
+                {t("sharedPay.payWithArc")}
               </button>
             </>
           )}
@@ -528,8 +549,10 @@ export function SharedBillPaymentPanel({
             role="status"
             className="rounded-2xl border border-info-line bg-info-surface px-3 py-2.5 text-xs leading-relaxed text-info-ink"
           >
-            <strong>Doğrulanıyor.</strong> {phase.note} Ödeme, sunucu zincirden
-            makbuzu doğrulayana kadar <strong>tamamlanmış sayılmaz</strong>.
+            <strong>{t("sharedPay.confirmingStrong")}</strong>{" "}
+            {resolveMessage(locale, phase.note)}
+            {t("sharedPay.confirmingMiddle")}
+            <strong>{t("sharedPay.confirmingNotDone")}</strong>.
           </p>
           <ExplorerLink explorerUrl={phase.explorerUrl} txHash={phase.txHash} />
         </>
@@ -541,8 +564,8 @@ export function SharedBillPaymentPanel({
             role="status"
             className="rounded-2xl border border-ok-line bg-ok-surface px-3 py-2.5 text-xs leading-relaxed text-ok-ink"
           >
-            <strong>Ödendi.</strong> Sunucu işlemi Arc Testnet üzerinde
-            doğruladı: gönderen, alıcı ve tutar birebir eşleşti.
+            <strong>{t("sharedPay.paidStrong")}</strong>
+            {t("sharedPay.paidRest")}
           </p>
           <ExplorerLink explorerUrl={phase.explorerUrl} txHash={phase.txHash} />
           {testnetWarning}
@@ -555,7 +578,7 @@ export function SharedBillPaymentPanel({
             role="alert"
             className="rounded-2xl border border-warn-line-strong bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
           >
-            {phase.message}
+            {resolveMessage(locale, phase.message)}
           </p>
           <ExplorerLink explorerUrl={phase.explorerUrl} txHash={phase.txHash} />
         </>
@@ -581,18 +604,19 @@ function ExplorerLink({
   explorerUrl: string | null;
   txHash: string | null;
 }) {
+  const { t } = useTranslator();
   if (txHash === null) {
     return null;
   }
   const url = explorerUrl ?? buildArcExplorerTxUrl(txHash);
   return (
     <p className="break-all text-[11px] text-ink-faint">
-      İşlem:{" "}
+      {t("common.transaction")}{" "}
       {url === null ? (
         <span className="font-mono">{txHash}</span>
       ) : (
         <a href={url} target="_blank" rel="noreferrer" className={LINK}>
-          ArcScan&apos;de gör
+          {t("common.viewOnArcScan")}
         </a>
       )}
     </p>

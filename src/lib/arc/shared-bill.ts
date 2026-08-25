@@ -15,6 +15,8 @@ import {
   MAX_LABEL_LENGTH,
 } from "./payment-request";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * PAYLAŞILAN GRUP HESABI (shared bill) sözleşmesi — EIP-712.
@@ -161,39 +163,18 @@ export type SharedBillProblem =
   | "lifetimeTooLong"
   | "invalidSignatureFormat";
 
-const PROBLEM_MESSAGES: Record<SharedBillProblem, string> = {
-  notAnObject: "Paylaşılan hesap okunamadı.",
-  unexpectedField: "Paylaşılan hesapta beklenmeyen alan var.",
-  missingField: "Paylaşılan hesapta eksik alan var.",
-  unsupportedSchemaVersion: "Bu paylaşılan hesap sürümü desteklenmiyor.",
-  invalidBillId: "Paylaşılan hesap kimliği geçersiz.",
-  invalidChainId: "Paylaşılan hesap Arc Testnet için oluşturulmamış.",
-  invalidRecipient: "Alıcı adresi geçersiz.",
-  invalidLabel: "İsim alanı geçersiz.",
-  invalidDebtor: "Borçlu adresi geçersiz.",
-  selfTransfer: "Alıcı kendi kendine borçlu olamaz.",
-  duplicateDebtor: "Aynı borçlu adresi birden fazla kez kullanılamaz.",
-  duplicateDebtKey: "Aynı borç kimliği birden fazla kez kullanılamaz.",
-  invalidDebtKey: "Borç kimliği geçersiz.",
-  invalidAmount: "Borç tutarı geçersiz.",
-  noDebts: "Paylaşılan hesapta hiç borç yok.",
-  tooManyDebts: "Paylaşılan hesapta izin verilenden fazla borç var.",
-  debtCountMismatch: "Borç sayısı manifest ile uyuşmuyor.",
-  commitmentMismatch:
-    "Borç listesi, imzalanan taahhütle uyuşmuyor. Bu hesaba güvenme.",
-  invalidProof:
-    "Borcun imzalanan köke ait olduğu kanıtlanamadı. Bu hesaba güvenme.",
-  legacyAggregateSchema:
-    "Bu paylaşılan hesap, artık desteklenmeyen eski bir taahhüt biçimiyle oluşturulmuş. Hesabı oluşturan kişiden yeni bir bağlantı iste.",
-  invalidTimestamps: "Paylaşılan hesabın zaman bilgisi geçersiz.",
-  expired: "Bu paylaşılan hesabın süresi dolmuş.",
-  notYetValid: "Bu paylaşılan hesap henüz geçerli değil.",
-  lifetimeTooLong: "Paylaşılan hesabın geçerlilik süresi izin verilenden uzun.",
-  invalidSignatureFormat: "Paylaşılan hesap imzası geçersiz biçimde.",
-};
-
-export function describeSharedBillProblem(problem: SharedBillProblem): string {
-  return PROBLEM_MESSAGES[problem];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeSharedBillProblem(
+  problem: SharedBillProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.sharedBill.${problem}`);
 }
 
 const DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;

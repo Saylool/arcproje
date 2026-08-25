@@ -1,6 +1,7 @@
 import { scanForDuplicateKeys } from "./json-duplicate-keys";
+import { translate, type TranslationKey } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import {
-  describePaymentRequestProblem,
   isValidSignatureFormat,
   validatePaymentRequestPayload,
   type PaymentRequestProblem,
@@ -32,22 +33,39 @@ export type CodecProblem =
   | "duplicateKey"
   | "invalidEnvelope";
 
-const CODEC_MESSAGES: Record<
-  Exclude<CodecProblem, PaymentRequestProblem>,
-  string
-> = {
-  tooLong: "Ödeme talebi bağlantısı beklenenden uzun.",
-  malformedEncoding: "Ödeme talebi bağlantısı bozuk.",
-  malformedJson: "Ödeme talebi içeriği okunamadı.",
-  duplicateKey: "Ödeme talebinde yinelenen alan var.",
-  invalidEnvelope: "Ödeme talebi yapısı beklenen biçimde değil.",
-};
+/** Yalnızca çözücüye ait sorunlar; gerisi talep doğrulayıcısına aittir. */
+const CODEC_ONLY: readonly Exclude<CodecProblem, PaymentRequestProblem>[] = [
+  "tooLong",
+  "malformedEncoding",
+  "malformedJson",
+  "duplicateKey",
+  "invalidEnvelope",
+];
 
-export function describeCodecProblem(problem: CodecProblem): string {
-  if (problem in CODEC_MESSAGES) {
-    return CODEC_MESSAGES[problem as keyof typeof CODEC_MESSAGES];
-  }
-  return describePaymentRequestProblem(problem as PaymentRequestProblem);
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Çözücüye ait olmayan bir sorun, talep doğrulayıcısının sözlüğüne devredilir;
+ * böylece aynı sorun her iki yolda da AYNI cümleyle anlatılır.
+ */
+export function describeCodecProblem(
+  problem: CodecProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, codecProblemKey(problem));
+}
+
+/**
+ * Sorunun SÖZLÜK YOLU.
+ *
+ * Arayüz metni durumda saklamak yerine bu yolu saklar; cümle her render'da
+ * etkin dilde kurulur.
+ */
+export function codecProblemKey(problem: CodecProblem): TranslationKey {
+  const codecOnly = CODEC_ONLY.find((candidate) => candidate === problem);
+  return codecOnly !== undefined
+    ? (`errors.codec.${codecOnly}` as TranslationKey)
+    : (`errors.paymentRequest.${problem as PaymentRequestProblem}` as TranslationKey);
 }
 
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/;

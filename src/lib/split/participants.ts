@@ -1,10 +1,23 @@
 import { ReceiptSchema, type Receipt } from "../receipt/schema";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+import { translatePlural } from "../i18n/dictionary";
 
 /** Devam edebilmek için gereken en az kişi sayısı. */
 export const MIN_PARTICIPANTS = 2;
 
 /** Akış her zaman kullanıcının kendisiyle başlar. */
 export const DEFAULT_PARTICIPANT_NAME = "Sen";
+
+/**
+ * İMZALANAN etiketlerde kullanılan yedek ad — DİLDEN BAĞIMSIZDIR.
+ *
+ * Bir katılımcı kimliği bulunamazsa etiket yine de bir metin olmalıdır. Bu
+ * metin imzalanan manifeste girdiği için ARAYÜZ DİLİNE GÖRE DEĞİŞEMEZ:
+ * kriptografik yük hiçbir koşulda dil tercihine bağlı olmamalıdır. Ekranda
+ * gösterilen yedek ad ise çevrilir (`common.unknownParticipant`).
+ */
+export const UNKNOWN_PARTICIPANT_LABEL = "Bilinmeyen kişi";
 
 export type Participant = {
   id: string;
@@ -36,17 +49,31 @@ export function createParticipantId(): string {
   return `p_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function createInitialAssignmentState(): AssignmentState {
+/**
+ * `name`: ilk kişinin adı. Verilmezse Türkçe varsayılan kullanılır.
+ *
+ * Ad bir KEZ, durum kurulurken seçilir ve o andan sonra KULLANICI VERİSİDİR:
+ * dil değiştirmek onu yeniden adlandırmaz. Aksi hâlde dil değiştirmek
+ * kullanıcının yazdığı bir ismi silebilir ve oluşturulmuş bir hesabın
+ * etiketleriyle çelişebilirdi.
+ */
+export function createInitialAssignmentState(
+  name: string = DEFAULT_PARTICIPANT_NAME,
+): AssignmentState {
   const you: Participant = {
     id: createParticipantId(),
-    name: DEFAULT_PARTICIPANT_NAME,
+    name,
   };
   return { participants: [you], payerId: you.id, assignments: [] };
 }
 
 /**
- * Karşılaştırma anahtarı. Uygulama Türkçe olduğu için Türkçe küçük harf
- * kuralları kullanılır ("İ" -> "i", "I" -> "ı").
+ * Karşılaştırma anahtarı.
+ *
+ * Küçük harfe indirgeme SABİT biçimde Türkçe kurallarıyla yapılır
+ * ("İ" -> "i", "I" -> "ı") ve ARAYÜZ DİLİNE GÖRE DEĞİŞMEZ. Değişseydi aynı
+ * kişi listesi bir dilde geçerli, ötekinde yinelenmiş sayılabilirdi; yinelenen
+ * ad denetimi belirlenimci kalmalıdır.
  */
 function toNameKey(name: string): string {
   return name.trim().toLocaleLowerCase("tr");
@@ -54,15 +81,18 @@ function toNameKey(name: string): string {
 
 export type ParticipantNameError = "empty" | "duplicate";
 
-const NAME_ERROR_MESSAGES: Record<ParticipantNameError, string> = {
-  empty: "İsim boş olamaz.",
-  duplicate: "Bu isim zaten listede var.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeParticipantNameError(
   error: ParticipantNameError,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return NAME_ERROR_MESSAGES[error];
+  return translate(locale, `errors.participantName.${error}`);
 }
 
 export function validateParticipantName(
@@ -357,8 +387,7 @@ export function checkReceiptReadyForSplit(
     return {
       ok: false,
       reason: "invalidReceipt",
-      message:
-        "Fiş verisi geçerli değil. Tutarları kontrol edip tekrar dene.",
+      message: translate(DEFAULT_LOCALE, "participants.receiptInvalid"),
     };
   }
 
@@ -366,8 +395,7 @@ export function checkReceiptReadyForSplit(
     return {
       ok: false,
       reason: "noItems",
-      message:
-        "Fişte hiç ürün yok. Kişilere dağıtmadan önce en az bir ürün ekle.",
+      message: translate(DEFAULT_LOCALE, "participants.receiptNoItems"),
     };
   }
 
@@ -375,8 +403,7 @@ export function checkReceiptReadyForSplit(
     return {
       ok: false,
       reason: "emptyItemName",
-      message:
-        "Bazı ürünlerin adı boş. Devam etmeden önce her ürüne bir ad ver.",
+      message: translate(DEFAULT_LOCALE, "participants.receiptEmptyNames"),
     };
   }
 
@@ -397,7 +424,11 @@ export function checkAssignmentsComplete(
     return {
       ok: false,
       reason: "notEnoughParticipants",
-      message: `Devam etmek için en az ${MIN_PARTICIPANTS} kişi gerekiyor.`,
+      message: translatePlural(
+        DEFAULT_LOCALE,
+        "needParticipants",
+        MIN_PARTICIPANTS,
+      ),
     };
   }
 
@@ -405,7 +436,7 @@ export function checkAssignmentsComplete(
     return {
       ok: false,
       reason: "invalidParticipantName",
-      message: "Kişi isimleri boş olamaz ve birbirinin aynısı olamaz.",
+      message: translate(DEFAULT_LOCALE, "participants.namesInvalid"),
     };
   }
 
@@ -414,7 +445,11 @@ export function checkAssignmentsComplete(
     return {
       ok: false,
       reason: "unassignedItems",
-      message: `${unassignedItemIds.length} ürün henüz kimseye atanmadı. Her ürünü en az bir kişiye ata.`,
+      message: translatePlural(
+        DEFAULT_LOCALE,
+        "itemsUnassigned",
+        unassignedItemIds.length,
+      ),
     };
   }
 

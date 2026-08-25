@@ -5,6 +5,8 @@ import {
 } from "./conversion";
 import { toCanonicalLabel, validateCanonicalLabel } from "./labels";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import {
   QUOTE_BASE_CURRENCY,
   QUOTE_CURRENCY,
@@ -152,39 +154,18 @@ export type PaymentRequestProblem =
   | "lifetimeTooLong"
   | "invalidSignatureFormat";
 
-const PROBLEM_MESSAGES: Record<PaymentRequestProblem, string> = {
-  notAnObject: "Ödeme talebi okunamadı.",
-  unexpectedField: "Ödeme talebinde beklenmeyen alan var.",
-  missingField: "Ödeme talebinde eksik alan var.",
-  unsupportedSchemaVersion: "Bu ödeme talebi sürümü desteklenmiyor.",
-  outdatedSchemaVersion:
-    "Bu bağlantı, kurun elle girildiği eski bir sürümle oluşturulmuş. Artık kur sunucu tarafından doğrulanıyor; talebi oluşturan kişiden yeni bir bağlantı iste.",
-  invalidQuote:
-    "Talepteki kur teklifi geçersiz. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
-  requestOutlivesQuote:
-    "Talebin geçerlilik süresi dayandığı kur teklifinden uzun. Bu bağlantıya güvenme.",
-  invalidRequestId: "Talep kimliği geçersiz.",
-  invalidChainId: "Talep Arc Testnet için oluşturulmamış.",
-  invalidRecipient: "Alıcı adresi geçersiz.",
-  invalidDebtor: "Borçlu adresi geçersiz.",
-  selfTransfer: "Gönderen ve alıcı aynı adres olamaz.",
-  invalidDebtKey: "Borç kimliği geçersiz.",
-  invalidAmount: "Talepteki tutar geçersiz.",
-  inconsistentAmount:
-    "Talepteki USDC tutarı, borç ve kurla uyuşmuyor. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
-  invalidRate: "Talepteki kur geçersiz.",
-  invalidLabel: "Talepteki isim alanı geçersiz.",
-  invalidTimestamps: "Talebin zaman bilgisi geçersiz.",
-  expired: "Bu ödeme talebinin süresi dolmuş.",
-  notYetValid: "Bu ödeme talebi henüz geçerli değil.",
-  lifetimeTooLong: "Talebin geçerlilik süresi izin verilenden uzun.",
-  invalidSignatureFormat: "Talep imzası geçersiz biçimde.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describePaymentRequestProblem(
   problem: PaymentRequestProblem,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return PROBLEM_MESSAGES[problem];
+  return translate(locale, `errors.paymentRequest.${problem}`);
 }
 
 const DECIMAL_STRING = /^(0|[1-9][0-9]*)$/;

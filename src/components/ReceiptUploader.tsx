@@ -10,6 +10,9 @@ import {
   type DragEvent,
 } from "react";
 
+import { useTranslator } from "@/lib/i18n/context";
+import { formatFileSize } from "@/lib/i18n/format";
+
 const ACCEPTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
 const ACCEPT_ATTRIBUTE = ACCEPTED_MIME_TYPES.join(",");
@@ -27,23 +30,6 @@ type ReceiptUploaderProps = {
   disabled?: boolean;
 };
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  const kilobytes = bytes / 1024;
-  if (kilobytes < 1024) {
-    return `${kilobytes.toLocaleString("tr-TR", {
-      maximumFractionDigits: 0,
-    })} KB`;
-  }
-
-  return `${(kilobytes / 1024).toLocaleString("tr-TR", {
-    maximumFractionDigits: 1,
-  })} MB`;
-}
-
 function isAcceptedImage(file: File): boolean {
   if (file.type) {
     return ACCEPTED_MIME_TYPES.includes(file.type);
@@ -56,19 +42,20 @@ function isAcceptedImage(file: File): boolean {
   );
 }
 
-function getValidationError(file: File): string | null {
+/** Dogrulama SONUCU koddur; gosterilecek cumle bilesende secilir. */
+type ValidationProblem = "unsupportedType" | "emptyFile" | "tooLarge";
+
+function getValidationProblem(file: File): ValidationProblem | null {
   if (!isAcceptedImage(file)) {
-    return "Bu dosya türü desteklenmiyor. Lütfen JPG, PNG veya WEBP formatında bir fiş görseli seç.";
+    return "unsupportedType";
   }
 
   if (file.size === 0) {
-    return "Dosya boş görünüyor. Lütfen fişin okunabilir bir fotoğrafını seç.";
+    return "emptyFile";
   }
 
   if (file.size > MAX_FILE_SIZE_BYTES) {
-    return `Görsel çok büyük (${formatFileSize(
-      file.size,
-    )}). En fazla 10 MB yükleyebilirsin.`;
+    return "tooLarge";
   }
 
   return null;
@@ -78,6 +65,7 @@ export function ReceiptUploader({
   onFileChange,
   disabled = false,
 }: ReceiptUploaderProps) {
+  const { t, locale } = useTranslator();
   const inputId = useId();
   const hintId = useId();
   const errorId = useId();
@@ -105,10 +93,12 @@ export function ReceiptUploader({
         return;
       }
 
-      const validationError = getValidationError(file);
-      if (validationError) {
+      const problem = getValidationProblem(file);
+      if (problem !== null) {
         // Geçerli bir seçim varsa hatalı dosya yüzünden onu kaybetme.
-        setError(validationError);
+        setError(
+          t(`upload.${problem}`, { size: formatFileSize(file.size, locale) }),
+        );
         return;
       }
 
@@ -120,7 +110,7 @@ export function ReceiptUploader({
       setReceipt({ file, previewUrl });
       onFileChange(file);
     },
-    [onFileChange, revokePreviewUrl],
+    [onFileChange, revokePreviewUrl, t, locale],
   );
 
   const handleInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -177,7 +167,7 @@ export function ReceiptUploader({
   }
 
   return (
-    <section aria-label="Fiş yükleme" className="flex flex-col gap-3">
+    <section aria-label={t("upload.sectionLabel")} className="flex flex-col gap-3">
       <div
         onDragEnter={handleDragOver}
         onDragOver={handleDragOver}
@@ -193,7 +183,7 @@ export function ReceiptUploader({
           type="file"
           accept={ACCEPT_ATTRIBUTE}
           className="peer sr-only"
-          aria-label="Fiş görseli seç"
+          aria-label={t("upload.inputLabel")}
           aria-describedby={describedByIds.join(" ")}
           tabIndex={receipt ? -1 : 0}
           disabled={disabled}
@@ -207,7 +197,7 @@ export function ReceiptUploader({
                 {/* eslint-disable-next-line @next/next/no-img-element -- yerel object URL önizlemesi; next/image bir blob için değer katmıyor */}
                 <img
                   src={receipt.previewUrl}
-                  alt={`Seçilen fiş görseli: ${receipt.file.name}`}
+                  alt={t("upload.previewAlt", { name: receipt.file.name })}
                   className="h-full w-full object-cover"
                 />
               </div>
@@ -221,7 +211,7 @@ export function ReceiptUploader({
                     {receipt.file.name}
                   </p>
                   <p className="mt-0.5 text-xs text-ink-faint">
-                    {formatFileSize(receipt.file.size)}
+                    {formatFileSize(receipt.file.size, locale)}
                   </p>
                 </div>
 
@@ -232,7 +222,7 @@ export function ReceiptUploader({
                     disabled={disabled}
                     className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
-                    Değiştir
+                    {t("common.change")}
                   </button>
                   <button
                     type="button"
@@ -240,7 +230,7 @@ export function ReceiptUploader({
                     disabled={disabled}
                     className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   >
-                    Kaldır
+                    {t("common.remove")}
                   </button>
                 </div>
               </div>
@@ -264,15 +254,15 @@ export function ReceiptUploader({
 
             <span className="flex flex-col gap-1">
               <span className="text-base font-semibold text-ink">
-                Fişini buraya sürükle
+                {t("upload.dropHere")}
               </span>
               <span className="text-sm text-ink-faint">
-                ya da cihazından bir görsel seç
+                {t("upload.orPick")}
               </span>
             </span>
 
             <span className="inline-flex items-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong">
-              Fiş görseli seç
+              {t("upload.pickButton")}
             </span>
           </label>
         )}
@@ -289,7 +279,7 @@ export function ReceiptUploader({
       )}
 
       <p id={hintId} className="px-1 text-xs text-ink-faint">
-        JPG, PNG veya WEBP · en fazla 10 MB
+        {t("upload.hint")}
       </p>
 
       {/* Durum değişikliklerini ekran okuyuculara duyuran kalıcı canlı bölge. */}
@@ -297,7 +287,7 @@ export function ReceiptUploader({
         {error
           ? error
           : receipt
-            ? `${receipt.file.name} seçildi. Fiş yüklemeye hazır.`
+            ? t("upload.selectedLive", { name: receipt.file.name })
             : ""}
       </p>
     </section>

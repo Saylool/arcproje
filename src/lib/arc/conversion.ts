@@ -1,3 +1,5 @@
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 /**
  * TRY kuruş -> USDC mikro birim dönüşümü.
  *
@@ -54,19 +56,21 @@ export type RateParseResult =
   | { ok: true; rate: ParsedRate }
   | { ok: false; reason: RateParseFailure };
 
-const RATE_FAILURE_MESSAGES: Record<RateParseFailure, string> = {
-  empty: "Kur girilmedi.",
-  invalid: "Geçerli bir kur gir (örn. 1 USDC = 34,25 TRY).",
-  ambiguous:
-    "Bu yazım binlik ayracı mı ondalık mı belli değil. Ondalık kısmı 1, 2 veya 4-6 basamak olacak şekilde yaz.",
-  tooManyDecimals: `Kurda en fazla ${MAX_RATE_DECIMALS} ondalık basamak kullanabilirsin.`,
-  tooLong: `Kur en fazla ${MAX_RATE_INPUT_LENGTH} karakter ve ${MAX_RATE_INTEGER_DIGITS} tam basamak olabilir.`,
-  tooLarge: "Girilen kur mantıklı bir aralığın dışında.",
-  notPositive: "Kur sıfırdan büyük olmalı.",
-};
-
-export function describeRateFailure(reason: RateParseFailure): string {
-  return RATE_FAILURE_MESSAGES[reason];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Sınır değerleri metne SÖZLÜKTE değil BURADA konur: tek doğru kaynak yine
+ * bu modüldeki sabitlerdir, sözlük yalnızca cümleyi taşır.
+ */
+export function describeRateFailure(
+  reason: RateParseFailure,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.conversion.${reason}`, {
+    max: MAX_RATE_DECIMALS,
+    maxLength: MAX_RATE_INPUT_LENGTH,
+    maxDigits: MAX_RATE_INTEGER_DIGITS,
+  });
 }
 
 /**
@@ -276,7 +280,14 @@ export function formatMicroUsdcAmount(microUsdc: bigint): string {
   return `${whole.toString()}.${fractionText}`;
 }
 
-/** Gösterim için: mikro USDC -> "12,345678" biçimi (Türkçe ondalık ayracı). */
+/**
+ * PROTOKOL biçimi: mikro USDC -> "12,345678" (sabit, Türkçe ondalık ayracı).
+ *
+ * DİLE DUYARLI YAPILMAMALIDIR. Sunucunun ürettiği `displayAmount` istemcide
+ * bu fonksiyonla YENİDEN üretilip birebir karşılaştırılır; dile göre değişse
+ * doğrulama düşerdi. Ekranda gösterilecek, dile duyarlı biçim için
+ * `@/lib/i18n/format` içindeki `formatUsdcAmount` kullanılır.
+ */
 export function formatMicroUsdcForDisplay(microUsdc: bigint): string {
   return formatMicroUsdcAmount(microUsdc).replace(".", ",");
 }

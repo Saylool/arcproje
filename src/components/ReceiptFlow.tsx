@@ -11,6 +11,15 @@ import { ParticipantAssignment } from "@/components/ParticipantAssignment";
 import { ProgressSteps, type FlowStepId } from "@/components/ProgressSteps";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
+import { readApiErrorCode } from "@/lib/i18n/api-errors";
+import { useTranslator } from "@/lib/i18n/context";
+import type { TranslationKey } from "@/lib/i18n/dictionary";
+import {
+  messageApi,
+  messageKey,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
 import {
   calculateDebts,
@@ -22,6 +31,7 @@ import {
   createInitialAssignmentState,
   normalizeAssignments,
   type AssignmentState,
+  type ReceiptSplitBlockReason,
 } from "@/lib/split/participants";
 
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
@@ -29,39 +39,27 @@ type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
 /** Fiş düzenleme, kişi atama, atama özeti ve pay/borç ekranı. */
 type FlowScreen = "receipt" | "participants" | "summary" | "debts" | "payment";
 
-const SCREEN_HEADINGS: Record<FlowScreen, { title: string; description: string }> = {
-  receipt: {
-    title: "Fişini yükle",
-    description:
-      "Fişin fotoğrafını ekle. Sonraki adımlarda ürünleri kişilere dağıtıp herkesin payını hesaplayacağız.",
-  },
+/** Ekran -> baslik/aciklama SOZLUK ANAHTARLARI. Metin dile gore secilir. */
+const SCREEN_HEADINGS: Record<
+  FlowScreen,
+  { title: TranslationKey; description: TranslationKey }
+> = {
+  receipt: { title: "flow.receiptTitle", description: "flow.receiptDescription" },
   participants: {
-    title: "Ürünleri kişilere dağıt",
-    description:
-      "Kişileri ekle ve her ürünü kimin aldığını işaretle. Bir ürünü birden fazla kişiye atayabilirsin.",
+    title: "flow.participantsTitle",
+    description: "flow.participantsDescription",
   },
-  summary: {
-    title: "Ürünleri kişilere dağıt",
-    description:
-      "Atamaların hazır. Kontrol edip herkesin payını hesaplayabilirsin.",
-  },
-  debts: {
-    title: "Payları kontrol et",
-    description:
-      "Herkesin payı ve fişi ödeyene olan borcu aşağıda. Tutarlar kuruşuna kadar dağıtıldı.",
-  },
-  payment: {
-    title: "Ödeme talebi oluştur",
-    description:
-      "Fişi sen ödedin. Her borçlu için ayrı bir ödeme talebi imzala; borçlu kendi cüzdanında onaylasın.",
-  },
+  summary: { title: "flow.summaryTitle", description: "flow.summaryDescription" },
+  debts: { title: "flow.debtsTitle", description: "flow.debtsDescription" },
+  payment: { title: "flow.paymentTitle", description: "flow.paymentDescription" },
 };
 
-const GENERIC_ERROR_MESSAGE = "Fiş analiz edilemedi. Lütfen tekrar dene.";
-const TIMEOUT_ERROR_MESSAGE =
-  "Analiz zaman aşımına uğradı. Lütfen tekrar dene.";
-const NETWORK_ERROR_MESSAGE =
-  "Sunucuya ulaşılamadı. Bağlantını kontrol edip tekrar dene.";
+/** Fis ekranina gecisi engelleyen neden -> sozluk anahtari. */
+const SPLIT_BLOCK_KEYS: Record<ReceiptSplitBlockReason, TranslationKey> = {
+  invalidReceipt: "participants.receiptInvalid",
+  noItems: "participants.receiptNoItems",
+  emptyItemName: "participants.receiptEmptyNames",
+};
 
 /**
  * Sunucu tarafındaki 30 saniyelik OpenAI timeout'undan birkaç saniye uzun.
@@ -69,21 +67,6 @@ const NETWORK_ERROR_MESSAGE =
  * istek tamamen takılırsa devreye bu sınır girer.
  */
 const CLIENT_TIMEOUT_MS = 35_000;
-
-/** Sunucunun { error: { code, message } } sözleşmesinden mesajı güvenle okur. */
-function readErrorMessage(payload: unknown): string {
-  if (typeof payload !== "object" || payload === null || !("error" in payload)) {
-    return GENERIC_ERROR_MESSAGE;
-  }
-  const { error } = payload as { error: unknown };
-  if (typeof error !== "object" || error === null || !("message" in error)) {
-    return GENERIC_ERROR_MESSAGE;
-  }
-  const { message } = error as { message: unknown };
-  return typeof message === "string" && message.trim() !== ""
-    ? message
-    : GENERIC_ERROR_MESSAGE;
-}
 
 function readReceiptField(payload: unknown): unknown {
   if (typeof payload === "object" && payload !== null && "receipt" in payload) {
@@ -93,20 +76,32 @@ function readReceiptField(payload: unknown): unknown {
 }
 
 export function ReceiptFlow() {
+  const { t, locale } = useTranslator();
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<AnalysisStatus>("idle");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  /*
+   * Hata durumda METIN degil METNIN TARIFI tutulur; boylece dil degisince
+   * gosterilen cumle de ANINDA yeni dile gecer.
+   */
+  const [errorMessage, setErrorMessage] =
+    useState<MessageDescriptor | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   // Yeni bir analiz geldiğinde düzenleyicinin taslak input'ları sıfırlansın.
   const [analysisKey, setAnalysisKey] = useState(0);
   const isAnalyzingRef = useRef(false);
 
   const [screen, setScreen] = useState<FlowScreen>("receipt");
-  // Üretilen ID'ler ilk render'da DOM'a yazılmaz; kişi ekranı başlangıçta kapalı.
-  const [assignment, setAssignment] = useState<AssignmentState>(
-    createInitialAssignmentState,
+  /*
+   * Ilk kisinin adi KURULUS ANINDAKI dile gore secilir ve o andan sonra
+   * KULLANICI VERISIDIR: dil degistirmek onu yeniden adlandirmaz.
+   * Uretilen ID'ler ilk render'da DOM'a yazilmaz; kisi ekrani baslangicta
+   * kapalidir.
+   */
+  const [assignment, setAssignment] = useState<AssignmentState>(() =>
+    createInitialAssignmentState(t("participants.defaultName")),
   );
-  const [splitError, setSplitError] = useState<string | null>(null);
+  const [splitError, setSplitError] =
+    useState<ReceiptSplitBlockReason | null>(null);
   const [debtResult, setDebtResult] = useState<DebtCalculationSuccess | null>(
     null,
   );
@@ -120,17 +115,20 @@ export function ReceiptFlow() {
     setDebtError(null);
   }, []);
 
-  const handleFileChange = useCallback((next: File | null) => {
-    setFile(next);
-    setReceipt(null);
-    setErrorMessage(null);
-    setStatus("idle");
-    setScreen("receipt");
-    setSplitError(null);
-    setAssignment(createInitialAssignmentState());
-    setDebtResult(null);
-    setDebtError(null);
-  }, []);
+  const handleFileChange = useCallback(
+    (next: File | null) => {
+      setFile(next);
+      setReceipt(null);
+      setErrorMessage(null);
+      setStatus("idle");
+      setScreen("receipt");
+      setSplitError(null);
+      setAssignment(createInitialAssignmentState(t("participants.defaultName")));
+      setDebtResult(null);
+      setDebtError(null);
+    },
+    [t],
+  );
 
   /** Fiş düzenlenince atamaları mevcut ürün ID'lerine göre güvenli tut. */
   const handleReceiptChange = useCallback(
@@ -199,14 +197,19 @@ export function ReceiptFlow() {
       const payload: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
-        setErrorMessage(readErrorMessage(payload));
+        /*
+         * Sunucunun hazir metni GOSTERILMEZ: yalnizca KARARLI KOD okunur ve
+         * cumle sozlukten, etkin dilde secilir. Taninmayan kod guvenli genel
+         * karsiliga duser.
+         */
+        setErrorMessage(messageApi(readApiErrorCode(payload) ?? undefined));
         setStatus("error");
         return;
       }
 
       const parsed = ReceiptSchema.safeParse(readReceiptField(payload));
       if (!parsed.success) {
-        setErrorMessage(GENERIC_ERROR_MESSAGE);
+        setErrorMessage(messageKey("errors.analyzeFailed"));
         setStatus("error");
         return;
       }
@@ -217,11 +220,13 @@ export function ReceiptFlow() {
       // Yeni fiş, yeni atama.
       setScreen("receipt");
       setSplitError(null);
-      setAssignment(createInitialAssignmentState());
+      setAssignment(createInitialAssignmentState(t("participants.defaultName")));
       setDebtResult(null);
       setDebtError(null);
     } catch {
-      setErrorMessage(didTimeout ? TIMEOUT_ERROR_MESSAGE : NETWORK_ERROR_MESSAGE);
+      setErrorMessage(
+        messageKey(didTimeout ? "errors.analyzeTimeout" : "errors.network"),
+      );
       setStatus("error");
     } finally {
       // Timer her başarı ve hata yolunda temizlenir.
@@ -236,7 +241,7 @@ export function ReceiptFlow() {
     }
     const readiness = checkReceiptReadyForSplit(receipt);
     if (!readiness.ok) {
-      setSplitError(readiness.message);
+      setSplitError(readiness.reason);
       return;
     }
     setSplitError(null);
@@ -245,12 +250,12 @@ export function ReceiptFlow() {
 
   const isAnalyzing = status === "analyzing";
   const ctaLabel = isAnalyzing
-    ? "Analiz ediliyor…"
+    ? t("flow.analyzing")
     : status === "error"
-      ? "Tekrar dene"
+      ? t("flow.retry")
       : status === "ready"
-        ? "Yeniden analiz et"
-        : "Fişi analiz et";
+        ? t("flow.reanalyze")
+        : t("flow.analyze");
 
   const currentStepId: FlowStepId =
     screen === "receipt"
@@ -265,10 +270,10 @@ export function ReceiptFlow() {
     <div className="flex flex-col gap-6">
       <header className="flex flex-col gap-2">
         <h1 className="text-2xl font-semibold tracking-tight text-ink sm:text-3xl">
-          {heading.title}
+          {t(heading.title)}
         </h1>
         <p className="text-sm leading-relaxed text-ink-faint sm:text-base">
-          {heading.description}
+          {t(heading.description)}
         </p>
       </header>
 
@@ -293,20 +298,19 @@ export function ReceiptFlow() {
                   {ctaLabel}
                 </button>
                 <p className="text-xs leading-relaxed text-ink-faint">
-                  Fiş görselin analiz için OpenAI&apos;ye gönderilir. Görsel
-                  sunucuda saklanmaz.
+                  {t("flow.uploadNotice")}
                 </p>
               </div>
 
               {isAnalyzing && (
                 <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink sm:text-sm">
-                  Fişteki ürünler okunuyor, bu birkaç saniye sürebilir…
+                  {t("flow.reading")}
                 </p>
               )}
 
               {status === "error" && errorMessage !== null && (
                 <p className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink sm:text-sm">
-                  {errorMessage}
+                  {resolveMessage(locale, errorMessage)}
                 </p>
               )}
             </div>
@@ -326,18 +330,18 @@ export function ReceiptFlow() {
                   onClick={goToParticipants}
                   className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 >
-                  Kişilere dağıt
+                  {t("flow.toParticipants")}
                 </button>
                 {splitError === null ? (
                   <p className="text-xs leading-relaxed text-ink-faint">
-                    Ürünleri kişilere dağıtmadan önce tutarları kontrol et.
+                    {t("flow.checkBeforeSplit")}
                   </p>
                 ) : (
                   <p
                     role="alert"
                     className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
                   >
-                    {splitError}
+                    {t(SPLIT_BLOCK_KEYS[splitError])}
                   </p>
                 )}
               </div>
@@ -404,20 +408,20 @@ export function ReceiptFlow() {
 
       <p aria-live="polite" className="sr-only">
         {isAnalyzing
-          ? "Fiş analiz ediliyor."
+          ? t("flow.liveAnalyzing")
           : status === "error" && errorMessage !== null
-            ? errorMessage
+            ? resolveMessage(locale, errorMessage)
             : screen === "payment"
-              ? "Ödeme talebi adımındasın."
+              ? t("flow.livePayment")
               : screen === "debts"
-                ? "Paylar hesaplandı."
-              : screen === "summary"
-                ? "Atamalar hazır. Özet gösteriliyor."
-                : screen === "participants"
-                  ? "Kişi atama adımındasın."
-                  : status === "ready"
-                    ? "Fiş analizi tamamlandı. Ürünleri düzenleyebilirsin."
-                    : ""}
+                ? t("flow.liveDebts")
+                : screen === "summary"
+                  ? t("flow.liveSummary")
+                  : screen === "participants"
+                    ? t("flow.liveParticipants")
+                    : status === "ready"
+                      ? t("flow.liveReady")
+                      : ""}
       </p>
     </div>
   );

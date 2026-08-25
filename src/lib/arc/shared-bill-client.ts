@@ -1,4 +1,7 @@
 import { SHARED_BILL_ROUTE } from "./shared-bill";
+import { readApiErrorCode } from "./../i18n/api-errors";
+import { translate } from "./../i18n/dictionary";
+import { DEFAULT_LOCALE } from "./../i18n/locale";
 
 /**
  * Paylasilan hesap olusturma API'sinin ISTEMCI tarafi.
@@ -14,10 +17,9 @@ const BILL_ID = /^0x[0-9a-f]{64}$/;
 
 export type CreateSharedBillResponse =
   | { ok: true; billId: string; path: string; expiresAt: number }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: string };
 
-const GENERIC_FAILURE =
-  "Paylasilan hesap olusturulamadi. Lutfen tekrar dene.";
+const GENERIC_FAILURE = translate(DEFAULT_LOCALE, "sharedBill.createFailed");
 
 export async function createSharedBillOnServer(
   body: { manifest: unknown; debts: unknown; signature: string },
@@ -43,6 +45,12 @@ export async function createSharedBillOnServer(
   }
 
   if (!response.ok) {
+    /*
+     * KOD tasinir, METIN tasinmaz: gosterilecek cumleyi arayuz kendi
+     * sozlugunden ve etkin dilden secer. Sunucunun hazir metni yalnizca
+     * geriye donuk uyumluluk icin `message` alaninda kalir.
+     */
+    const code = readApiErrorCode(payload);
     const message =
       typeof payload === "object" &&
       payload !== null &&
@@ -50,7 +58,9 @@ export async function createSharedBillOnServer(
         "string"
         ? ((payload as { error: { message: string } }).error.message)
         : GENERIC_FAILURE;
-    return { ok: false, message };
+    return code === null
+      ? { ok: false, message }
+      : { ok: false, message, code };
   }
 
   if (typeof payload !== "object" || payload === null) {

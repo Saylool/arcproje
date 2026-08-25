@@ -19,6 +19,8 @@
  * modülü kullanan yollarda da KULLANILMAZ.
  */
 
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+
 const BIG_ZERO = BigInt(0);
 
 /**
@@ -91,22 +93,33 @@ const MINOR_PER_MAJOR = BigInt(100);
  * yapılan tutarın hepsi AYNI tam sayıdan türemek zorunda olduğu için
  * biçimlendirme de burada tam sayı üzerinden yapılır.
  *
- * Çıktı Türkçe yazımdır: binlik ayracı ".", ondalık ayracı ",".
+ * Ayraçlar DİLE göre seçilir: Türkçede binlik ".", ondalık ","; İngilizcede
+ * tersi ve sembol başta. Bu YALNIZCA gösterimdir — tutar `BigInt` olarak
+ * kalır ve hiçbir aşamada `Number`a daraltılmaz.
  */
-export function formatMinorUnitsAsTry(value: unknown): string | null {
+export function formatMinorUnitsAsTry(
+  value: unknown,
+  locale: Locale = DEFAULT_LOCALE,
+): string | null {
   if (!isCanonicalMinorUnits(value)) {
     return null;
   }
   const amount = BigInt(value);
   const whole = (amount / MINOR_PER_MAJOR).toString();
   const fraction = (amount % MINOR_PER_MAJOR).toString().padStart(2, "0");
+  // Ayraçlar YALNIZCA gösterimi etkiler; tutar BigInt olarak kalır.
+  const isEnglish = locale === "en";
+  const groupSeparator = isEnglish ? "," : ".";
+  const decimalSeparator = isEnglish ? "." : ",";
 
   let grouped = "";
   for (let index = 0; index < whole.length; index += 1) {
     if (index > 0 && (whole.length - index) % 3 === 0) {
-      grouped += ".";
+      grouped += groupSeparator;
     }
     grouped += whole[index];
   }
-  return `${grouped},${fraction} ₺`;
+  return isEnglish
+    ? `₺${grouped}${decimalSeparator}${fraction}`
+    : `${grouped}${decimalSeparator}${fraction} ₺`;
 }
