@@ -901,7 +901,8 @@ export const en: Dictionary = {
       BILL_ID_UNAVAILABLE: "This shared bill could not be created. Please try again.",
       STORAGE_REJECTED:
         "The shared bill could not be saved; the debt list was not accepted.",
-      DEBT_NOT_CLAIMABLE: "This debt is not payable right now.",
+      DEBT_NOT_CLAIMABLE:
+        "This debt is not payable right now: it may already be paid, an attempt may be in progress on another device or tab, or the result of a previous attempt could not be verified. Check your wallet's transaction history and ArcScan before sending again.",
       OFFER_UNUSABLE:
         "The payment offer is no longer usable (expired or already used). Refresh the rate and try again.",
       ATTEMPT_ALREADY_ACTIVE:

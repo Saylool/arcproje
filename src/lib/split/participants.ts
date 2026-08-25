@@ -9,16 +9,6 @@ export const MIN_PARTICIPANTS = 2;
 /** Akış her zaman kullanıcının kendisiyle başlar. */
 export const DEFAULT_PARTICIPANT_NAME = "Sen";
 
-/**
- * İMZALANAN etiketlerde kullanılan yedek ad — DİLDEN BAĞIMSIZDIR.
- *
- * Bir katılımcı kimliği bulunamazsa etiket yine de bir metin olmalıdır. Bu
- * metin imzalanan manifeste girdiği için ARAYÜZ DİLİNE GÖRE DEĞİŞEMEZ:
- * kriptografik yük hiçbir koşulda dil tercihine bağlı olmamalıdır. Ekranda
- * gösterilen yedek ad ise çevrilir (`common.unknownParticipant`).
- */
-export const UNKNOWN_PARTICIPANT_LABEL = "Bilinmeyen kişi";
-
 export type Participant = {
   id: string;
   name: string;

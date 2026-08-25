@@ -9,7 +9,10 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
-import { prepareLabel } from "@/lib/arc/labels";
+import {
+  SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL,
+  prepareLabel,
+} from "@/lib/arc/labels";
 import { MAX_LABEL_LENGTH } from "@/lib/arc/payment-request";
 import { debtIdentityKey } from "@/lib/arc/payment-state";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
@@ -43,10 +46,7 @@ import {
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
-import {
-  UNKNOWN_PARTICIPANT_LABEL,
-  type Participant,
-} from "@/lib/split/participants";
+import type { Participant } from "@/lib/split/participants";
 
 /**
  * TEK BAGLANTILI paylasilan hesap olusturucu — fisi odeyen (ALICI) tarafi.
@@ -121,7 +121,7 @@ export function SharedBillCreator({
   const signingNameOf = useCallback(
     (id: string) =>
       participants.find((participant) => participant.id === id)?.name ??
-      UNKNOWN_PARTICIPANT_LABEL,
+      SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL,
     [participants],
   );
 

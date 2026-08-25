@@ -27,7 +27,10 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
-import { prepareLabel } from "@/lib/arc/labels";
+import {
+  PAYMENT_REQUEST_UNKNOWN_PARTICIPANT_LABEL,
+  prepareLabel,
+} from "@/lib/arc/labels";
 import {
   MAX_LABEL_LENGTH,
   createPaymentRequestPayload,
@@ -46,10 +49,7 @@ import {
 } from "@/lib/arc/wallet";
 import { debtIdentityKey } from "@/lib/arc/payment-state";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
-import {
-  UNKNOWN_PARTICIPANT_LABEL,
-  type Participant,
-} from "@/lib/split/participants";
+import type { Participant } from "@/lib/split/participants";
 import { toDativeName } from "@/lib/split/turkish";
 
 /**
@@ -132,7 +132,7 @@ export function PaymentRequestCreator({
   const signingNameOf = useCallback(
     (id: string) =>
       participants.find((participant) => participant.id === id)?.name ??
-      UNKNOWN_PARTICIPANT_LABEL,
+      PAYMENT_REQUEST_UNKNOWN_PARTICIPANT_LABEL,
     [participants],
   );
 

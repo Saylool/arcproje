@@ -163,6 +163,27 @@ describe("AÇIĞA VURMA EŞİTLİĞİ", () => {
     }
   });
 
+  it("DEBT_NOT_CLAIMABLE eyleme dönük yönlendirmeyi KAYBETMEZ", () => {
+    /*
+     * Sunucu bu üç durumu (ödendi / süren deneme / sonucu doğrulanamamış)
+     * TEK bir kod altında, farklı metinlerle anlatır; istemci koddan hangisi
+     * olduğunu ayırt EDEMEZ. Bu yüzden gösterilen metin üçünün de gerektirdiği
+     * eylemi taşımalıdır. Özellikle "körlemesine tekrar gönderme" uyarısı
+     * kaybolamaz: kaybı çift ödeme riski doğurur.
+     */
+    for (const locale of LOCALES) {
+      const message = localizeApiError(locale, "DEBT_NOT_CLAIMABLE");
+      expect(message.length, locale).toBeGreaterThan(60);
+      expect(message, locale).toMatch(/ArcScan/);
+      expect(message, locale).toMatch(
+        locale === "tr" ? /cüzdanının işlem geçmişi/i : /transaction history/i,
+      );
+      expect(message, locale).toMatch(
+        locale === "tr" ? /tekrar göndermeden önce/i : /before sending again/i,
+      );
+    }
+  });
+
   it("yapılandırma sırları hiçbir dilde gösterilmez", () => {
     for (const locale of LOCALES) {
       const message = localizeApiError(locale, "SERVICE_NOT_CONFIGURED");

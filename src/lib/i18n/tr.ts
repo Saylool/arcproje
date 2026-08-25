@@ -940,7 +940,8 @@ export const tr = {
         "Paylaşılan hesabın imzası doğrulanamadı. Hesap oluşturulmadı.",
       BILL_ID_UNAVAILABLE: "Bu paylaşılan hesap oluşturulamadı. Lütfen yeniden dene.",
       STORAGE_REJECTED: "Paylaşılan hesap kaydedilemedi; borç listesi kabul edilmedi.",
-      DEBT_NOT_CLAIMABLE: "Bu borç şu anda ödenebilir durumda değil.",
+      DEBT_NOT_CLAIMABLE:
+        "Bu borç şu anda ödenebilir durumda değil: ödenmiş olabilir, başka bir cihazda ya da sekmede süren bir deneme olabilir veya önceki denemenin sonucu doğrulanamamış olabilir. Tekrar göndermeden önce cüzdanının işlem geçmişini ve ArcScan'i kontrol et.",
       OFFER_UNUSABLE:
         "Ödeme teklifi artık kullanılamıyor (süresi dolmuş ya da zaten kullanılmış). Kuru yenileyip tekrar dene.",
       ATTEMPT_ALREADY_ACTIVE:

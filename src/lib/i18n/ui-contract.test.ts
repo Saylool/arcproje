@@ -250,14 +250,28 @@ describe("KRİPTOGRAFİK yükler dile bağlanamaz", () => {
   });
 
   it("imzalanan etiketlerin yedek adı DİLDEN BAĞIMSIZDIR", () => {
-    const participants = read("src/lib/split/participants.ts");
-    expect(participants).toContain("UNKNOWN_PARTICIPANT_LABEL");
-
-    for (const file of [
-      "src/components/SharedBillCreator.tsx",
-      "src/components/PaymentRequestCreator.tsx",
-    ]) {
+    /*
+     * Yedek ad sözlükten GELMEZ: her akış kendi BAYT SABİTİNİ kullanır
+     * (bkz. `signed-label-stability.test.ts`).
+     */
+    for (const [file, constantName] of [
+      [
+        "src/components/SharedBillCreator.tsx",
+        "SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL",
+      ],
+      [
+        "src/components/PaymentRequestCreator.tsx",
+        "PAYMENT_REQUEST_UNKNOWN_PARTICIPANT_LABEL",
+      ],
+    ] as const) {
       const source = read(file);
+      expect(source, file).toContain(constantName);
+      // İmza yedeği ÇEVİRİ çağrısıyla kurulamaz.
+      const start = source.indexOf("const signingNameOf");
+      const body = source.slice(start, source.indexOf("[participants],", start));
+      expect(body, file).toContain(constantName);
+      expect(body, file).not.toMatch(/\bt\(|translate\(|useTranslator/);
+
       // `prepareLabel` çağrıları YALNIZCA dilden bağımsız adı kullanır.
       for (const call of source.match(/prepareLabel\([\s\S]{0,120}?\)/g) ?? []) {
         expect(call, `${file}: ${call}`).not.toContain('t("common');

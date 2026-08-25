@@ -87,6 +87,25 @@ export function validateCanonicalLabel(
   return { ok: true, value };
 }
 
+/**
+ * İMZALANAN ETİKETLERİN YEDEK ADLARI — BAYT SABİTİ.
+ *
+ * Bir katılımcı kimliği bulunamazsa etiket yine de bir metin olmalıdır ve bu
+ * metin İMZALANAN gövdeye girer: paylaşılan hesapta Merkle yaprağına, ödeme
+ * talebinde imzalanan alana. Bu yüzden iki kural birden geçerlidir:
+ *
+ *   1. ARAYÜZ DİLİNE GÖRE DEĞİŞEMEZ — kriptografik yük dil tercihine
+ *      bağlanamaz;
+ *   2. GEÇMİŞE GÖRE DEĞİŞEMEZ — bu baytlar yerelleştirmeden ÖNCE de
+ *      imzalanıyordu; değiştirmek aynı girdi için farklı bir kök üretirdi.
+ *
+ * İki akış tarihsel olarak FARKLI metinler imzaladı; her biri kendi baytını
+ * korur. Ekranda gösterilen yedek ad ayrıca çevrilir
+ * (`common.unknownParticipant`); çeviri yalnızca GÖRÜNÜMÜ değiştirir.
+ */
+export const SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL = "Bilinmeyen kisi";
+export const PAYMENT_REQUEST_UNKNOWN_PARTICIPANT_LABEL = "Bilinmeyen kişi";
+
 /** Kod noktası sınırında keser; yüzey çifti ortadan bölünmez. */
 function truncateAtCodePoint(value: string, maxLength: number): string {
   if (value.length <= maxLength) {
