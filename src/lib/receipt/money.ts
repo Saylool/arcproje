@@ -1,4 +1,6 @@
 import type { AdjustmentKind, Receipt, ReceiptItem } from "./schema";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, toIntlLocale, type Locale } from "../i18n/locale";
 
 export type MoneyParseFailureReason =
   | "empty"
@@ -10,17 +12,18 @@ export type MoneyParseResult =
   | { ok: true; minor: number }
   | { ok: false; reason: MoneyParseFailureReason };
 
-const FAILURE_MESSAGES: Record<MoneyParseFailureReason, string> = {
-  empty: "Bir tutar gir.",
-  invalid: "Geçerli bir tutar gir (örn. 320,50).",
-  tooManyDecimals: "En fazla iki ondalık basamak girebilirsin (örn. 320,50).",
-  negative: "Tutar negatif olamaz.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeMoneyParseFailure(
   reason: MoneyParseFailureReason,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return FAILURE_MESSAGES[reason];
+  return translate(locale, `errors.money.${reason}`);
 }
 
 /** Binlik ayraçlı tam sayı: 1.234.567 veya 1,234,567 */
@@ -104,26 +107,42 @@ export function parseMoneyToMinor(input: string): MoneyParseResult {
   return { ok: true, minor };
 }
 
-/** Input alanlarında gösterilecek deterministik biçim: 32050 -> "320,50" */
-export function formatMinorForInput(minor: number): string {
+/**
+ * Input alanlarında gösterilecek deterministik biçim: 32050 -> "320,50".
+ *
+ * YALNIZCA ONDALIK AYRACI dile göre değişir; binlik ayracı EKLENMEZ. Bunun
+ * nedeni `parseMoneyToMinor`ın hem `,` hem `.` kabul etmesi ve tek başına
+ * geçen bir ayracı ondalık saymasıdır: ayraç değişse de aynı tam sayı geri
+ * okunur, yani biçim değişmesi TUTARI DEĞİŞTİRMEZ.
+ */
+export function formatMinorForInput(
+  minor: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   const rounded = Math.trunc(minor);
   const sign = rounded < 0 ? "-" : "";
   const absolute = Math.abs(rounded);
   const major = Math.floor(absolute / 100);
   const fraction = String(absolute % 100).padStart(2, "0");
-  return `${sign}${major},${fraction}`;
+  const decimal = locale === "en" ? "." : ",";
+  return `${sign}${major}${decimal}${fraction}`;
 }
 
 /**
  * Salt okunur gösterim. Bölme yalnızca görüntüleme içindir; uygulama state'i
  * minor unit olarak kalır.
  */
-export function formatMinorForDisplay(minor: number, currency: string): string {
+export function formatMinorForDisplay(
+  minor: number,
+  currency: string,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
   const value = minor / 100;
+  const intl = toIntlLocale(locale);
 
   if (/^[A-Z]{3}$/.test(currency)) {
     try {
-      return new Intl.NumberFormat("tr-TR", {
+      return new Intl.NumberFormat(intl, {
         style: "currency",
         currency,
         minimumFractionDigits: 2,
@@ -134,7 +153,7 @@ export function formatMinorForDisplay(minor: number, currency: string): string {
     }
   }
 
-  return new Intl.NumberFormat("tr-TR", {
+  return new Intl.NumberFormat(intl, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);

@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { translate, type TranslationKey } from "../i18n/dictionary";
+
 /**
  * Arayüz sözleşmesi.
  *
@@ -10,6 +12,24 @@ import { describe, expect, it } from "vitest";
  */
 
 const creator = readFileSync("src/components/PaymentRequestCreator.tsx", "utf8");
+
+/**
+ * METİN ARTIK BİLEŞENDE DEĞİL SÖZLÜKTEDİR.
+ *
+ * Sözleşme iki parçada doğrulanır: bileşen doğru ANAHTARI kullanıyor mu ve
+ * sözlük o anahtar altında beklenen TÜRKÇE cümleyi taşıyor mu. İngilizce
+ * karşılığın boş olmadığı da kontrol edilir; böylece bir metin İngilizceye
+ * çevrilmeden eklenirse test düşer.
+ */
+function expectShows(
+  source: string,
+  key: TranslationKey,
+  expectedTurkish: string,
+): void {
+  expect(source, key).toContain(key);
+  expect(translate("tr", key), key).toContain(expectedTurkish);
+  expect(translate("en", key), key).not.toBe("");
+}
 const payer = readFileSync("src/components/PaymentRequestPayer.tsx", "utf8");
 const conversion = readFileSync("src/lib/arc/conversion.ts", "utf8");
 const readme = readFileSync("README.md", "utf8");
@@ -29,13 +49,17 @@ describe("oluşturucu ekranı", () => {
     expect(creator).toContain('status: "loading"');
     expect(creator).toContain('status: "ready"');
     expect(creator).toContain('status: "error"');
-    expect(creator).toContain("Kuru yenile");
-    expect(creator).toContain("Kuru yeniden dene");
+    expectShows(creator, "request.rateRefresh", "Kuru yenile");
+    expectShows(creator, "request.rateRetry", "Kuru yeniden dene");
   });
 
   it("CoinGecko atfı görünür ve bağlantılıdır", () => {
     expect(creator).toContain("https://www.coingecko.com/en/api");
-    expect(creator).toContain("Data provided by CoinGecko");
+    expectShows(
+      creator,
+      "request.coingeckoAttribution",
+      "Data provided by CoinGecko",
+    );
   });
 
   it("geçerli teklif olmadan talep oluşturulamaz", () => {
@@ -47,7 +71,7 @@ describe("oluşturucu ekranı", () => {
   });
 
   it("süresi dolan teklifte uyarı gösterir", () => {
-    expect(creator).toContain("Kur teklifinin süresi doldu");
+    expectShows(creator, "request.rateExpired", "Kur teklifinin süresi doldu");
   });
 });
 
@@ -66,15 +90,17 @@ describe("ödeyen ekranı", () => {
   });
 
   it("cüzdan imzasının piyasa kurunu kanıtlamadığını söyler", () => {
-    expect(payer).toContain(
+    expectShows(
+      payer,
+      "payer.immutableStrong",
       "Cüzdan imzası tek başına kurun piyasa değeri olduğunu kanıtlamaz",
     );
   });
 
   it("kur kaynağını ve zamanlarını gösterir", () => {
-    expect(payer).toContain("Kur kaynağı");
-    expect(payer).toContain("Kur gözlem zamanı");
-    expect(payer).toContain("Kur geçerliliği");
+    expectShows(payer, "payer.rowRateSource", "Kur kaynağı");
+    expectShows(payer, "payer.rowRateObservedAt", "Kur gözlem zamanı");
+    expectShows(payer, "payer.rowRateValidity", "Kur geçerliliği");
   });
 });
 
@@ -119,13 +145,13 @@ describe("bağlantı geçerlilik süresi doğru anlatılır", () => {
   it("gerçek bitiş anı ve kalan süre gösterilir", () => {
     expect(creator).toContain("currentGenerated.expiresAt");
     expect(creator).toContain("generatedSecondsLeft");
-    expect(creator).toContain("en fazla 5 dakika");
+    expectShows(creator, "request.linkWarningStrong", "en fazla 5 dakika");
   });
 
   it("süresi dolan bağlantıda kopyala/paylaş pasifleşir", () => {
     expect(creator).toContain("generatedExpired");
     expect(creator).toContain("disabled={generatedExpired}");
-    expect(creator).toContain("Bu bağlantının süresi doldu");
+    expectShows(creator, "request.linkExpired", "Bu bağlantının süresi doldu");
   });
 
   it("kurun elle girilen demo kuru olduğu iddiası kalmadı", () => {
@@ -164,7 +190,7 @@ describe("çift gönderim koruması", () => {
   it("doğrulama sırasında görünür durum değişir ve düğme pasifleşir", () => {
     expect(payer).toContain('setStatus("verifying")');
     expect(payer).toContain('status === "verifying"');
-    expect(payer).toContain("Talep ve kur yeniden doğrulanıyor");
+    expectShows(payer, "payer.reverifying", "Talep ve kur yeniden doğrulanıyor");
   });
 
   it("başarıdan sonra kilit bırakılmaz", () => {
@@ -198,8 +224,10 @@ describe("belirsiz gönderim sonucu", () => {
   });
 
   it("önceki gönderim uyarısı yetkili olmadığını söyler", () => {
-    expect(payer).toContain("yalnızca bu tarayıcıda tutulur");
-    expect(payer).toContain("başka bir cihazdan");
+    expectShows(payer, "payer.priorLocalOnly", "yalnızca bu tarayıcıda tutulur");
+    expect(translate("tr", "payer.priorLocalOnly")).toContain(
+      "başka bir cihazdan",
+    );
   });
 });
 
@@ -268,7 +296,12 @@ describe("gönderim rezervasyonu", () => {
   });
 
   it("kilit/depo yoksa FAIL-CLOSED: Türkçe tarayıcı uyarısı gösterilir", () => {
-    expect(payer).toContain("SUBMISSION_UNAVAILABLE_MESSAGE");
+    // Metin sözlükten gelir; kaynak yalnızca anahtarı taşır.
+    expectShows(
+      payer,
+      "errors.submissionUnavailable",
+      "Güvenlik gereği gönderim BAŞLATILMADI",
+    );
     expect(payer).toContain('guarded.reason === "unavailable"');
     expect(payer).toContain('guarded.reason === "busy"');
   });
@@ -299,11 +332,21 @@ describe("mutabakat kaydı yenilemeden sonra da durur", () => {
     expect(payer).toContain('outcome.code === "reverted" ? "reverted" : "unknown"');
     // Revert için ayrı, "ödeme yapılmadı" diyen bir metin vardır.
     expect(payer).toContain('priorSubmission === "reverted"');
-    expect(payer).toMatch(/revert\)\. Ödeme yapılmadı/);
+    expect(payer).toContain("payer.priorReverted");
+    expect(translate("tr", "payer.priorReverted")).toMatch(
+      /revert\)\. Ödeme yapılmadı/,
+    );
+    expect(translate("en", "payer.priorReverted")).toMatch(
+      /revert\)\. No payment was made/,
+    );
   });
 
   it("belirsizlik başarı ya da başarısızlık İDDİA ETMEZ", () => {
-    expect(payer).toContain("ödeme yapılmış da olabilir, yapılmamış da");
+    expectShows(
+      payer,
+      "payer.priorUnknown",
+      "ödeme yapılmış da olabilir, yapılmamış da",
+    );
   });
 
   it("kayıt varken tahmin ve gönderim düğmesi kapalı kalır", () => {

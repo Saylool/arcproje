@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 
 import { shortenWalletAddress, walletAddressesEqual } from "@/lib/arc/address";
 import { formatMicroUsdcAmount, formatMicroUsdcForDisplay } from "@/lib/arc/conversion";
+import type { Locale } from "@/lib/i18n/locale";
 import {
   ARC_TESTNET_DOCS_URL,
   ARC_TESTNET_FAUCET_URL,
@@ -14,18 +15,26 @@ import {
   extractQuoteFromPayload,
   type SignedPaymentRequest,
 } from "@/lib/arc/payment-request";
+import { useTranslator } from "@/lib/i18n/context";
+import { formatDateTime, formatUsdcAmount } from "@/lib/i18n/format";
+import {
+  messageKey,
+  messageRate,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 import { formatQuoteRate, type RateQuote } from "@/lib/rates/quote";
 import { verifyQuoteWithServer } from "@/lib/rates/client";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import {
   REQUEST_QUERY_PARAM,
+  codecProblemKey,
   decodeSignedRequest,
-  describeCodecProblem,
+  type CodecProblem,
 } from "@/lib/arc/request-codec";
 import { verifyPaymentRequestSignature } from "@/lib/arc/request-signing";
 import { createSingleFlight } from "@/lib/arc/single-flight";
 import {
-  SUBMISSION_UNAVAILABLE_MESSAGE,
   clearReservation,
   readSubmissionView,
   recordSubmission,
@@ -34,7 +43,6 @@ import {
   type SubmissionOutcome,
 } from "@/lib/arc/submission-log";
 import {
-  describeArcSendError,
   keepsSubmissionLocked,
   estimateArcSend,
   reviewStateAfterSendFailure,
@@ -60,9 +68,10 @@ import {
  * URL parametreleri veya form durumu kullanılmaz.
  */
 
+/* Metinler durumda TARIF olarak tutulur; dil degisince cumle de degisir. */
 type VerifyState =
   | { status: "loading" }
-  | { status: "invalid"; message: string }
+  | { status: "invalid"; message: MessageDescriptor }
   | { status: "valid"; request: SignedPaymentRequest; quote: RateQuote };
 
 type FlowStatus =
@@ -75,6 +84,11 @@ type FlowStatus =
 
 const LINK_CLASS =
   "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+
+/** Çözücü sorununu ertelenmiş mesaja çevirir. */
+function codecMessage(problem: CodecProblem): MessageDescriptor {
+  return messageKey(codecProblemKey(problem));
+}
 
 /**
  * Dış kabuk: sorgu parametresini okur ve talebe ÖZEL oturumu `key` ile
@@ -92,6 +106,7 @@ export function PaymentRequestPayer() {
 }
 
 function RequestSession({ encoded }: { encoded: string | null }) {
+  const { t, locale } = useTranslator();
 
   const [verifyState, setVerifyState] = useState<VerifyState>({ status: "loading" });
 
@@ -104,7 +119,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   const [status, setStatus] = useState<FlowStatus>("idle");
   const [estimateSummary, setEstimateSummary] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] =
+    useState<MessageDescriptor | null>(null);
   const [transaction, setTransaction] = useState<ArcSendSuccess | null>(null);
   /*
    * Yeniden girişe karşı EŞZAMANLI kilit. React durumu asenkron güncellendiği
@@ -125,6 +141,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
    * Zincire ulaşmış OLABİLECEK işlemin hash'i ve ArcScan bağlantısı.
    * Revert ve belirsiz sonucun İKİSİNDE de tutulur: mutabakatın tek ipucu.
    */
+  /** Bazı hatalara "yeni bağlantı iste" ipucu eklenir. */
+  const [needsNewLinkHint, setNeedsNewLinkHint] = useState(false);
   const [pendingTxHash, setPendingTxHash] = useState<string | null>(null);
   const [pendingTxUrl, setPendingTxUrl] = useState<string | null>(null);
 
@@ -137,7 +155,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         if (!cancelled) {
           setVerifyState({
             status: "invalid",
-            message: "Bağlantıda ödeme talebi bulunamadı.",
+            message: messageKey("payer.noRequestInLink"),
           });
         }
         return;
@@ -148,7 +166,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         if (!cancelled) {
           setVerifyState({
             status: "invalid",
-            message: describeCodecProblem(decoded.problem),
+            message: codecMessage(decoded.problem),
           });
         }
         return;
@@ -161,10 +179,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       if (!verified.ok) {
         setVerifyState({
           status: "invalid",
-          message:
+          message: messageKey(
             verified.reason === "signerMismatch"
-              ? "Talebi imzalayan hesap, talepteki alıcı değil. Bu bağlantıya güvenme."
-              : "Ödeme talebinin imzası doğrulanamadı. Bu bağlantıya güvenme.",
+              ? "payer.signerMismatch"
+              : "payer.signatureUnverified",
+          ),
         });
         return;
       }
@@ -177,12 +196,17 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       const quoteCheck = await verifyQuoteWithServer(
         quote,
         decoded.request.payload.quoteTag,
+        fetch,
+        locale,
       );
       if (cancelled) {
         return;
       }
       if (!quoteCheck.ok) {
-        setVerifyState({ status: "invalid", message: quoteCheck.message });
+        setVerifyState({
+          status: "invalid",
+          message: messageRate(quoteCheck.code),
+        });
         return;
       }
       setVerifyState({ status: "valid", request: decoded.request, quote });
@@ -192,7 +216,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [encoded]);
+  }, [encoded, locale]);
 
   const request = verifyState.status === "valid" ? verifyState.request : null;
 
@@ -305,9 +329,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     const accounts = await requestAccounts(selectedWalletUuid);
     if (!accounts.ok) {
       setErrorMessage(
-        accounts.code === "rejected"
-          ? "Cüzdan bağlantısı reddedildi."
-          : "Cüzdana bağlanılamadı.",
+        messageKey(
+          accounts.code === "rejected"
+            ? "wallet.connectRejected"
+            : "wallet.connectFailed",
+        ),
       );
       return;
     }
@@ -323,9 +349,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
       setErrorMessage(
-        switched.code === "rejected"
-          ? "Ağ değişikliği reddedildi."
-          : "Arc Testnet'e geçilemedi.",
+        messageKey(
+          switched.code === "rejected"
+            ? "wallet.switchRejected"
+            : "wallet.switchFailed",
+        ),
       );
       return;
     }
@@ -345,7 +373,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     priorSubmission === null;
 
   /** İncelemeyi düşürür: onay kutusu ve gönder düğmesi ekrandan kalkar. */
-  const dropReview = (message: string) => {
+  const dropReview = (message: MessageDescriptor) => {
+    setNeedsNewLinkHint(false);
     setErrorMessage(message);
     setEstimateSummary(null);
     setConfirmed(false);
@@ -353,7 +382,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   };
 
   /** Yeniden denenebilir hatada incelemeye dönülür. */
-  const backToReview = (message: string) => {
+  const backToReview = (message: MessageDescriptor) => {
+    setNeedsNewLinkHint(false);
     setErrorMessage(message);
     setStatus("review");
   };
@@ -390,9 +420,8 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       if (encoded !== null) {
         const fresh = decodeSignedRequest(encoded, Date.now());
         if (!fresh.ok) {
-          dropReview(
-            `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-          );
+          dropReview(codecMessage(fresh.problem));
+          setNeedsNewLinkHint(true);
           return;
         }
       }
@@ -400,12 +429,14 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       const quoteBeforeEstimate = await verifyQuoteWithServer(
         extractQuoteFromPayload(request.payload),
         request.payload.quoteTag,
+        fetch,
+        locale,
       );
       if (isStale()) {
         return;
       }
       if (!quoteBeforeEstimate.ok) {
-        dropReview(quoteBeforeEstimate.message);
+        dropReview(messageRate(quoteBeforeEstimate.code));
         return;
       }
 
@@ -415,7 +446,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         return;
       }
       if (!outcome.ok) {
-        setErrorMessage(describeArcSendError(outcome.code));
+        setErrorMessage(messageKey(`errors.send.${outcome.code}`));
         setStatus("idle");
         return;
       }
@@ -459,27 +490,22 @@ function RequestSession({ encoded }: { encoded: string | null }) {
        * ilk savunma katmanıdır; gönderim sınırı aynı süreyi kendisi de ölçer.
        */
       if (encoded === null) {
-        dropReview("Bağlantıda ödeme talebi bulunamadı.");
+        dropReview(messageKey("payer.noRequestInLink"));
         return;
       }
       const fresh = decodeSignedRequest(encoded, Date.now());
       if (!fresh.ok) {
-        dropReview(
-          `${describeCodecProblem(fresh.problem)} Talebi oluşturan kişiden yeni bir bağlantı iste.`,
-        );
+        dropReview(codecMessage(fresh.problem));
+        setNeedsNewLinkHint(true);
         return;
       }
       const reverified = await verifyPaymentRequestSignature(fresh.request);
       if (!reverified.ok) {
-        dropReview(
-          "Ödeme talebinin cüzdan imzası artık doğrulanamıyor. Gönderim yapılmadı.",
-        );
+        dropReview(messageKey("payer.reverifyFailed"));
         return;
       }
       if (fresh.request.payload.requestId !== snapshot.requestId) {
-        dropReview(
-          "Bağlantıdaki talep, incelediğin talep değil. Gönderim yapılmadı; sayfayı yenileyip yeniden incele.",
-        );
+        dropReview(messageKey("payer.differentRequest"));
         return;
       }
       /*
@@ -490,9 +516,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       const quoteBeforeSend = await verifyQuoteWithServer(
         extractQuoteFromPayload(fresh.request.payload),
         fresh.request.payload.quoteTag,
+        fetch,
+        locale,
       );
       if (!quoteBeforeSend.ok) {
-        dropReview(quoteBeforeSend.message);
+        dropReview(messageRate(quoteBeforeSend.code));
         return;
       }
 
@@ -513,29 +541,29 @@ function RequestSession({ encoded }: { encoded: string | null }) {
         keepLocked = true;
         if (guarded.reason === "unavailable") {
           // Tarayıcı güvenli gönderimi sağlayamıyor: hiçbir şey gönderilmedi.
-          dropReview(SUBMISSION_UNAVAILABLE_MESSAGE);
+          dropReview(messageKey("errors.submissionUnavailable"));
           return;
         }
         if (guarded.reason === "busy") {
-          dropReview(
-            "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu; MetaMask ve ArcScan'i kontrol et.",
-          );
+          dropReview(messageKey("payer.otherTabSending"));
           return;
         }
         setPriorSubmission(guarded.existing);
         dropReview(
-          guarded.existing === "pending"
-            ? "Bu talep için başka bir sekmede gönderim sürüyor. Aynı ödemeyi iki kez göndermemek için burada durduruldu; MetaMask ve ArcScan'i kontrol et."
-            : guarded.existing === "success"
-              ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim kaydı var. Tekrar göndermeden önce ArcScan'de kontrol et."
-              : "Bu talep için bu tarayıcıdan sonucu doğrulanmamış bir gönderim var. Tekrar göndermeden önce MetaMask geçmişini ve ArcScan'i kontrol et.",
+          messageKey(
+            guarded.existing === "pending"
+              ? "payer.otherTabSending"
+              : guarded.existing === "success"
+                ? "payer.alreadySucceeded"
+                : "payer.unverifiedSubmission",
+          ),
         );
         return;
       }
       setPriorSubmission("pending");
       const outcome = guarded.value;
       if (!outcome.ok) {
-        const message = describeArcSendError(outcome.code);
+        const message = messageKey(`errors.send.${outcome.code}`);
         if (keepsSubmissionLocked(outcome.code)) {
           /*
            * kit.send ÇAĞRILDI ve sonuç belirsiz veya işlem revert etti.
@@ -600,125 +628,143 @@ function RequestSession({ encoded }: { encoded: string | null }) {
 
   if (verifyState.status === "loading") {
     return (
-      <section aria-label="Ödeme talebi" className={cardClass}>
-        <p className="text-sm text-ink-faint">Ödeme talebi doğrulanıyor…</p>
+      <section aria-label={t("payer.sectionLabel")} className={cardClass}>
+        <p className="text-sm text-ink-faint">{t("payer.verifying")}</p>
       </section>
     );
   }
 
   if (verifyState.status === "invalid") {
     return (
-      <section aria-label="Ödeme talebi" className={cardClass}>
+      <section aria-label={t("payer.sectionLabel")} className={cardClass}>
         <h2 className="text-base font-semibold tracking-tight text-ink">
-          Bu ödeme talebi geçersiz
+          {t("payer.invalidTitle")}
         </h2>
         <p
           role="alert"
           className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
-          {verifyState.message}
+          {resolveMessage(locale, verifyState.message)}
         </p>
         <p className="text-xs leading-relaxed text-ink-faint">
-          Güvenlik gereği geçersiz bir talep için cüzdan bağlama veya ödeme
-          seçenekleri gösterilmez. Bağlantıyı sana gönderen kişiden yeni bir
-          talep iste.
+          {t("payer.invalidNotice")}
         </p>
       </section>
     );
   }
 
   const payload = verifyState.request.payload;
-  const expiresText = new Date(payload.expiresAt * 1000).toLocaleString("tr-TR");
+  const expiresText = formatDateTime(payload.expiresAt, locale);
 
   return (
-    <section aria-label="Ödeme talebi" className={cardClass}>
+    <section aria-label={t("payer.sectionLabel")} className={cardClass}>
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-base font-semibold tracking-tight text-ink">
-            Ödeme talebi
+            {t("payer.title")}
           </h2>
           <span className="rounded-full bg-warn-surface-strong px-2 py-0.5 text-[10px] font-semibold text-warn-ink">
-            TEST AĞI
+            {t("common.testNetworkBadge")}
           </span>
           <span className="rounded-full bg-brand-soft-strong px-2 py-0.5 text-[10px] font-semibold text-brand-ink">
-            cüzdan imzası doğrulandı
+            {t("payer.signatureVerifiedBadge")}
           </span>
         </div>
         <p className="text-xs leading-relaxed text-ink-faint">
-          Bu talep,{" "}
+          {t("payer.signedByPrefix")}
           <span className="font-mono">
             {shortenWalletAddress(payload.recipient)}
-          </span>{" "}
-          adresli cüzdan tarafından imzalandı. Ödemeyi{" "}
-          <strong className="font-semibold">kendi cüzdanında sen onaylarsın</strong>;
-          kimse senin cüzdanından para çekemez.
+          </span>
+          {t("payer.signedBySuffix")}
+          <strong className="font-semibold">
+            {t("payer.signedByYouConfirm")}
+          </strong>
+          {t("payer.signedByEnd")}
         </p>
         <p className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-[11px] leading-relaxed text-warn-ink">
-          <strong className="font-semibold">İsimler kimlik kanıtı değildir.</strong>{" "}
-          &quot;{payload.recipientLabel}&quot; ve &quot;{payload.debtorLabel}&quot;
-          bu talebi oluşturan kişinin yazdığı etiketlerdir. İmza yalnızca{" "}
-          <strong className="font-semibold">cüzdan adresinin</strong> bu talebi
-          imzaladığını kanıtlar; kişinin gerçek veya yasal kimliğini kanıtlamaz.
-          Ödemeden önce aşağıdaki tam alıcı adresini, fişi ödeyen kişiyle{" "}
           <strong className="font-semibold">
-            güvendiğin bir iletişim kanalından
-          </strong>{" "}
-          (yüz yüze, telefon) karşılaştır.
+            {t("payer.labelsWarningStrong")}
+          </strong>
+          {/*
+            Etiketler KULLANICI VERISIDIR ve cevrilmez; sablona yalnizca metin
+            olarak yerlestirilir.
+          */}
+          {t("payer.labelsWarningMiddle", {
+            recipient: payload.recipientLabel,
+            debtor: payload.debtorLabel,
+          })}
+          <strong className="font-semibold">
+            {t("payer.labelsWarningAddress")}
+          </strong>
+          {t("payer.labelsWarningAfterAddress")}
+          <strong className="font-semibold">
+            {t("payer.labelsWarningChannel")}
+          </strong>
+          {t("payer.labelsWarningEnd")}
         </p>
       </header>
 
       {/* Değiştirilemez inceleme */}
       <dl className="flex flex-col gap-1 rounded-2xl border border-line p-3 text-xs">
-        <Row label="Borçlu / gönderen" value={payload.debtorLabel} />
-        <Row label="Gönderen adresi" value={shortenWalletAddress(payload.debtor)} />
-        <Row label="Fişi ödeyen / alıcı" value={payload.recipientLabel} />
-        <Row label="Alıcı adresi" value={shortenWalletAddress(payload.recipient)} />
-        <Row label="Borç (TRY)" value={formatTry(payload.tryMinor)} />
+        <Row label={t("payer.rowDebtor")} value={payload.debtorLabel} />
         <Row
-          label="Kur"
+          label={t("payer.rowSenderAddress")}
+          value={shortenWalletAddress(payload.debtor)}
+        />
+        <Row label={t("payer.rowPayer")} value={payload.recipientLabel} />
+        <Row
+          label={t("payer.rowRecipientAddress")}
+          value={shortenWalletAddress(payload.recipient)}
+        />
+        <Row
+          label={t("payer.rowDebtTry")}
+          value={formatTry(payload.tryMinor, locale)}
+        />
+        <Row
+          label={t("payer.rowRate")}
           value={`1 USDC = ${formatQuoteRate(verifyState.quote)} TRY`}
         />
-        <Row label="Kur kaynağı" value={payload.quoteSource} />
+        <Row label={t("payer.rowRateSource")} value={payload.quoteSource} />
         <Row
-          label="Kur gözlem zamanı"
-          value={new Date(payload.quoteObservedAt * 1000).toLocaleString("tr-TR")}
+          label={t("payer.rowRateObservedAt")}
+          value={formatDateTime(payload.quoteObservedAt, locale)}
         />
         <Row
-          label="Kur geçerliliği"
-          value={new Date(payload.quoteExpiresAt * 1000).toLocaleString("tr-TR")}
+          label={t("payer.rowRateValidity")}
+          value={formatDateTime(payload.quoteExpiresAt, locale)}
         />
         <Row
-          label="Gönderilecek"
-          value={`${formatMicroUsdcForDisplay(BigInt(payload.microUsdc))} USDC`}
+          label={t("payer.rowToSend")}
+          /* Gosterim kanonik tam sayidan turer; protokol metni degismez. */
+          value={`${formatUsdcAmount(BigInt(payload.microUsdc), locale)} USDC`}
           strong
         />
-        <Row label="Ağ" value={ACTIVE_NETWORK_PROFILE.displayName} />
-        <Row label="Geçerlilik" value={expiresText} />
+        <Row
+          label={t("payer.rowNetwork")}
+          value={ACTIVE_NETWORK_PROFILE.displayName}
+        />
+        <Row label={t("payer.rowValidity")} value={expiresText} />
       </dl>
       <div className="flex flex-col gap-2">
         <AddressDisclosure
-          title="Alıcı (fişi ödeyen) adresinin tamamı"
+          title={t("payer.recipientDisclosure")}
           address={payload.recipient}
         />
         <AddressDisclosure
-          title="Gönderen (senin) adresinin tamamı"
+          title={t("payer.senderDisclosure")}
           address={payload.debtor}
         />
       </div>
       <p className="text-[11px] leading-relaxed text-ink-faint">
-        Bu alanlar imzalıdır ve değiştirilemez. Tutar, adresler ve ağ talebi
-        imzalayan kişi tarafından belirlenmiştir.{" "}
-        <strong className="font-semibold">
-          Cüzdan imzası tek başına kurun piyasa değeri olduğunu kanıtlamaz.
-        </strong>{" "}
-        Kur, sunucu tarafından CoinGecko&apos;dan alınıp imzalanmıştır ve bu
-        sayfa açılırken sunucuya ayrıca doğrulatılmıştır.
+        {t("payer.immutablePrefix")}
+        <strong className="font-semibold">{t("payer.immutableStrong")}</strong>
+        {t("payer.immutableSuffix")}
       </p>
 
       {/* Cüzdan */}
       <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-          Kendi cüzdanını bağla
+          {t("payer.connectHeading")}
         </h3>
         {!walletsScanned ? (
           <button
@@ -727,21 +773,20 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             disabled={busy}
             className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Cüzdanı bağla
+            {t("wallet.connect")}
           </button>
         ) : wallets.length === 0 ? (
           <p
             role="alert"
             className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
           >
-            Tarayıcında cüzdan bulunamadı. MetaMask gibi bir EIP-6963 cüzdanı
-            kurup sayfayı yenile.
+            {t("wallet.notFoundInstall")}
           </p>
         ) : (
           <div className="flex flex-col gap-2">
             {wallets.length > 1 && (
               <p className="text-[11px] text-ink-faint">
-                Birden fazla cüzdan bulundu, birini seç:
+                {t("wallet.multipleFound")}
               </p>
             )}
             <div className="flex flex-wrap gap-2">
@@ -773,7 +818,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 disabled={selectedWalletUuid === null || busy}
                 className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Hesabı bağla
+                {t("wallet.connectAccount")}
               </button>
               {account !== null && !onArc && (
                 <button
@@ -782,13 +827,13 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   disabled={busy}
                   className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Arc Testnet&apos;e geç
+                  {t("wallet.switchToArc")}
                 </button>
               )}
             </div>
             {account !== null && (
               <p className="text-[11px] text-ink-faint">
-                Bağlı hesap:{" "}
+                {t("wallet.connectedAccount")}{" "}
                 <span className="font-mono">{shortenWalletAddress(account)}</span>
                 {" · "}
                 {onArc ? (
@@ -797,7 +842,9 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   </span>
                 ) : (
                   <span className="text-warn-ink-faint">
-                    Arc Testnet değil (zincir {chainId ?? "bilinmiyor"})
+                    {t("wallet.notArcWithChain", {
+                      chainId: chainId ?? t("common.unknownChain"),
+                    })}
                   </span>
                 )}
               </p>
@@ -807,8 +854,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 role="alert"
                 className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2 text-[11px] leading-relaxed text-warn-ink"
               >
-                Bağlı hesap, talepteki borçlu adresiyle aynı değil. Bu talebi
-                yalnızca {payload.debtorLabel} ödeyebilir.
+                {t("payer.debtorMismatch", { debtor: payload.debtorLabel })}
               </p>
             )}
           </div>
@@ -821,16 +867,13 @@ function RequestSession({ encoded }: { encoded: string | null }) {
           className="rounded-2xl border border-warn-line bg-warn-surface px-3 py-2.5 text-xs leading-relaxed text-warn-ink"
         >
           {priorSubmission === "success"
-            ? "Bu talep için bu tarayıcıdan zaten başarılı bir gönderim yapılmış görünüyor. Tekrar göndermeden önce ArcScan'de kontrol et."
+            ? t("payer.priorSuccess")
             : priorSubmission === "pending"
-              ? "Bu talep için bir gönderim sürüyor (bu sekmede veya başka bir sekmede). Aynı ödemeyi iki kez göndermemek için burada beklet."
+              ? t("payer.priorPending")
               : priorSubmission === "reverted"
-                ? "Bu talep için yapılan gönderim zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı; tekrar denemeden önce ArcScan'de ve MetaMask geçmişinde kontrol et."
-                : "Bu talep için bu tarayıcıdan bir gönderim başlatılmış ama sonucu doğrulanamamış: ödeme yapılmış da olabilir, yapılmamış da. Tekrar göndermeden önce MetaMask işlem geçmişini ve ArcScan'i kontrol et."}{" "}
-          <strong className="font-semibold">
-            Bu kayıt yalnızca bu tarayıcıda tutulur; başka bir cihazdan veya
-            gizli sekmeden yapılan gönderimi bilemez.
-          </strong>
+                ? t("payer.priorReverted")
+                : t("payer.priorUnknown")}{" "}
+          <strong className="font-semibold">{t("payer.priorLocalOnly")}</strong>
           {pendingTxHash !== null && (
             <>
               {" "}
@@ -848,7 +891,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 rel="noreferrer"
                 className={LINK_CLASS}
               >
-                İşlemi ArcScan&apos;de aç
+                {t("common.openOnArcScan")}
               </a>
             </>
           )}
@@ -864,13 +907,12 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             disabled={!canEstimate}
             className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {status === "estimating" ? "Tahmin alınıyor…" : "İşlemi tahmin et"}
+            {status === "estimating" ? t("payer.estimating") : t("payer.estimate")}
           </button>
 
           {estimateSummary !== null && status === "review" && (
             <p className="text-[11px] text-ink-faint">
-              Tahmini ağ ücreti (gas, ayrı hesaplanır ve tutardan düşülmez):{" "}
-              {estimateSummary}
+              {t("payer.estimatedFee", { fee: estimateSummary })}
             </p>
           )}
 
@@ -884,11 +926,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   onChange={(event) => setConfirmed(event.target.checked)}
                   className="mt-0.5 accent-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 />
-                <span>
-                  Yukarıdaki imzalı talebi okudum. Kurun sunucu tarafından
-                  CoinGecko&apos;dan alınıp doğrulandığını ve gönderilecek
-                  tutarın Arc Testnet test USDC&apos;si olduğunu anlıyorum.
-                </span>
+                <span>{t("payer.confirmCheckbox")}</span>
               </label>
               <button
                 type="button"
@@ -896,20 +934,20 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 disabled={!confirmed || busy}
                 className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled"
               >
-                Cüzdanda onayla
+                {t("payer.confirmInWallet")}
               </button>
             </div>
           )}
 
           {status === "verifying" && (
             <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs text-brand-ink">
-              Talep ve kur yeniden doğrulanıyor…
+              {t("payer.reverifying")}
             </p>
           )}
 
           {status === "sending" && (
             <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs text-brand-ink">
-              İşlem cüzdanda bekleniyor…
+              {t("payer.waitingWallet")}
             </p>
           )}
         </div>
@@ -918,7 +956,12 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       {transaction !== null && (
         <div className="flex flex-col gap-1 rounded-2xl border border-brand-line-soft bg-brand-soft p-3 text-xs text-brand-ink">
           <p className="font-semibold">
-            Ödeme gönderildi ({transaction.snapshot.displayAmount} USDC).
+            {t("payer.sentAmount", {
+              amount: formatUsdcAmount(
+                BigInt(transaction.snapshot.microUsdc),
+                locale,
+              ),
+            })}
           </p>
           <p className="break-all font-mono text-[11px]">{transaction.txHash}</p>
           {transaction.explorerUrl !== null && (
@@ -928,13 +971,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
               rel="noreferrer"
               className={LINK_CLASS}
             >
-              ArcScan&apos;de görüntüle
+              {t("common.showOnArcScan")}
             </a>
           )}
           <p className="mt-1 text-[11px] leading-relaxed text-brand-ink">
-            Bu sayfada aynı talep için tekrar gönderim kapatıldı. Ödeyen kişinin
-            sayfası bu ödemeyi otomatik olarak öğrenmez; ona bilgi vermen
-            gerekir.
+            {t("payer.sentNotice")}
           </p>
         </div>
       )}
@@ -944,35 +985,35 @@ function RequestSession({ encoded }: { encoded: string | null }) {
           role="alert"
           className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
-          {errorMessage}
+          {resolveMessage(locale, errorMessage)}
+          {needsNewLinkHint ? ` ${t("payer.askForNewLink")}` : ""}
         </p>
       )}
 
       <p aria-live="polite" className="sr-only">
         {status === "estimating"
-          ? "İşlem tahmini alınıyor."
+          ? t("payer.liveEstimating")
           : status === "verifying"
-            ? "Talep ve kur yeniden doğrulanıyor."
+            ? t("payer.liveVerifying")
             : status === "sending"
-              ? "İşlem cüzdanda bekleniyor."
+              ? t("payer.liveSending")
               : transaction !== null
-                ? "Ödeme gönderildi."
+                ? t("payer.liveSent")
                 : errorMessage !== null
-                  ? errorMessage
+                  ? resolveMessage(locale, errorMessage)
                   : ""}
       </p>
 
       <p className="border-t border-line-soft pt-4 text-[11px] leading-relaxed text-ink-faint">
-        Test USDC için{" "}
+        {t("payer.footnotePrefix")}
         <a href={ARC_TESTNET_FAUCET_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-          Circle Faucet
+          {t("common.faucet")}
         </a>
-        , ağ kurulumu için{" "}
+        {t("payer.footnoteMiddle")}
         <a href={ARC_TESTNET_DOCS_URL} target="_blank" rel="noreferrer" className={LINK_CLASS}>
-          Arc dokümanı
+          {t("common.arcDocs")}
         </a>
-        . Bu bağlantı teknik olarak tekrar açılabilir; aynı borcun ikinci kez
-        ödenmesini engelleyen bir sunucu veya zincir üstü kayıt yoktur.
+        {t("payer.footnoteSuffix")}
       </p>
     </section>
   );
@@ -981,11 +1022,17 @@ function RequestSession({ encoded }: { encoded: string | null }) {
 const cardClass =
   "flex flex-col gap-4 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5";
 
-function formatTry(minor: string): string {
+/**
+ * TRY gosterimi. Girdi KANONIK metindir ve `BigInt` ile islenir: kayan
+ * noktaya HIC dusulmez. Yalnizca ondalik ayraci dile gore degisir; tutarin
+ * kendisi degismez.
+ */
+function formatTry(minor: string, locale: Locale): string {
   const value = BigInt(minor);
   const whole = value / BigInt(100);
   const fraction = (value % BigInt(100)).toString().padStart(2, "0");
-  return `₺${whole.toString()},${fraction}`;
+  const decimal = locale === "en" ? "." : ",";
+  return `₺${whole.toString()}${decimal}${fraction}`;
 }
 
 
@@ -1001,6 +1048,7 @@ function AddressDisclosure({
   title: string;
   address: string;
 }) {
+  const { t } = useTranslator();
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
   );
@@ -1034,13 +1082,13 @@ function AddressDisclosure({
           onClick={copy}
           className="self-start rounded-full border border-line bg-card px-3 py-1 text-[11px] font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
-          {copyState === "copied" ? "Kopyalandı" : "Adresi kopyala"}
+          {copyState === "copied" ? t("common.copied") : t("common.copyAddress")}
         </button>
         <p aria-live="polite" className="text-[11px] text-ink-faint">
           {copyState === "copied"
-            ? "Adres panoya kopyalandı."
+            ? t("common.addressCopied")
             : copyState === "failed"
-              ? "Tarayıcı pano erişimine izin vermedi. Adresi yukarıdan seçip elle kopyalayabilirsin."
+              ? t("common.addressCopyFailed")
               : ""}
         </p>
       </div>

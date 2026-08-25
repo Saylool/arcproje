@@ -9,14 +9,16 @@ import {
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
 } from "@/lib/arc/network";
-import { prepareLabel } from "@/lib/arc/labels";
+import {
+  SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL,
+  prepareLabel,
+} from "@/lib/arc/labels";
 import { MAX_LABEL_LENGTH } from "@/lib/arc/payment-request";
 import { debtIdentityKey } from "@/lib/arc/payment-state";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import {
   SHARED_BILL_MAX_LIFETIME_MS,
   createSharedBill,
-  describeSharedBillProblem,
 } from "@/lib/arc/shared-bill";
 import { createSharedBillOnServer } from "@/lib/arc/shared-bill-client";
 import {
@@ -25,10 +27,7 @@ import {
   validateSharedBillDraft,
   type SharedBillDraftRow,
 } from "@/lib/arc/shared-bill-draft";
-import {
-  describeSharedBillSigningError,
-  signSharedBillManifest,
-} from "@/lib/arc/shared-bill-signing";
+import { signSharedBillManifest } from "@/lib/arc/shared-bill-signing";
 import {
   discoverWallets,
   getChainId,
@@ -37,6 +36,13 @@ import {
   switchToArcTestnet,
   type WalletInfo,
 } from "@/lib/arc/wallet";
+import { useTranslator } from "@/lib/i18n/context";
+import {
+  messageApi,
+  messageKey,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
@@ -88,6 +94,7 @@ export function SharedBillCreator({
   result,
   onBack,
 }: Props) {
+  const { t, locale } = useTranslator();
   const headingId = useId();
 
   const [addresses, setAddresses] = useState<Record<string, string>>({});
@@ -98,31 +105,46 @@ export function SharedBillCreator({
   const [chainId, setChainId] = useState<number | null>(null);
 
   const [busy, setBusy] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  /* Durumda METIN degil TARIF tutulur; dil degisince cumle de degisir. */
+  const [errorMessage, setErrorMessage] =
+    useState<MessageDescriptor | null>(null);
   const [generated, setGenerated] = useState<GeneratedLink | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const nameOf = useCallback(
+  /**
+   * Kisi adi VERIDIR ve cevrilmez.
+   *
+   * Bu ekranda ad hem GORUNUR hem de `debtorLabel` / `recipientLabel` olarak
+   * IMZALANIR. Bu yuzden bulunamama durumundaki yedek ad DILDEN BAGIMSIZDIR:
+   * imzalanan manifest hicbir kosulda arayuz diline gore degisemez.
+   */
+  const signingNameOf = useCallback(
     (id: string) =>
       participants.find((participant) => participant.id === id)?.name ??
-      "Bilinmeyen kisi",
+      SHARED_BILL_UNKNOWN_PARTICIPANT_LABEL,
     [participants],
   );
 
   const isTry = receipt.currency === "TRY";
   const onArc = isArcTestnet(chainId);
 
-  /** Her borc bir satirdir: kim, ne kadar, hangi adrese odeyecek. */
+  /*
+   * Her borc bir satirdir: kim, ne kadar, hangi adrese odeyecek.
+   *
+   * `name` hem ekranda gosterilir HEM DE `debtorLabel` olarak IMZALANIR
+   * (bkz. `shared-bill-draft.ts`). Bu yuzden yedek ad dilden bagimsiz
+   * olanidir: imzalanan manifest arayuz diline gore degisemez.
+   */
   const rows: readonly SharedBillDraftRow[] = useMemo(
     () =>
       result.debts.map((debt) => ({
         participantId: debt.fromParticipantId,
-        name: nameOf(debt.fromParticipantId),
+        name: signingNameOf(debt.fromParticipantId),
         debtKey: debtIdentityKey(debt),
         amountMinor: debt.amountMinor,
         address: addresses[debt.fromParticipantId] ?? "",
       })),
-    [result.debts, addresses, nameOf],
+    [result.debts, addresses, signingNameOf],
   );
 
   const draft = useMemo(
@@ -176,9 +198,11 @@ export function SharedBillCreator({
     const accounts = await requestAccounts(selectedWalletUuid);
     if (!accounts.ok) {
       setErrorMessage(
-        accounts.code === "rejected"
-          ? "Cuzdan baglantisi reddedildi."
-          : "Cuzdana baglanilamadi.",
+        messageKey(
+          accounts.code === "rejected"
+            ? "wallet.connectRejected"
+            : "wallet.connectFailed",
+        ),
       );
       return;
     }
@@ -192,7 +216,7 @@ export function SharedBillCreator({
     setErrorMessage(null);
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
-      setErrorMessage("Ag degistirilemedi. Cuzdandan Arc Testnet'i sec.");
+      setErrorMessage(messageKey("wallet.switchFailedPickManually"));
       return;
     }
     const chain = await getChainId(selectedWalletUuid);
@@ -224,13 +248,13 @@ export function SharedBillCreator({
       const built = createSharedBill({
         recipient: account,
         recipientLabel: prepareLabel(
-          nameOf(result.payerId),
+          signingNameOf(result.payerId),
           MAX_LABEL_LENGTH,
         ),
         debts: draft.debts,
       });
       if (!built.ok) {
-        setErrorMessage(describeSharedBillProblem(built.problem));
+        setErrorMessage(messageKey(`errors.sharedBill.${built.problem}`));
         return;
       }
 
@@ -240,7 +264,7 @@ export function SharedBillCreator({
         built.manifest,
       );
       if (!signed.ok) {
-        setErrorMessage(describeSharedBillSigningError(signed.code));
+        setErrorMessage(messageKey(`errors.billSigning.${signed.code}`));
         return;
       }
 
@@ -250,7 +274,11 @@ export function SharedBillCreator({
         signature: signed.signature,
       });
       if (!created.ok) {
-        setErrorMessage(created.message);
+        /*
+         * Sunucunun hazir metni GOSTERILMEZ: cumle KARARLI KODA gore
+         * sozlukten, etkin dilde secilir.
+         */
+        setErrorMessage(messageApi(created.code));
         return;
       }
 
@@ -271,7 +299,7 @@ export function SharedBillCreator({
       await navigator.clipboard.writeText(activeLink.url);
       setCopied(true);
     } catch {
-      setErrorMessage("Baglanti kopyalanamadi. Elle secip kopyalayabilirsin.");
+      setErrorMessage(messageKey("common.linkCopyFailed"));
     }
   };
 
@@ -279,8 +307,8 @@ export function SharedBillCreator({
     if (activeLink === null) return;
     try {
       await navigator.share({
-        title: "Hesabi Bol",
-        text: "Ortak hesap odeme baglantisi",
+        title: t("sharedBill.shareTitle"),
+        text: t("sharedBill.shareText"),
         url: activeLink.url,
       });
     } catch {
@@ -292,13 +320,11 @@ export function SharedBillCreator({
     return (
       <section aria-labelledby={headingId} className={CARD_CLASS}>
         <h2 id={headingId} className="text-base font-semibold text-ink">
-          Ortak odeme baglantisi
+          {t("sharedBill.titleOnlyTry")}
         </h2>
-        <p className="text-sm text-ink-soft">
-          Bu adim yalnizca TRY fisleri icin kullanilabilir.
-        </p>
+        <p className="text-sm text-ink-soft">{t("sharedBill.onlyTry")}</p>
         <button type="button" onClick={onBack} className={LINK_CLASS}>
-          Geri don
+          {t("common.back")}
         </button>
       </section>
     );
@@ -307,27 +333,28 @@ export function SharedBillCreator({
   return (
     <section aria-labelledby={headingId} className={CARD_CLASS}>
       <h2 id={headingId} className="text-base font-semibold text-ink">
-        Tek baglanti olustur
+        {t("sharedBill.title")}
       </h2>
 
       <p className="text-sm leading-relaxed text-ink-soft">
-        Fisi odeyen cuzdanini bir kez baglarsin, her borclu icin bir adres
-        girersin ve <strong>tek bir imza</strong> atarsin.{" "}
-        <strong>Butun borclular ayni baglantiyi alir.</strong>
+        {t("sharedBill.introPrefix")}
+        <strong>{t("sharedBill.introSignature")}</strong>
+        {t("sharedBill.introMiddle")}
+        <strong>{t("sharedBill.introAllSame")}</strong>
       </p>
 
       <p className="rounded-2xl border border-brand-line-soft bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink">
-        Bu imza yalnizca bir <strong>talep olusturur</strong>. Kimsenin
-        cuzdanindan para cekemez ve hicbir transfer yetkisi vermez. Transferi
-        her borclu kendi cuzdaninda imzalar. Ag:{" "}
-        {ACTIVE_NETWORK_PROFILE.displayName} — test USDC&apos;sinin gercek
-        parasal degeri yoktur.
+        {t("sharedBill.noticePrefix")}
+        <strong>{t("sharedBill.noticeRequest")}</strong>
+        {t("sharedBill.noticeSuffix", {
+          network: ACTIVE_NETWORK_PROFILE.displayName,
+        })}
       </p>
 
       {/* Cuzdan */}
       <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <h3 className="text-sm font-semibold text-ink">
-          1. Fisi odeyen cuzdan
+          {t("sharedBill.stepWallet")}
         </h3>
         {!walletsScanned && (
           <button
@@ -335,19 +362,19 @@ export function SharedBillCreator({
             onClick={scanWallets}
             className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            Cuzdani bagla
+            {t("wallet.connect")}
           </button>
         )}
         {walletsScanned && wallets.length === 0 && (
           <p className="text-xs text-ink-faint">
-            Tarayicida cuzdan bulunamadi.{" "}
+            {t("wallet.notFound")}{" "}
             <a
               href={ARC_TESTNET_DOCS_URL}
               target="_blank"
               rel="noreferrer"
               className={LINK_CLASS}
             >
-              Arc Testnet kurulumu
+              {t("common.arcSetup")}
             </a>
           </p>
         )}
@@ -358,7 +385,7 @@ export function SharedBillCreator({
               onChange={(event) => setSelectedWalletUuid(event.target.value)}
               className="rounded-full border border-line px-3 py-1.5 text-sm"
             >
-              <option value="">Cuzdan sec</option>
+              <option value="">{t("wallet.select")}</option>
               {wallets.map((wallet) => (
                 <option key={wallet.uuid} value={wallet.uuid}>
                   {wallet.name}
@@ -371,13 +398,14 @@ export function SharedBillCreator({
               disabled={selectedWalletUuid === null}
               className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              Bagla
+              {t("wallet.connectShort")}
             </button>
           </div>
         )}
         {account !== null && (
           <p className="text-xs text-ink-soft">
-            Alici: <span className="font-mono">{shortenWalletAddress(account)}</span>
+            {t("wallet.recipientIs")}{" "}
+            <span className="font-mono">{shortenWalletAddress(account)}</span>
           </p>
         )}
         {account !== null && !onArc && (
@@ -386,7 +414,9 @@ export function SharedBillCreator({
             onClick={switchNetwork}
             className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink"
           >
-            {ACTIVE_NETWORK_PROFILE.displayName} agina gec
+            {t("wallet.switchTo", {
+              network: ACTIVE_NETWORK_PROFILE.displayName,
+            })}
           </button>
         )}
       </div>
@@ -394,10 +424,10 @@ export function SharedBillCreator({
       {/* Borclu adresleri */}
       <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
         <h3 className="text-sm font-semibold text-ink">
-          2. Her borclu icin bir cuzdan adresi
+          {t("sharedBill.stepAddresses")}
         </h3>
         {rows.length === 0 && (
-          <p className="text-xs text-ink-faint">Paylasilacak bir borc yok.</p>
+          <p className="text-xs text-ink-faint">{t("sharedBill.noDebts")}</p>
         )}
         {rows.map((row) => {
           const invalid =
@@ -405,14 +435,15 @@ export function SharedBillCreator({
           return (
             <label key={row.participantId} className="flex flex-col gap-1">
               <span className="text-xs font-medium text-ink-soft">
-                {row.name} — {formatMinorForDisplay(row.amountMinor, receipt.currency)}
+                {row.name} —{" "}
+                {formatMinorForDisplay(row.amountMinor, receipt.currency, locale)}
               </span>
               <input
                 type="text"
                 inputMode="text"
                 autoComplete="off"
                 spellCheck={false}
-                placeholder="0x…"
+                placeholder={t("common.addressPlaceholder")}
                 value={row.address}
                 onChange={(event) =>
                   setAddresses((previous) => ({
@@ -430,7 +461,7 @@ export function SharedBillCreator({
         })}
         {!draft.ok && rows.length > 0 && (
           <p role="alert" className="text-xs text-danger-ink">
-            {describeSharedBillDraftProblem(draft.problem)}
+            {describeSharedBillDraftProblem(draft.problem, locale)}
           </p>
         )}
       </div>
@@ -443,17 +474,16 @@ export function SharedBillCreator({
           disabled={!canCreate}
           className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? "Imzalaniyor…" : "Imzala ve tek baglanti olustur"}
+          {busy ? t("sharedBill.signing") : t("sharedBill.signAndCreate")}
         </button>
         {errorMessage !== null && (
           <p role="alert" className="text-xs leading-relaxed text-danger-ink">
-            {errorMessage}
+            {resolveMessage(locale, errorMessage)}
           </p>
         )}
         {linkIsStale && (
           <p role="alert" className="text-xs leading-relaxed text-warn-ink-soft">
-            Girdiler degisti; onceki baglanti artik gecerli degil. Yeniden
-            imzalayip yeni bir baglanti olustur.
+            {t("sharedBill.stale")}
           </p>
         )}
       </div>
@@ -462,7 +492,7 @@ export function SharedBillCreator({
       {activeLink !== null && (
         <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
           <h3 className="text-sm font-semibold text-ink">
-            3. Tek baglanti — herkese ayni
+            {t("sharedBill.stepLink")}
           </h3>
           <p className="break-all rounded-2xl border border-line bg-muted px-3 py-2 font-mono text-[11px] text-ink-soft">
             {activeLink.url}
@@ -473,38 +503,37 @@ export function SharedBillCreator({
               onClick={copyLink}
               className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
             >
-              {copied ? "Kopyalandi" : "Kopyala"}
+              {copied ? t("common.copied") : t("common.copy")}
             </button>
             <button
               type="button"
               onClick={shareLink}
               className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
             >
-              Paylas
+              {t("common.share")}
             </button>
           </div>
           {qrSvg !== null && (
             <div
-              aria-label="Ortak odeme baglantisinin QR kodu"
+              aria-label={t("sharedBill.qrLabel")}
               className="w-40 self-start [&>svg]:h-auto [&>svg]:w-full"
               dangerouslySetInnerHTML={{ __html: qrSvg }}
             />
           )}
           <p className="text-xs leading-relaxed text-ink-faint">
-            Baglanti borc listesini, adresleri veya isimleri TASIMAZ; yalnizca
-            tahmin edilemez bir kimlik icerir. Baglantiyi acan herkes hesabi
-            gorebilir, bu yuzden yalnizca ilgili kisilerle paylas. En fazla{" "}
-            {SHARED_BILL_MAX_LIFETIME_MS / (24 * 60 * 60 * 1000)} gun gecerlidir.
+            {t("sharedBill.linkNotice", {
+              days: SHARED_BILL_MAX_LIFETIME_MS / (24 * 60 * 60 * 1000),
+            })}
           </p>
           <p className="text-xs leading-relaxed text-ink-faint">
-            Test USDC&apos;si icin{" "}
+            {t("sharedBill.faucetPrefix")}
             <a
               href={ARC_TESTNET_FAUCET_URL}
               target="_blank"
               rel="noreferrer"
               className={LINK_CLASS}
             >
-              Circle Faucet
+              {t("common.faucet")}
             </a>
             .
           </p>
@@ -516,7 +545,7 @@ export function SharedBillCreator({
         onClick={onBack}
         className="self-start text-xs text-ink-faint underline underline-offset-2"
       >
-        Geri don
+        {t("common.back")}
       </button>
     </section>
   );

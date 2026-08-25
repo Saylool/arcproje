@@ -9,6 +9,8 @@ import {
   type SharedBillManifest,
 } from "./shared-bill";
 import { withProvider } from "./wallet";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * Paylaşılan grup hesabı manifestinin imzalanması ve doğrulanması.
@@ -35,27 +37,18 @@ export type SharedBillSigningErrorCode =
   | "signerMismatch"
   | "signFailed";
 
-const MESSAGES: Record<SharedBillSigningErrorCode, string> = {
-  noProvider: "Cüzdan bağlantısı bulunamadı. Cüzdanı yeniden bağla.",
-  rejected: "İmza cüzdanda reddedildi.",
-  noAccount: "Cüzdanda açık bir hesap yok.",
-  accountChanged:
-    "Cüzdandaki aktif hesap, hesabın alıcısı değil. Fişi ödeyen hesaba geçip tekrar dene.",
-  networkChanged:
-    "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
-  invalidManifest:
-    "Paylaşılan hesap kendi doğrulamamızdan geçmedi; cüzdana hiçbir şey gönderilmedi. Adresleri ve tutarları kontrol edip tekrar dene.",
-  invalidRecipient: "Alıcı cüzdan adresi geçersiz.",
-  signatureFormat: "Cüzdan beklenen biçimde bir imza döndürmedi.",
-  signerMismatch:
-    "İmzayı atan hesap hesabın alıcısıyla eşleşmiyor. Paylaşılan hesap oluşturulmadı.",
-  signFailed: "Paylaşılan hesap imzalanamadı. Lütfen tekrar dene.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeSharedBillSigningError(
   code: SharedBillSigningErrorCode,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return MESSAGES[code];
+  return translate(locale, `errors.billSigning.${code}`);
 }
 
 export type SharedBillSigningResult =

@@ -4,6 +4,8 @@ import { normalizeWalletAddress, walletAddressesEqual } from "./address";
 import { isArcTestnet, parseChainId } from "./network";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
 import { withProvider } from "./wallet";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * BORÇLU CÜZDAN KİMLİK DOĞRULAMASI — erişim meydan okuması (challenge).
@@ -84,28 +86,18 @@ export type AccessChallengeProblem =
   | "lifetimeTooLong"
   | "invalidSignatureFormat";
 
-const PROBLEM_MESSAGES: Record<AccessChallengeProblem, string> = {
-  notAnObject: "Erişim isteği okunamadı.",
-  unexpectedField: "Erişim isteğinde beklenmeyen alan var.",
-  missingField: "Erişim isteğinde eksik alan var.",
-  unsupportedVersion: "Bu erişim isteği sürümü desteklenmiyor.",
-  invalidBillId: "Hesap kimliği geçersiz.",
-  invalidChainId: "Erişim isteği Arc Testnet için oluşturulmamış.",
-  invalidDebtor: "Cüzdan adresi geçersiz.",
-  invalidNonce: "Erişim isteğinin tek kullanımlık değeri geçersiz.",
-  invalidAudience: "Erişim isteğinin hedefi geçersiz.",
-  audienceMismatch: "Erişim isteği bu uygulama için oluşturulmamış.",
-  invalidTimestamps: "Erişim isteğinin zaman bilgisi geçersiz.",
-  expired: "Erişim isteğinin süresi doldu. Yeniden dene.",
-  notYetValid: "Erişim isteği henüz geçerli değil.",
-  lifetimeTooLong: "Erişim isteğinin ömrü izin verilenden uzun.",
-  invalidSignatureFormat: "İmza geçersiz biçimde.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeAccessChallengeProblem(
   problem: AccessChallengeProblem,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return PROBLEM_MESSAGES[problem];
+  return translate(locale, `errors.access.${problem}`);
 }
 
 const BILL_ID = /^0x[0-9a-f]{64}$/i;
@@ -296,25 +288,18 @@ export type AccessSigningErrorCode =
   | "signerMismatch"
   | "signFailed";
 
-const SIGNING_MESSAGES: Record<AccessSigningErrorCode, string> = {
-  noProvider: "Cüzdan bağlantısı bulunamadı. Cüzdanı yeniden bağla.",
-  rejected: "İmza cüzdanda reddedildi. Borcunu görmek için imzalaman gerekir.",
-  noAccount: "Cüzdanda açık bir hesap yok.",
-  accountChanged:
-    "Cüzdandaki aktif hesap değişti. Görmek istediğin borcun cüzdanına geçip tekrar dene.",
-  networkChanged:
-    "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
-  invalidChallenge:
-    "Erişim isteği kendi doğrulamamızdan geçmedi; cüzdana hiçbir şey gönderilmedi.",
-  signatureFormat: "Cüzdan beklenen biçimde bir imza döndürmedi.",
-  signerMismatch: "İmzayı atan hesap, isteği yapılan adresle eşleşmiyor.",
-  signFailed: "İmzalanamadı. Lütfen tekrar dene.",
-};
-
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
 export function describeAccessSigningError(
   code: AccessSigningErrorCode,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return SIGNING_MESSAGES[code];
+  return translate(locale, `errors.accessSigning.${code}`);
 }
 
 /**

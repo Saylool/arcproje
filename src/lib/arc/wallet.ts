@@ -1,3 +1,5 @@
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE } from "../i18n/locale";
 import {
   ARC_TESTNET_CHAIN_ID_HEX,
   buildAddArcTestnetParams,
@@ -66,7 +68,10 @@ export function discoverWallets(timeoutMs = 350): Promise<WalletInfo[]> {
       providerRegistry.set(detail.info.uuid, detail.provider);
       found.set(detail.info.uuid, {
         uuid: detail.info.uuid,
-        name: typeof detail.info.name === "string" ? detail.info.name : "Cüzdan",
+        name:
+          typeof detail.info.name === "string"
+            ? detail.info.name
+            : translate(DEFAULT_LOCALE, "wallet.fallbackName"),
         rdns: typeof detail.info.rdns === "string" ? detail.info.rdns : "",
         icon: safeIcon(detail.info.icon),
       });

@@ -10,12 +10,8 @@ import {
 } from "@/lib/arc/network";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { SHARED_BILL_ACCESS_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill-access";
+import { signSharedBillAccessChallenge } from "@/lib/arc/shared-bill-access";
 import {
-  describeAccessSigningError,
-  signSharedBillAccessChallenge,
-} from "@/lib/arc/shared-bill-access";
-import {
-  describeViewProblem,
   fetchAuthenticatedDebt,
   requestAccessChallenge,
   submitAccessResolution,
@@ -31,6 +27,14 @@ import {
   type WalletInfo,
 } from "@/lib/arc/wallet";
 import { formatMinorUnitsAsTry } from "@/lib/arc/minor-units";
+import { useTranslator } from "@/lib/i18n/context";
+import { formatDateTime } from "@/lib/i18n/format";
+import {
+  messageApi,
+  messageKey,
+  resolveMessage,
+  type MessageDescriptor,
+} from "@/lib/i18n/messages";
 
 import { SharedBillPaymentPanel } from "./SharedBillPaymentPanel";
 
@@ -51,11 +55,15 @@ import { SharedBillPaymentPanel } from "./SharedBillPaymentPanel";
 
 type Props = { billId: string };
 
+/*
+ * Adim ve hata metinleri durumda METIN olarak DEGIL, TARIF olarak tutulur.
+ * Dil degistiginde ekrandaki cumle de aninda yeni dile gecer.
+ */
 type Stage =
   | { status: "idle" }
-  | { status: "working"; step: string }
+  | { status: "working"; step: MessageDescriptor }
   | { status: "ready"; view: VerifiedView }
-  | { status: "error"; message: string };
+  | { status: "error"; message: MessageDescriptor };
 
 const CARD_CLASS =
   "flex flex-col gap-4 rounded-3xl border border-line bg-card p-5 shadow-sm";
@@ -63,6 +71,7 @@ const LINK_CLASS =
   "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 export function SharedBillDebtorView({ billId }: Props) {
+  const { t, tRich, locale } = useTranslator();
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
@@ -116,10 +125,11 @@ export function SharedBillDebtorView({ billId }: Props) {
     if (!accounts.ok) {
       setStage({
         status: "error",
-        message:
+        message: messageKey(
           accounts.code === "rejected"
-            ? "Cüzdan bağlantısı reddedildi."
-            : "Cüzdana bağlanılamadı.",
+            ? "wallet.connectRejected"
+            : "wallet.connectFailed",
+        ),
       });
       return;
     }
@@ -134,7 +144,7 @@ export function SharedBillDebtorView({ billId }: Props) {
     if (!switched.ok) {
       setStage({
         status: "error",
-        message: "Ağ değiştirilemedi. Cüzdandan Arc Testnet'i seç.",
+        message: messageKey("wallet.switchFailedPickManually"),
       });
       return;
     }
@@ -150,14 +160,15 @@ export function SharedBillDebtorView({ billId }: Props) {
     }
     setCopied(false);
 
-    setStage({ status: "working", step: "Erişim isteği alınıyor…" });
+    setStage({ status: "working", step: messageKey("sharedPay.stepChallenge") });
     const challenge = await requestAccessChallenge(billId, account);
     if (!challenge.ok) {
-      setStage({ status: "error", message: challenge.message });
+      // Sunucunun hazir metni degil, KARARLI KODU tasinir.
+      setStage({ status: "error", message: messageApi(challenge.code) });
       return;
     }
 
-    setStage({ status: "working", step: "Cüzdanda imza bekleniyor…" });
+    setStage({ status: "working", step: messageKey("sharedPay.stepSignature") });
     const signed = await signSharedBillAccessChallenge(
       selectedWalletUuid,
       challenge.value.challenge,
@@ -166,29 +177,29 @@ export function SharedBillDebtorView({ billId }: Props) {
     if (!signed.ok) {
       setStage({
         status: "error",
-        message: describeAccessSigningError(signed.code),
+        message: messageKey(`errors.accessSigning.${signed.code}`),
       });
       return;
     }
 
-    setStage({ status: "working", step: "Borç aranıyor…" });
+    setStage({ status: "working", step: messageKey("sharedPay.stepLookup") });
     const resolved = await submitAccessResolution(billId, {
       challenge: challenge.value.challenge,
       tag: challenge.value.tag,
       signature: signed.signature,
     });
     if (!resolved.ok) {
-      setStage({ status: "error", message: resolved.message });
+      setStage({ status: "error", message: messageApi(resolved.code) });
       return;
     }
 
     const fetched = await fetchAuthenticatedDebt(billId);
     if (!fetched.ok) {
-      setStage({ status: "error", message: fetched.message });
+      setStage({ status: "error", message: messageApi(fetched.code) });
       return;
     }
 
-    setStage({ status: "working", step: "İmza ve kanıt doğrulanıyor…" });
+    setStage({ status: "working", step: messageKey("sharedPay.stepVerify") });
     const verified = await verifyAuthenticatedView({
       payload: fetched.value,
       connectedAddress: account,
@@ -200,7 +211,7 @@ export function SharedBillDebtorView({ billId }: Props) {
       // Doğrulama düşerse HİÇBİR borç gösterilmez.
       setStage({
         status: "error",
-        message: describeViewProblem(verified.problem),
+        message: messageKey(`errors.view.${verified.problem}`),
       });
       return;
     }
@@ -220,13 +231,13 @@ export function SharedBillDebtorView({ billId }: Props) {
 
   const expiryText = useMemo(() => {
     if (stage.status !== "ready") return null;
-    return new Date(stage.view.billExpiresAt * 1000).toLocaleString("tr-TR");
-  }, [stage]);
+    return formatDateTime(stage.view.billExpiresAt, locale);
+  }, [stage, locale]);
 
   return (
-    <section aria-label="Ortak hesap" className={CARD_CLASS}>
+    <section aria-label={t("sharedPay.sectionLabel")} className={CARD_CLASS}>
       <h1 className="text-base font-semibold tracking-tight text-ink">
-        Ortak hesap — kendi borcun
+        {t("sharedPay.title")}
       </h1>
 
       {/*
@@ -234,17 +245,19 @@ export function SharedBillDebtorView({ billId }: Props) {
         önce hiçbir hesap verisi gösterilmez.
       */}
       <p className="text-sm leading-relaxed text-ink-soft">
-        Bu bağlantı gruptaki <strong>herkese aynı</strong> gönderildi. Kendi
-        borcunu görmek için cüzdanını bağlayıp bir <strong>kimlik doğrulama
-        mesajı</strong> imzalaman gerekiyor.
+        {t("sharedPay.introPrefix")}
+        <strong>{t("sharedPay.introEveryone")}</strong>
+        {t("sharedPay.introMiddle")}
+        <strong>{t("sharedPay.introAuthMessage")}</strong>
+        {t("sharedPay.introSuffix")}
       </p>
 
       <p className="rounded-2xl border border-brand-line-soft bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink">
-        Bu imza bir <strong>işlem değildir</strong>: hiçbir token onaylamaz,
-        hiçbir transfer yetkisi vermez ve cüzdanından para çekmez. Yalnızca bu
-        adresi kontrol ettiğini kanıtlar. Kimlik doğrulaması değil, yalnızca
-        adres sahipliği kanıtıdır. Geçerlilik:{" "}
-        {SHARED_BILL_ACCESS_MAX_LIFETIME_MS / 60000} dakika.
+        {t("sharedPay.noticePrefix")}
+        <strong>{t("sharedPay.noticeNotATransaction")}</strong>
+        {t("sharedPay.noticeSuffix", {
+          minutes: SHARED_BILL_ACCESS_MAX_LIFETIME_MS / 60000,
+        })}
       </p>
 
       {/* Cüzdan */}
@@ -255,19 +268,19 @@ export function SharedBillDebtorView({ billId }: Props) {
             onClick={scanWallets}
             className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white"
           >
-            Cüzdanı bağla
+            {t("wallet.connect")}
           </button>
         )}
         {walletsScanned && wallets.length === 0 && (
           <p className="text-xs text-ink-faint">
-            Tarayıcıda cüzdan bulunamadı.{" "}
+            {t("wallet.notFound")}{" "}
             <a
               href={ARC_TESTNET_DOCS_URL}
               target="_blank"
               rel="noreferrer"
               className={LINK_CLASS}
             >
-              Arc Testnet kurulumu
+              {t("common.arcSetup")}
             </a>
           </p>
         )}
@@ -278,7 +291,7 @@ export function SharedBillDebtorView({ billId }: Props) {
               onChange={(event) => setSelectedWalletUuid(event.target.value)}
               className="rounded-full border border-line px-3 py-1.5 text-sm"
             >
-              <option value="">Cüzdan seç</option>
+              <option value="">{t("wallet.select")}</option>
               {wallets.map((wallet) => (
                 <option key={wallet.uuid} value={wallet.uuid}>
                   {wallet.name}
@@ -291,13 +304,13 @@ export function SharedBillDebtorView({ billId }: Props) {
               disabled={selectedWalletUuid === null}
               className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
             >
-              Bağla
+              {t("wallet.connectShort")}
             </button>
           </div>
         )}
         {account !== null && (
           <p className="text-xs text-ink-soft">
-            Bağlı cüzdan:{" "}
+            {t("wallet.connectedWallet")}{" "}
             <span className="font-mono">{shortenWalletAddress(account)}</span>
           </p>
         )}
@@ -307,7 +320,9 @@ export function SharedBillDebtorView({ billId }: Props) {
             onClick={switchNetwork}
             className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink"
           >
-            {ACTIVE_NETWORK_PROFILE.displayName} ağına geç
+            {t("wallet.switchTo", {
+              network: ACTIVE_NETWORK_PROFILE.displayName,
+            })}
           </button>
         )}
         {account !== null && onArc && stage.status !== "ready" && (
@@ -317,7 +332,9 @@ export function SharedBillDebtorView({ billId }: Props) {
             disabled={stage.status === "working"}
             className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
           >
-            {stage.status === "working" ? stage.step : "İmzala ve borcumu gör"}
+            {stage.status === "working"
+              ? resolveMessage(locale, stage.step)
+              : t("sharedPay.authenticate")}
           </button>
         )}
       </div>
@@ -327,26 +344,31 @@ export function SharedBillDebtorView({ billId }: Props) {
           role="alert"
           className="rounded-2xl border border-danger-line bg-danger-surface px-3 py-2.5 text-xs leading-relaxed text-danger-ink"
         >
-          {stage.message}
+          {resolveMessage(locale, stage.message)}
         </p>
       )}
 
       {/* Yalnızca KENDİ borcu */}
       {stage.status === "ready" && (
         <div className="flex flex-col gap-3 border-t border-line-soft pt-4">
-          <h2 className="text-sm font-semibold text-ink">Senin borcun</h2>
+          <h2 className="text-sm font-semibold text-ink">
+            {t("sharedPay.yourDebt")}
+          </h2>
           <p className="text-2xl font-semibold tracking-tight text-ink">
             {/* Gösterim TAM SAYIDAN türer; `Number` ile daraltılmaz. */}
-            {formatMinorUnitsAsTry(stage.view.debt.tryMinor) ?? "—"}
+            {formatMinorUnitsAsTry(stage.view.debt.tryMinor, locale) ??
+              t("common.dash")}
           </p>
           <p className="text-xs text-ink-soft">
-            {stage.view.debt.debtorLabel} →{" "}
-            <strong>{stage.view.recipient.label}</strong> (fişi ödeyen)
+            {tRich("sharedPay.debtorToRecipient", {
+              debtor: stage.view.debt.debtorLabel,
+              recipient: <strong>{stage.view.recipient.label}</strong>,
+            })}
           </p>
 
           <div className="flex flex-col gap-1">
             <span className="text-xs font-medium text-ink-soft">
-              Alıcı cüzdan adresi
+              {t("sharedPay.recipientAddress")}
             </span>
             <p className="break-all rounded-2xl border border-line bg-muted px-3 py-2 font-mono text-[11px] text-ink-soft">
               {stage.view.recipient.address}
@@ -356,13 +378,13 @@ export function SharedBillDebtorView({ billId }: Props) {
               onClick={copyRecipient}
               className="self-start rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
             >
-              {copied ? "Kopyalandı" : "Adresi kopyala"}
+              {copied ? t("common.copied") : t("common.copyAddress")}
             </button>
           </div>
 
           {expiryText !== null && (
             <p className="text-xs text-ink-faint">
-              Bu bağlantı {expiryText} tarihine kadar geçerli.
+              {t("sharedPay.validUntil", { date: expiryText })}
             </p>
           )}
 
@@ -387,15 +409,18 @@ export function SharedBillDebtorView({ billId }: Props) {
           )}
 
           <p className="text-xs leading-relaxed text-ink-faint">
-            Ağ: {ACTIVE_NETWORK_PROFILE.displayName}. Test USDC&apos;sinin{" "}
-            <strong>gerçek parasal değeri yoktur</strong>. Test parası için{" "}
+            {t("sharedPay.networkNotePrefix", {
+              network: ACTIVE_NETWORK_PROFILE.displayName,
+            })}
+            <strong>{t("sharedPay.networkNoteStrong")}</strong>
+            {t("sharedPay.networkNoteSuffix")}
             <a
               href={ARC_TESTNET_FAUCET_URL}
               target="_blank"
               rel="noreferrer"
               className={LINK_CLASS}
             >
-              Circle Faucet
+              {t("common.faucet")}
             </a>
             .
           </p>

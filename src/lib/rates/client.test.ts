@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { fetchQuoteFromServer, verifyQuoteWithServer } from "./client";
+import { describeQuoteProblem } from "./quote";
 import { buildTestQuote } from "./quote-fixture";
+import { translate } from "../i18n/dictionary";
+import type { Locale } from "../i18n/locale";
+
+const describeGeneric = (locale: Locale) =>
+  translate(locale, "errors.rateMalformed");
 
 const NOW = 1_700_000_000_000;
 const SIGNED = buildTestQuote({ nowMs: NOW, wholeRate: 42 });
@@ -46,13 +52,24 @@ describe("fetchQuoteFromServer", () => {
     expect(result.ok).toBe(false);
   });
 
-  it("hata durumunda sunucu mesajını taşır", async () => {
+  it("TANINMAYAN kodda sunucunun ham metnini GÖSTERMEZ", async () => {
+    /*
+     * Sunucudan gelen hazır metin kullanıcıya basılmaz: gösterilecek cümle
+     * her zaman sözlükten, KARARLI KODA göre seçilir. Kod tanınmıyorsa
+     * güvenli genel karşılık kullanılır.
+     */
     const result = await fetchQuoteFromServer(
       NOW,
       (async () =>
         jsonResponse({ error: { code: "timeout", message: "Kur zaman aşımı." } }, 504)) as never,
     );
-    expect(result).toEqual({ ok: false, message: "Kur zaman aşımı." });
+    expect(result).toEqual({
+      ok: false,
+      message: describeGeneric("tr"),
+      code: "timeout",
+    });
+    if (result.ok) return;
+    expect(result.message).not.toContain("Kur zaman aşımı.");
   });
 
   it("ağ hatasında sessizce başarılı olmaz", async () => {
@@ -91,7 +108,12 @@ describe("verifyQuoteWithServer", () => {
       (async () =>
         jsonResponse({ valid: false, error: { code: "expired", message: "Süre doldu." } })) as never,
     );
-    expect(result).toEqual({ ok: false, message: "Süre doldu." });
+    // Metin KODDAN gelir, sunucunun gönderdiği metinden değil.
+    expect(result).toEqual({
+      ok: false,
+      message: describeQuoteProblem("expired", "tr"),
+      code: "expired",
+    });
   });
 
   it("hatalı HTTP durumunda başarısızdır", async () => {
@@ -100,7 +122,11 @@ describe("verifyQuoteWithServer", () => {
       SIGNED.tag,
       (async () => jsonResponse({ error: { code: "invalidTag", message: "Etiket geçersiz." } }, 400)) as never,
     );
-    expect(result).toEqual({ ok: false, message: "Etiket geçersiz." });
+    expect(result).toEqual({
+      ok: false,
+      message: describeQuoteProblem("invalidTag", "tr"),
+      code: "invalidTag",
+    });
   });
 
   it("ağ hatasında başarısızdır", async () => {

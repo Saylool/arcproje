@@ -1,7 +1,12 @@
+import { useTranslator } from "@/lib/i18n/context";
+
+/**
+ * Adim KIMLIKLERI kararlidir ve cevrilmez; gorunen etiket sozlukten gelir.
+ */
 export const FLOW_STEPS = [
-  { id: "receipt", label: "Fiş" },
-  { id: "participants", label: "Kişiler" },
-  { id: "payment", label: "Ödeme" },
+  { id: "receipt", labelKey: "progress.receipt" },
+  { id: "participants", labelKey: "progress.participants" },
+  { id: "payment", labelKey: "progress.payment" },
 ] as const;
 
 export type FlowStepId = (typeof FLOW_STEPS)[number]["id"];
@@ -14,10 +19,11 @@ type ProgressStepsProps = {
 };
 
 export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
+  const { t } = useTranslator();
   const currentIndex = FLOW_STEPS.findIndex((step) => step.id === currentStepId);
 
   return (
-    <nav aria-label="İlerleme durumu">
+    <nav aria-label={t("progress.label")}>
       <ol className="flex items-center">
         {FLOW_STEPS.map((step, index) => {
           const isActive = index === currentIndex;
@@ -53,17 +59,17 @@ export function ProgressSteps({ currentStepId }: ProgressStepsProps) {
                       : "text-ink-faint"
                 }`}
               >
-                {step.label}
+                {t(step.labelKey)}
               </span>
 
               <span className="sr-only">
                 {isActive
-                  ? "(şu anki adım)"
+                  ? t("progress.current")
                   : isCompleted
-                    ? "(tamamlandı)"
+                    ? t("progress.completed")
                     : isPaymentPreview
-                      ? "(sonraki aşama, henüz hazır değil)"
-                      : "(henüz tamamlanmadı)"}
+                      ? t("progress.upcoming")
+                      : t("progress.notCompleted")}
               </span>
 
               {!isLast && (

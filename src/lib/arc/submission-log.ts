@@ -1,4 +1,6 @@
 import { buildArcExplorerTxUrl, isValidTransactionHash } from "./network";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE } from "../i18n/locale";
 
 /**
  * Aynı tarayıcıda kazara tekrar gönderimi engelleyen YEREL kayıt ve kilit.
@@ -88,8 +90,10 @@ export type LockManagerLike = {
  * Kilit veya doğrulanabilir kalıcı kayıt olmadan aynı ödemenin iki sekmeden
  * iki kez gönderilmediği GÖSTERİLEMEZ; bu yüzden gönderim hiç başlatılmaz.
  */
-export const SUBMISSION_UNAVAILABLE_MESSAGE =
-  "Bu tarayıcı, aynı ödemenin iki kez gönderilmesini engelleyecek kilidi (Web Locks) veya doğrulanabilir yerel kaydı sağlamıyor. Güvenlik gereği gönderim BAŞLATILMADI. Güncel bir tarayıcıda, gizli olmayan bir sekmede ve site verilerine izin vererek tekrar dene.";
+export const SUBMISSION_UNAVAILABLE_MESSAGE = translate(
+  DEFAULT_LOCALE,
+  "errors.submissionUnavailable",
+);
 
 function defaultStorage(): StorageLike | null {
   try {

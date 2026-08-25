@@ -3,6 +3,25 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { SHARED_BILL_FLOW_ENABLED } from "@/lib/arc/shared-bill-feature";
+import { translate, type TranslationKey } from "@/lib/i18n/dictionary";
+
+/**
+ * METİN ARTIK BİLEŞENDE DEĞİL SÖZLÜKTEDİR.
+ *
+ * Bu yüzden sözleşme İKİ parçada doğrulanır: bileşen doğru ANAHTARI kullanıyor
+ * mu ve sözlük o anahtar altında beklenen TÜRKÇE cümleyi taşıyor mu. İkisi
+ * birlikte, eskisiyle aynı garantiyi verir; ayrıca İngilizce karşılığın da
+ * boş olmadığını kontrol eder.
+ */
+function expectShows(
+  source: string,
+  key: TranslationKey,
+  expectedTurkish: string,
+): void {
+  expect(source, key).toContain(key);
+  expect(translate("tr", key), key).toContain(expectedTurkish);
+  expect(translate("en", key), key).not.toBe("");
+}
 
 /**
  * BORÇLU ÖDEME ARAYÜZÜNÜN SÖZLEŞMESİ.
@@ -27,7 +46,7 @@ const code = panel
 
 describe("ödeme YALNIZCA kullanıcının açık eylemiyle başlar", () => {
   it("gönderim, KULLANICININ tıkladığı düğmeye bağlıdır", () => {
-    expect(panel).toContain("Arc Testnet ile öde");
+    expectShows(panel, "sharedPay.payWithArc", "Arc Testnet ile öde");
     expect(panel).toContain("onClick={() => pay(phase.offer)}");
   });
 
@@ -37,8 +56,8 @@ describe("ödeme YALNIZCA kullanıcının açık eylemiyle başlar", () => {
      * vardır; `pay` ancak `reviewed` dalında çağrılabilir.
      */
     const branch = panel.slice(panel.indexOf('phase.status === "offered" ?'));
-    const estimateFirst = branch.indexOf("İşlemi tahmin et");
-    const payAfter = branch.indexOf("Arc Testnet ile öde");
+    const estimateFirst = branch.indexOf("sharedPay.estimateButton");
+    const payAfter = branch.indexOf("sharedPay.payWithArc");
     expect(estimateFirst).toBeGreaterThanOrEqual(0);
     expect(payAfter).toBeGreaterThan(estimateFirst);
   });
@@ -95,8 +114,8 @@ describe("ÖDENDİ etiketi yalnızca SUNUCU onayından sonra", () => {
   });
 
   it("doğrulanırken kullanıcıya 'tamamlanmış sayılmaz' denir", () => {
-    expect(panel).toContain("Doğrulanıyor.");
-    expect(panel).toContain("tamamlanmış sayılmaz");
+    expectShows(panel, "sharedPay.confirmingStrong", "Doğrulanıyor.");
+    expectShows(panel, "sharedPay.confirmingNotDone", "tamamlanmış sayılmaz");
   });
 
   it("yoklama SINIRLIDIR", () => {
@@ -138,28 +157,37 @@ describe("belirsiz sonuç KİLİTLİ kalır", () => {
 
 describe("uyarılar ve atıf GÖRÜNÜR kalır", () => {
   it("CoinGecko atfı vardır", () => {
-    expect(panel).toContain("CoinGecko");
+    expectShows(panel, "sharedPay.rateSourceName", "CoinGecko");
   });
 
   it("testnet uyarısı ve faucet bağlantısı vardır", () => {
-    expect(panel).toContain("gerçek parasal değeri yoktur");
+    expectShows(
+      panel,
+      "sharedPay.networkNoteStrong",
+      "gerçek parasal değeri yoktur",
+    );
     expect(panel).toContain("ARC_TESTNET_FAUCET_URL");
   });
 
   it("alıcının TAM adresi gösterilir", () => {
-    expect(panel).toContain("Alıcı cüzdan adresi (tam)");
+    expectShows(
+      panel,
+      "sharedPay.recipientAddressFull",
+      "Alıcı cüzdan adresi (tam)",
+    );
     expect(panel).toContain("{phase.offer.recipient}");
   });
 
   it("kur, TRY borcu, USDC tutarı ve bitiş gösterilir", () => {
-    for (const label of [
-      "Borç (TRY)",
-      "Kur (1 USDC)",
-      "Gönderilecek",
-      "Kur teklifi biter",
-      "Tahmini ücret",
-    ]) {
-      expect(panel, label).toContain(label);
+    const rows: [TranslationKey, string][] = [
+      ["sharedPay.rowDebtTry", "Borç (TRY)"],
+      ["sharedPay.rowRate", "Kur (1 USDC)"],
+      ["sharedPay.rowToSend", "Gönderilecek"],
+      ["sharedPay.rowRateExpires", "Kur teklifi biter"],
+      ["sharedPay.rowEstimatedFee", "Tahmini ücret"],
+    ];
+    for (const [key, turkish] of rows) {
+      expectShows(panel, key, turkish);
     }
   });
 });

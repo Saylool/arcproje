@@ -26,6 +26,8 @@ import {
   QUOTE_MIN_SEND_MARGIN_SECONDS,
 } from "@/lib/rates/quote";
 import { withProvider, type Eip1193Provider } from "./wallet";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * App Kit Send akışının güvenlik sınırı.
@@ -109,45 +111,18 @@ export type ArcSendErrorCode =
   | "estimateFailed"
   | "sendFailed";
 
-const ARC_SEND_MESSAGES: Record<ArcSendErrorCode, string> = {
-  noProvider: "Cüzdan bağlantısı bulunamadı. Cüzdanı yeniden bağla.",
-  rejected: "İşlem cüzdanda reddedildi.",
-  noAccount: "Cüzdanda açık bir hesap yok. Cüzdanı açıp yeniden bağla.",
-  accountChanged:
-    "Cüzdandaki aktif hesap, onayladığın ödemenin göndericisi değil. Doğru hesaba geçip tekrar dene.",
-  networkChanged:
-    "Cüzdan Arc Testnet'te değil. Ağı Arc Testnet'e alıp tekrar dene.",
-  invalidRecipient: "Alıcı cüzdan adresi geçerli değil.",
-  invalidSender: "Gönderen cüzdan adresi geçerli değil.",
-  selfTransfer:
-    "Gönderen ve alıcı aynı cüzdan adresi. Kendine ödeme yapılamaz.",
-  invalidAmount: "Gönderilecek tutar geçerli değil.",
-  invalidRate: "Ödeme talebindeki kur geçerli değil.",
-  inconsistentAmount:
-    "Gönderilecek tutar, borç ve kurla uyuşmuyor; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
-  invalidRequestId: "Ödeme talebinin kimliği geçersiz.",
-  invalidRequestTime:
-    "Ödeme talebinin geçerlilik bilgisi geçersiz; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
-  expiredRequest:
-    "Bu ödeme talebinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
-  invalidQuoteId: "Ödeme talebindeki kur teklifi kimliği geçersiz.",
-  expiredQuote:
-    "Talebin dayandığı kur teklifinin süresi doldu; gönderim yapılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
-  insufficientTimeRemaining:
-    "Kur teklifinin bitişine çok az kaldı; işlem onaylanmadan süresi dolabilirdi. Gönderim başlatılmadı. Talebi oluşturan kişiden yeni bir bağlantı iste.",
-  submissionUnknown:
-    "İşlem cüzdana GÖNDERİLDİ ama sonucu doğrulanamadı. TEKRAR DENEME: aynı ödeme iki kez gidebilir. Önce MetaMask'taki işlem geçmişini ve ArcScan'i kontrol et; işlem görünmüyorsa yeni bir bağlantı iste.",
-  reverted:
-    "İşlem zincire ulaştı ama BAŞARISIZ oldu (revert). Ödeme yapılmadı ama gas harcanmış olabilir. Aşağıdaki işlem bağlantısından ArcScan'de ayrıntıyı gör; tekrar denemeden önce MetaMask geçmişini de kontrol et.",
-  insufficientFunds:
-    "Bakiye veya gas yetersiz. Circle Faucet'ten test USDC alıp tekrar dene.",
-  estimateFailed:
-    "İşlem tahmini alınamadı. Ağ veya tutarı kontrol edip tekrar dene.",
-  sendFailed: "İşlem gönderilemedi. Lütfen tekrar dene.",
-};
-
-export function describeArcSendError(code: ArcSendErrorCode): string {
-  return ARC_SEND_MESSAGES[code];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeArcSendError(
+  code: ArcSendErrorCode,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.send.${code}`);
 }
 
 /**

@@ -2,6 +2,7 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
+import { useTranslator } from "@/lib/i18n/context";
 import {
   applyTheme,
   oppositeTheme,
@@ -33,12 +34,11 @@ import {
  * JAVASCRIPT YOKSA: tema CSS medya sorgusuyla sistem tercihine gore dogru
  * kalir; yalnizca dugme is gormez ve etiket notr kalarak yanlis vaatte
  * bulunmaz.
+ *
+ * DILDEN BAGIMSIZ: etiketler sozlukten gelir, tema DEGERI ise
+ * `localStorage`ta yasar. Dil degistirmek temayi, tema degistirmek dili
+ * SIFIRLAMAZ; iki tercih ayri kanallarda tutulur.
  */
-
-const LABEL_TO_DARK = "Karanlık moda geç";
-const LABEL_TO_LIGHT = "Aydınlık moda geç";
-/** Tema henuz cozulmeden onceki, yaniltmayan notr etiket. */
-const LABEL_NEUTRAL = "Temayı değiştir";
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 
@@ -107,6 +107,7 @@ function getServerSnapshot(): Theme | null {
 
 export function ThemeToggle({ className }: { className?: string }) {
   const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const { t } = useTranslator();
 
   const toggle = useCallback(() => {
     const current =
@@ -121,10 +122,10 @@ export function ThemeToggle({ className }: { className?: string }) {
 
   const label =
     theme === null
-      ? LABEL_NEUTRAL
+      ? t("theme.neutral")
       : theme === "dark"
-        ? LABEL_TO_LIGHT
-        : LABEL_TO_DARK;
+        ? t("theme.toLight")
+        : t("theme.toDark");
 
   return (
     <button

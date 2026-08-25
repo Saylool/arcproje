@@ -14,6 +14,9 @@
  * kullanılabilir. İmzalama/doğrulama `./quote-auth` (yalnızca sunucu) içindedir.
  */
 
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+
 import {
   MAX_RATE_VALUE,
   isCanonicalRateDenominator,
@@ -102,27 +105,18 @@ export type QuoteProblem =
   | "expired"
   | "invalidTag";
 
-const QUOTE_MESSAGES: Record<QuoteProblem, string> = {
-  notAnObject: "Kur teklifi okunamadı.",
-  unexpectedField: "Kur teklifinde beklenmeyen alan var.",
-  missingField: "Kur teklifinde eksik alan var.",
-  unsupportedQuoteVersion: "Bu kur teklifi sürümü desteklenmiyor.",
-  invalidQuoteId: "Kur teklifi kimliği geçersiz.",
-  invalidCurrencyPair: "Kur teklifi USDC/TRY çifti için değil.",
-  invalidSource: "Kur teklifinin kaynağı beklenen sağlayıcı değil.",
-  invalidRate: "Kur teklifindeki kur değeri geçersiz.",
-  invalidTimestamps: "Kur teklifinin zaman bilgisi geçersiz.",
-  observationTooOld:
-    "Kur verisi güncel değil. Kuru yenileyip tekrar dene.",
-  observationInFuture: "Kur teklifinin gözlem zamanı gelecekte görünüyor.",
-  lifetimeTooLong: "Kur teklifinin geçerlilik süresi izin verilenden uzun.",
-  notYetValid: "Kur teklifi henüz geçerli değil.",
-  expired: "Kur teklifinin süresi doldu. Kuru yenileyip tekrar dene.",
-  invalidTag: "Kur teklifinin sunucu imzası doğrulanamadı.",
-};
-
-export function describeQuoteProblem(problem: QuoteProblem): string {
-  return QUOTE_MESSAGES[problem];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeQuoteProblem(
+  problem: QuoteProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.quote.${problem}`);
 }
 
 /** İmzalanan alanların kanonik SIRASI. Doğrulama da bu sırayı kullanır. */

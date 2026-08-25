@@ -2,6 +2,8 @@ import { normalizeWalletAddress, walletAddressesEqual } from "./address";
 import { prepareLabel } from "./labels";
 import { MAX_LABEL_LENGTH } from "./payment-request";
 import { MAX_SHARED_BILL_DEBTS } from "./shared-bill";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
  * Paylasilan hesap TASLAGI — olusturucu arayuzunun saf kurallari.
@@ -36,21 +38,14 @@ export type SharedBillDraftProblem =
   | "recipientIsDebtor"
   | "invalidAmount";
 
-const PROBLEM_MESSAGES: Record<SharedBillDraftProblem, string> = {
-  noDebts: "Paylasilacak bir borc yok.",
-  tooManyDebts: `Bir hesapta en fazla ${MAX_SHARED_BILL_DEBTS} borclu olabilir.`,
-  invalidRecipient: "Once fisi odeyen cuzdani baglaman gerekiyor.",
-  missingAddress: "Her borclu icin bir cuzdan adresi girilmeli.",
-  invalidAddress: "Bu cuzdan adresi gecerli degil.",
-  duplicateAddress: "Ayni cuzdan adresi birden fazla kisiye verilemez.",
-  recipientIsDebtor: "Borclu adresi, fisi odeyenin adresiyle ayni olamaz.",
-  invalidAmount: "Borc tutari gecerli degil.",
-};
-
+/** Kodun kullaniciya gosterilecek karsiligi. Sinir degeri burada verilir. */
 export function describeSharedBillDraftProblem(
   problem: SharedBillDraftProblem,
+  locale: Locale = DEFAULT_LOCALE,
 ): string {
-  return PROBLEM_MESSAGES[problem];
+  return translate(locale, `errors.draft.${problem}`, {
+    max: MAX_SHARED_BILL_DEBTS,
+  });
 }
 
 export type SharedBillDraftDebt = Readonly<{

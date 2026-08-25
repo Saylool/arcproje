@@ -1,4 +1,6 @@
 import { checkTotals, sumItemsMinor } from "../receipt/money";
+import { translate, type TranslationKey } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 import {
   ReceiptSchema,
   type AdjustmentKind,
@@ -34,13 +36,10 @@ import {
  */
 export const ROUNDING_METHOD = "largest-remainder-with-item-rotation";
 
-export const ROUNDING_DESCRIPTION =
-  "Bölünemeyen kuruşlar kaybolmaz. Ürünlerde artan kuruş, ürün sırasına göre " +
-  "dönüşümlü olarak farklı kişiye verilir. Ayrı uygulanan vergi ve servis, " +
-  "kişilerin ürün payı oranında en büyük kalan yöntemiyle dağıtılır ve " +
-  "eşitlik durumunda öncelik kalemden kaleme kaydırılır. Ayrı uygulanan " +
-  "indirim ise kişinin indirim öncesi bakiyesi oranında düşülür; böylece " +
-  "kimsenin payı yuvarlama yüzünden eksiye düşmez.";
+export const ROUNDING_DESCRIPTION = translate(
+  DEFAULT_LOCALE,
+  "debts.roundingDescription",
+);
 
 export type ParticipantShare = {
   participantId: string;
@@ -69,29 +68,50 @@ export type InvalidAssignmentDetail =
   | "unassignedItem"
   | "duplicateParticipantId";
 
-const INVALID_ASSIGNMENT_MESSAGES: Record<InvalidAssignmentDetail, string> = {
-  notEnoughParticipants: `Payları hesaplamak için en az ${MIN_PARTICIPANTS} kişi gerekiyor.`,
-  invalidParticipantName:
-    "Kişi isimleri boş olamaz ve birbirinin aynısı olamaz.",
-  unknownPayer: "Fişi ödeyen kişi seçili değil.",
-  missingAssignment: "Bazı ürünler hiç kimseye atanmamış.",
-  duplicateAssignment: "Bir ürün için birden fazla atama kaydı var.",
-  duplicateParticipantInAssignment:
-    "Bir üründe aynı kişi birden fazla kez atanmış.",
-  unknownParticipant: "Atamalarda artık var olmayan bir kişi bulunuyor.",
-  unknownItem: "Atamalarda artık var olmayan bir ürün bulunuyor.",
-  unassignedItem: "Bazı ürünler hiç kimseye atanmamış.",
-  duplicateParticipantId:
-    "Kişi listesinde aynı kimlik birden fazla kez bulunuyor.",
-};
-
 export type InvalidReceiptDetail = "schema" | "duplicateItemId";
 
-const INVALID_RECEIPT_MESSAGES: Record<InvalidReceiptDetail, string> = {
-  schema: "Fiş verisi geçerli değil. Tutarları kontrol edip düzelt.",
-  duplicateItemId:
-    "Fişte aynı ürün kimliği birden fazla kez geçiyor. Ürünleri kontrol et.",
-};
+/**
+ * HESAPLAMA HATASININ KARARLI KODU.
+ *
+ * `status` bazı durumlarda tek başına yetmez: örneğin `zeroAllocationWeight`
+ * iki ayrı nedenden doğar ve iki ayrı cümleyle anlatılır. Kod, gösterilecek
+ * metni TEK BAŞINA belirler ve doğrudan sözlük yoluna karşılık gelir; bu
+ * sayede arayüz metni dilden bağımsız olarak seçebilir.
+ *
+ * Kod MAKİNE OKUNURDUR ve çevrilmez.
+ */
+export type DebtFailureCode =
+  | `assignments.${InvalidAssignmentDetail}`
+  | `receipt.${InvalidReceiptDetail}`
+  | "unsafeAmount"
+  | "indeterminateTotals"
+  | "mismatchedTotals"
+  | "allocationMismatch"
+  | "zeroChargeWeight"
+  | "zeroDiscountWeight"
+  | "discountExceedsBalance"
+  | "negativeParticipantShare";
+
+/**
+ * Kodun Türkçe karşılığı. `message` alanı GERİYE DÖNÜK UYUMLULUK içindir ve
+ * her zaman varsayılan dildedir; arayüz metni `code` üzerinden ve etkin dilde
+ * seçer (bkz. `describeDebtFailure`).
+ */
+function messageFor(code: DebtFailureCode): string {
+  return translate(DEFAULT_LOCALE, `errors.${code}` as TranslationKey, {
+    min: MIN_PARTICIPANTS,
+  });
+}
+
+/** Etkin dildeki karşılık. Hesaplama sonucunu DEĞİŞTİRMEZ. */
+export function describeDebtFailure(
+  failure: DebtCalculationFailure,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.${failure.code}` as TranslationKey, {
+    min: MIN_PARTICIPANTS,
+  });
+}
 
 export type DebtCalculationSuccess = {
   status: "success";
@@ -108,16 +128,19 @@ export type DebtCalculationFailure =
   | {
       status: "invalidReceipt";
       detail: InvalidReceiptDetail;
+      code: DebtFailureCode;
       message: string;
     }
   | {
       status: "invalidAssignments";
       detail: InvalidAssignmentDetail;
+      code: DebtFailureCode;
       message: string;
     }
   | {
       status: "indeterminateTotals";
       uncertainAdjustments: AdjustmentKind[];
+      code: DebtFailureCode;
       message: string;
     }
   | {
@@ -125,24 +148,28 @@ export type DebtCalculationFailure =
       expectedTotalMinor: number;
       statedTotalMinor: number;
       differenceMinor: number;
+      code: DebtFailureCode;
       message: string;
     }
-  | { status: "zeroAllocationWeight"; message: string }
+  | { status: "zeroAllocationWeight"; code: DebtFailureCode; message: string }
   | {
       status: "unsafeAmount";
       /** Güvenli tam sayı aralığını aşan alan veya ara toplam. */
       field: string;
+      code: DebtFailureCode;
       message: string;
     }
   | {
       status: "discountExceedsBalance";
       discountMinor: number;
       availableMinor: number;
+      code: DebtFailureCode;
       message: string;
     }
   | {
       status: "negativeParticipantShare";
       participantId: string;
+      code: DebtFailureCode;
       message: string;
     };
 
@@ -151,18 +178,22 @@ export type DebtCalculationResult =
   | DebtCalculationFailure;
 
 function invalid(detail: InvalidAssignmentDetail): DebtCalculationFailure {
+  const code = `assignments.${detail}` as const;
   return {
     status: "invalidAssignments",
     detail,
-    message: INVALID_ASSIGNMENT_MESSAGES[detail],
+    code,
+    message: messageFor(code),
   };
 }
 
 function invalidReceipt(detail: InvalidReceiptDetail): DebtCalculationFailure {
+  const code = `receipt.${detail}` as const;
   return {
     status: "invalidReceipt",
     detail,
-    message: INVALID_RECEIPT_MESSAGES[detail],
+    code,
+    message: messageFor(code),
   };
 }
 
@@ -170,9 +201,8 @@ function unsafe(field: string): DebtCalculationFailure {
   return {
     status: "unsafeAmount",
     field,
-    message:
-      "Tutarlar güvenli sayı aralığını aşıyor, bu yüzden kuruşu kuruşuna " +
-      "hesaplama yapılamıyor. Fişteki tutarları kontrol et.",
+    code: "unsafeAmount",
+    message: messageFor("unsafeAmount"),
   };
 }
 
@@ -377,9 +407,8 @@ export function calculateDebts(
     return {
       status: "indeterminateTotals",
       uncertainAdjustments: totals.uncertainAdjustments,
-      message:
-        "Bazı ücretlerin ürün fiyatlarına dahil olup olmadığı belirsiz. " +
-        "Payları hesaplamadan önce fiş ekranından bunu netleştir.",
+      code: "indeterminateTotals",
+      message: messageFor("indeterminateTotals"),
     };
   }
   if (totals.status === "mismatch") {
@@ -388,9 +417,8 @@ export function calculateDebts(
       expectedTotalMinor: totals.expectedTotalMinor,
       statedTotalMinor: totals.statedTotalMinor,
       differenceMinor: totals.differenceMinor,
-      message:
-        "Ürün toplamı ile fişteki genel toplam uyuşmuyor. " +
-        "Payları hesaplamadan önce fiş ekranından tutarları düzelt.",
+      code: "mismatchedTotals",
+      message: messageFor("mismatchedTotals"),
     };
   }
 
@@ -448,9 +476,8 @@ export function calculateDebts(
   if (taxShares === null || serviceShares === null) {
     return {
       status: "zeroAllocationWeight",
-      message:
-        "Ürün toplamı sıfırken ayrıca uygulanan bir ücret var. " +
-        "Bu tutarın kimlere dağıtılacağı belirlenemiyor.",
+      code: "zeroChargeWeight",
+      message: messageFor("zeroChargeWeight"),
     };
   }
 
@@ -470,9 +497,8 @@ export function calculateDebts(
       status: "discountExceedsBalance",
       discountMinor: separateDiscount,
       availableMinor,
-      message:
-        "İndirim, dağıtılabilir tutardan büyük. Fişteki indirim değerini " +
-        "veya uygulama biçimini kontrol et.",
+      code: "discountExceedsBalance",
+      message: messageFor("discountExceedsBalance"),
     };
   }
 
@@ -480,9 +506,8 @@ export function calculateDebts(
   if (discountShares === null) {
     return {
       status: "zeroAllocationWeight",
-      message:
-        "Dağıtılabilir tutar sıfırken indirim uygulanıyor. " +
-        "Bu tutarın kimlerden düşüleceği belirlenemiyor.",
+      code: "zeroDiscountWeight",
+      message: messageFor("zeroDiscountWeight"),
     };
   }
 
@@ -514,9 +539,8 @@ export function calculateDebts(
     return {
       status: "negativeParticipantShare",
       participantId: negative.participantId,
-      message:
-        "Bir kişinin payı eksiye düşüyor. İndirim tutarını veya atamaları " +
-        "kontrol et.",
+      code: "negativeParticipantShare",
+      message: messageFor("negativeParticipantShare"),
     };
   }
 
@@ -534,9 +558,8 @@ export function calculateDebts(
       expectedTotalMinor: allocatedTotalMinor,
       statedTotalMinor: receipt.totalMinor,
       differenceMinor: allocatedTotalMinor - receipt.totalMinor,
-      message:
-        "Dağıtılan paylar fişteki genel toplama eşit çıkmadı. " +
-        "Fiş tutarlarını kontrol et.",
+      code: "allocationMismatch",
+      message: messageFor("allocationMismatch"),
     };
   }
 

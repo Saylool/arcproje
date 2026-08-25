@@ -1,3 +1,4 @@
+import { useTranslator } from "@/lib/i18n/context";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
@@ -13,8 +14,6 @@ type DebtSummaryProps = {
   onPay: () => void;
 };
 
-const INCLUDED_LABEL = "— fiyata dahil";
-
 export function DebtSummaryView({
   receipt,
   participants,
@@ -23,28 +22,47 @@ export function DebtSummaryView({
   onEditReceipt,
   onPay,
 }: DebtSummaryProps) {
+  const { t, tRich, locale } = useTranslator();
+
+  /** Kisi adi VERIDIR; bulunamazsa yalnizca yer tutucu cevrilir. */
   const nameOf = (participantId: string) =>
     participants.find((participant) => participant.id === participantId)?.name ??
-    "Bilinmeyen kişi";
+    t("common.unknownParticipant");
 
   const money = (minor: number) =>
-    formatMinorForDisplay(minor, receipt.currency);
+    formatMinorForDisplay(minor, receipt.currency, locale);
+
+  /**
+   * Borc cumlesi dile gore FARKLI KURULUR.
+   *
+   * Turkcede alacaklinin adi yonelme haline girer ("Ayse'ye") ve "borclu"
+   * eki tutardan SONRA gelir; Ingilizcede fiil ortadadir ("owes") ve ek
+   * yoktur. Bu yuzden ad, sablona yerlestirilen bir YUVA olarak verilir ve
+   * cumle sozlukte kurulur.
+   */
+  const debtorName = (participantId: string) => nameOf(participantId);
+  const creditorName = (participantId: string) =>
+    locale === "tr" ? toDativeName(nameOf(participantId)) : nameOf(participantId);
+  const owesSuffix = t("debts.owesSuffix");
 
   const adjustmentRows = [
     {
-      label: "Vergi payı",
+      key: "tax",
+      label: t("debts.taxShare"),
       separate: receipt.taxTreatment === "separate",
       read: (share: DebtCalculationSuccess["participantShares"][number]) =>
         share.taxMinor,
     },
     {
-      label: "Servis payı",
+      key: "service",
+      label: t("debts.serviceShare"),
       separate: receipt.serviceChargeTreatment === "separate",
       read: (share: DebtCalculationSuccess["participantShares"][number]) =>
         share.serviceChargeMinor,
     },
     {
-      label: "İndirim payı",
+      key: "discount",
+      label: t("debts.discountShare"),
       separate: receipt.discountTreatment === "separate",
       read: (share: DebtCalculationSuccess["participantShares"][number]) =>
         share.discountMinor,
@@ -55,18 +73,21 @@ export function DebtSummaryView({
 
   return (
     <section
-      aria-label="Pay ve borç özeti"
+      aria-label={t("debts.sectionLabel")}
       className="flex flex-col gap-4 rounded-3xl border border-line bg-card p-4 shadow-card sm:p-5"
     >
       <header className="flex flex-col gap-1">
         <h2 className="text-base font-semibold tracking-tight text-ink">
-          Kimin ne kadar payı var
+          {t("debts.title")}
         </h2>
         <p className="text-xs leading-relaxed text-ink-faint">
-          Fişi <strong className="font-semibold text-ink-soft">
-            {nameOf(result.payerId)}
-          </strong>{" "}
-          ödedi. Diğerleri payları kadar ona borçlu.
+          {tRich("debts.paidBy", {
+            payer: (
+              <strong className="font-semibold text-ink-soft">
+                {nameOf(result.payerId)}
+              </strong>
+            ),
+          })}
         </p>
       </header>
 
@@ -88,7 +109,7 @@ export function DebtSummaryView({
                   {nameOf(share.participantId)}
                   {isPayer && (
                     <span className="ml-2 rounded-full bg-brand px-2 py-0.5 text-[10px] font-semibold text-white">
-                      ödeyen
+                      {t("debts.payerBadge")}
                     </span>
                   )}
                 </span>
@@ -99,19 +120,19 @@ export function DebtSummaryView({
 
               <dl className="mt-2 flex flex-col gap-1 border-t border-line-soft pt-2">
                 <div className="flex items-baseline justify-between gap-3">
-                  <dt className="text-xs text-ink-faint">Ürün payı</dt>
+                  <dt className="text-xs text-ink-faint">{t("debts.itemShare")}</dt>
                   <dd className="text-xs tabular-nums text-ink-soft">
                     {money(share.itemSubtotalMinor)}
                   </dd>
                 </div>
                 {adjustmentRows.map((row) => (
                   <div
-                    key={row.label}
+                    key={row.key}
                     className="flex items-baseline justify-between gap-3"
                   >
                     <dt className="text-xs text-ink-faint">{row.label}</dt>
                     <dd className="text-xs tabular-nums text-ink-soft">
-                      {row.separate ? money(row.read(share)) : INCLUDED_LABEL}
+                      {row.separate ? money(row.read(share)) : t("debts.includedInPrice")}
                     </dd>
                   </div>
                 ))}
@@ -132,28 +153,28 @@ export function DebtSummaryView({
       >
         {totalsMatch ? (
           <>
-            Payların toplamı{" "}
+            {t("debts.totalsMatchPrefix")}
             <strong className="font-semibold tabular-nums">
               {money(result.allocatedTotalMinor)}
-            </strong>{" "}
-            — fişteki genel toplamla birebir aynı. Hiçbir kuruş kaybolmadı.
+            </strong>
+            {t("debts.totalsMatchSuffix")}
           </>
         ) : (
-          <>
-            Payların toplamı {money(result.allocatedTotalMinor)}, fişteki genel
-            toplam {money(result.receiptTotalMinor)}. Bu bir hesaplama hatası.
-          </>
+          t("debts.totalsMismatch", {
+            allocated: money(result.allocatedTotalMinor),
+            stated: money(result.receiptTotalMinor),
+          })
         )}
       </p>
 
       {/* --- Borçlar --- */}
       <div className="flex flex-col gap-2 border-t border-line-soft pt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
-          Borçlar
+          {t("debts.heading")}
         </h3>
         {result.debts.length === 0 ? (
           <p className="text-xs text-ink-faint">
-            Ödeyen dışında kimsenin payı yok, bu yüzden borç oluşmadı.
+            {t("debts.none")}
           </p>
         ) : (
           <ul className="flex flex-col gap-1.5">
@@ -163,14 +184,22 @@ export function DebtSummaryView({
                 className="flex items-baseline justify-between gap-3 rounded-2xl border border-line px-3 py-2"
               >
                 <span className="min-w-0 text-sm text-ink-soft">
-                  <strong className="font-semibold text-ink">
-                    {nameOf(debt.fromParticipantId)}
-                  </strong>
-                  , {toDativeName(nameOf(debt.toParticipantId))}
+                  {tRich("debts.owes", {
+                    from: (
+                      <strong className="font-semibold text-ink">
+                        {debtorName(debt.fromParticipantId)}
+                      </strong>
+                    ),
+                    to: creditorName(debt.toParticipantId),
+                  })}
                 </span>
                 <span className="shrink-0 text-sm font-semibold tabular-nums text-ink">
                   {money(debt.amountMinor)}
-                  <span className="ml-1 font-normal text-ink-faint">borçlu</span>
+                  {owesSuffix !== "" && (
+                    <span className="ml-1 font-normal text-ink-faint">
+                      {owesSuffix}
+                    </span>
+                  )}
                 </span>
               </li>
             ))}
@@ -180,7 +209,7 @@ export function DebtSummaryView({
 
       {/* --- Yuvarlama açıklaması --- */}
       <p className="rounded-2xl bg-muted px-3 py-2.5 text-[11px] leading-relaxed text-ink-faint">
-        {result.rounding.description}
+        {t("debts.roundingDescription")}
       </p>
 
       {/* --- Gezinme --- */}
@@ -191,7 +220,7 @@ export function DebtSummaryView({
             onClick={onPay}
             className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            Ödeme talebi oluştur
+            {t("debts.createRequest")}
           </button>
         )}
 
@@ -201,20 +230,19 @@ export function DebtSummaryView({
             onClick={onEditAssignments}
             className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            Atamaları düzenle
+            {t("debts.editAssignments")}
           </button>
           <button
             type="button"
             onClick={onEditReceipt}
             className="rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
-            Fişi düzelt
+            {t("debts.editReceipt")}
           </button>
         </div>
 
         <p className="text-xs leading-relaxed text-ink-faint">
-          Her borçlu için ayrı bir ödeme talebi imzalarsın; borçlu kendi
-          cüzdanında onaylar. Arc Testnet test USDC&apos;si kullanılır.
+          {t("debts.footnote")}
         </p>
       </div>
     </section>

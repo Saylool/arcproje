@@ -16,6 +16,9 @@ import {
 } from "./send";
 import { parseQuoteRate } from "@/lib/rates/quote";
 import { SHARED_BILL_API_BASE } from "./shared-bill-access-client";
+import { translate } from "../i18n/dictionary";
+import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
+import { readApiErrorCode } from "../i18n/api-errors";
 
 /**
  * ORTAK HESAP ÖDEMESİ — İSTEMCİ TARAFI.
@@ -43,7 +46,7 @@ const GENERIC_FAILURE = "Ödeme başlatılamadı. Lütfen tekrar dene.";
 
 export type PaymentFetchResult<T> =
   | { ok: true; value: T }
-  | { ok: false; message: string };
+  | { ok: false; message: string; code?: string };
 
 async function readJson(response: Response): Promise<unknown> {
   try {
@@ -51,6 +54,13 @@ async function readJson(response: Response): Promise<unknown> {
   } catch {
     return null;
   }
+}
+
+/** Sunucu hatasını koduyla birlikte taşır; kod yoksa alan hiç eklenmez. */
+function apiFailure(payload: unknown): { ok: false; message: string; code?: string } {
+  const code = readApiErrorCode(payload);
+  const message = messageOf(payload);
+  return code === null ? { ok: false, message } : { ok: false, message, code };
 }
 
 function messageOf(payload: unknown): string {
@@ -85,7 +95,7 @@ async function postJson(
   const payload = await readJson(response);
   return response.ok
     ? { ok: true, value: payload }
-    : { ok: false, message: messageOf(payload) };
+    : apiFailure(payload);
 }
 
 /*
@@ -123,25 +133,18 @@ export type OfferProblem =
   | "expired"
   | "insufficientTime";
 
-const OFFER_MESSAGES: Record<OfferProblem, string> = {
-  malformedResponse:
-    "Sunucudan beklenmeyen bir ödeme teklifi geldi. Ödeme açılmadı.",
-  walletMismatch:
-    "Teklif bağlı cüzdana ait değil. Doğru cüzdana geçip tekrar dene.",
-  recipientMismatch:
-    "Teklifin alıcısı, imzalı hesaptaki alıcı değil. Bu teklife güvenme; ödeme açılmadı.",
-  amountMismatch:
-    "Teklifin TRY tutarı, doğrulanmış borcunla uyuşmuyor. Ödeme açılmadı.",
-  inconsistentAmount:
-    "Teklifin USDC tutarı, borç ve kurdan yeniden hesaplananla uyuşmuyor. Ödeme açılmadı.",
-  wrongChain: "Cüzdan Arc Testnet'te değil. Ödeme açılmadı.",
-  expired: "Ödeme teklifinin süresi doldu. Kuru yenile.",
-  insufficientTime:
-    "Kur teklifinin bitişine çok az kaldı. Kuru yenileyip tekrar dene.",
-};
-
-export function describeOfferProblem(problem: OfferProblem): string {
-  return OFFER_MESSAGES[problem];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeOfferProblem(
+  problem: OfferProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.offer.${problem}`);
 }
 
 export type VerifyOfferResult =
@@ -360,17 +363,18 @@ export type ClaimProblem =
   | "snapshotRejected"
   | "changedFromReview";
 
-const CLAIM_MESSAGES: Record<ClaimProblem, string> = {
-  malformedResponse:
-    "Sunucudan beklenmeyen bir rezervasyon yanıtı geldi. Gönderim yapılmadı.",
-  snapshotRejected:
-    "Rezervasyon kendi doğrulamamızdan geçmedi; cüzdana hiçbir şey gönderilmedi.",
-  changedFromReview:
-    "Rezervasyonun içeriği, incelediğin ödemeyle birebir aynı değil; gönderim YAPILMADI. Baştan başla.",
-};
-
-export function describeClaimProblem(problem: ClaimProblem): string {
-  return CLAIM_MESSAGES[problem];
+/**
+ * Kodun kullanıcıya gösterilecek karşılığı.
+ *
+ * Metin SÖZLÜKTEN gelir; kod MAKİNE OKUNUR kalır ve çevrilmez. `locale`
+ * verilmezse Türkçeye düşülür, böylece sunucu tarafındaki çağıranlar
+ * (API yanıtları) değişmeden aynı metni üretir.
+ */
+export function describeClaimProblem(
+  problem: ClaimProblem,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return translate(locale, `errors.claim.${problem}`);
 }
 
 export type VerifyClaimResult =
@@ -555,7 +559,7 @@ export async function readPaymentStatus(
   const payload = await readJson(response);
   return response.ok
     ? { ok: true, value: payload }
-    : { ok: false, message: messageOf(payload) };
+    : apiFailure(payload);
 }
 
 /*
