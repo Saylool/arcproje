@@ -37,6 +37,21 @@ export const en: Dictionary = {
     neutral: "Change theme",
   },
 
+  auth: {
+    continueWithGoogle: "Continue with Google",
+    loading: "Working…",
+    signOut: "Sign out",
+    signedInState: "Google session",
+    safeFallbackName: "Signed in",
+    analysisRequired: "Sign in with Google to analyze a receipt.",
+    chooseAgainAfterSignIn:
+      "For your privacy, the selected image is not kept during the sign-in redirect. You will need to choose the receipt image again when you return.",
+    failureTitle: "Sign-in could not be completed",
+    failureMessage:
+      "Authentication could not be completed right now. Return to the home page and try again.",
+    backHome: "Return to home",
+  },
+
   metadata: {
     homeTitle: "Split the Bill — Upload your receipt",
     homeDescription:
@@ -47,6 +62,7 @@ export const en: Dictionary = {
     sharedBillTitle: "Shared bill — Split the Bill",
     sharedBillDescription:
       "Connect your wallet and sign an authentication message to see what you owe.",
+    authErrorTitle: "Sign-in error — Split the Bill",
   },
 
   common: {
@@ -871,6 +887,7 @@ export const en: Dictionary = {
     },
 
     api: {
+      AUTH_REQUIRED: "Sign in with Google to use this operation.",
       SERVICE_UNAVAILABLE: "The service is unavailable right now. Please try again shortly.",
       SERVICE_NOT_CONFIGURED:
         "This feature is not configured on the server. Please try again shortly.",

@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { AuthControl, type SafeAuthUser } from "@/components/AuthControl";
 import { LanguageSelect } from "@/components/LanguageSelect";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTranslator } from "@/lib/i18n/context";
@@ -25,9 +26,12 @@ import type { TranslationKey } from "@/lib/i18n/dictionary";
 export function AppHeader({
   titleKey,
   className,
+  authUser,
 }: {
   titleKey?: TranslationKey;
   className?: string;
+  /** `undefined`: bu sayfada Google kontrolü hiç gösterilmez (borçlu akışı). */
+  authUser?: SafeAuthUser | null;
 }) {
   const { t, locale } = useTranslator();
 
@@ -39,7 +43,7 @@ export function AppHeader({
   }, [t, titleKey, locale]);
 
   return (
-    <div className={`flex items-center justify-between gap-3 ${className ?? ""}`}>
+    <div className={`flex flex-wrap items-center justify-between gap-3 ${className ?? ""}`}>
       <div className="flex min-w-0 items-center gap-2">
         <span
           aria-hidden="true"
@@ -51,7 +55,8 @@ export function AppHeader({
           {t("app.name")}
         </span>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
+        {authUser !== undefined && <AuthControl user={authUser} />}
         <LanguageSelect />
         <ThemeToggle />
       </div>

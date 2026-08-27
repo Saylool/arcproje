@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
 import {
+  authenticateRequest,
+  type AuthenticateRequest,
+} from "@/lib/auth/session";
+import {
   extractReceipt,
   isReceiptAnalysisConfigured,
   type ExtractionFailureCode,
@@ -45,8 +49,15 @@ const FAILURE_RESPONSES: Record<
   },
 };
 
+const NO_STORE_HEADERS = {
+  "cache-control": "no-store, private, max-age=0",
+} as const;
+
 function errorResponse(status: number, code: string, message: string) {
-  return NextResponse.json({ error: { code, message } }, { status });
+  return NextResponse.json(
+    { error: { code, message } },
+    { status, headers: NO_STORE_HEADERS },
+  );
 }
 
 const IMAGE_TYPE_MESSAGES: Record<
@@ -58,7 +69,40 @@ const IMAGE_TYPE_MESSAGES: Record<
   mismatch: "Dosyanın içeriği bildirilen dosya türüyle eşleşmiyor.",
 };
 
-export async function POST(request: Request) {
+type ReceiptRouteDependencies = Readonly<{
+  authenticate: AuthenticateRequest;
+  configured: typeof isReceiptAnalysisConfigured;
+  extract: typeof extractReceipt;
+}>;
+
+export function createReceiptAnalyzePost(
+  dependencies: Partial<ReceiptRouteDependencies> = {},
+) {
+  const resolved: ReceiptRouteDependencies = {
+    authenticate: dependencies.authenticate ?? authenticateRequest,
+    configured: dependencies.configured ?? isReceiptAnalysisConfigured,
+    extract: dependencies.extract ?? extractReceipt,
+  };
+  return (request: Request) => receiptAnalyzePost(request, resolved);
+}
+
+async function receiptAnalyzePost(
+  request: Request,
+  dependencies: ReceiptRouteDependencies,
+) {
+  /*
+   * İLK işlem auth'tur. Gövde türüne, boyutuna veya FormData'ya dahi auth
+   * sonucundan önce bakılmaz; yetkisiz görsel belleğe alınamaz.
+   */
+  const user = await dependencies.authenticate();
+  if (user === null) {
+    return errorResponse(
+      401,
+      "AUTH_REQUIRED",
+      "Bu işlem için oturum açman gerekiyor.",
+    );
+  }
+
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("multipart/form-data")) {
     return errorResponse(
@@ -119,7 +163,7 @@ export async function POST(request: Request) {
   }
 
   // Key yoksa hiçbir sağlayıcı çağrısı yapılmaz.
-  if (!isReceiptAnalysisConfigured()) {
+  if (!dependencies.configured()) {
     return errorResponse(
       503,
       "SERVICE_NOT_CONFIGURED",
@@ -131,7 +175,7 @@ export async function POST(request: Request) {
   const imageDataUrl = `data:${imageType.mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 
   try {
-    const result = await extractReceipt(imageDataUrl);
+    const result = await dependencies.extract(imageDataUrl);
     if (!result.ok) {
       const failure = FAILURE_RESPONSES[result.code];
       return errorResponse(failure.status, result.code, failure.message);
@@ -149,3 +193,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export const POST = createReceiptAnalyzePost();

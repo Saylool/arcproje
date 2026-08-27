@@ -40,6 +40,21 @@ export const tr = {
     neutral: "Temayı değiştir",
   },
 
+  auth: {
+    continueWithGoogle: "Google ile devam et",
+    loading: "İşleniyor…",
+    signOut: "Çıkış yap",
+    signedInState: "Google oturumu",
+    safeFallbackName: "Oturum açık",
+    analysisRequired: "Fişi analiz etmek için Google ile oturum açmalısın.",
+    chooseAgainAfterSignIn:
+      "Gizliliğin için seçtiğin görsel giriş yönlendirmesinde tutulmaz. Döndüğünde fiş görselini yeniden seçmen gerekecek.",
+    failureTitle: "Oturum açılamadı",
+    failureMessage:
+      "Kimlik doğrulama şu anda tamamlanamadı. Lütfen ana sayfaya dönüp yeniden dene.",
+    backHome: "Ana sayfaya dön",
+  },
+
   metadata: {
     homeTitle: "Hesabı Böl — Fişini yükle",
     homeDescription:
@@ -50,6 +65,7 @@ export const tr = {
     sharedBillTitle: "Ortak hesap — Hesabı Böl",
     sharedBillDescription:
       "Kendi borcunu görmek için cüzdanını bağla ve kimlik doğrulama mesajı imzala.",
+    authErrorTitle: "Oturum hatası — Hesabı Böl",
   },
 
   /* --------------------------------------------------------------------- */
@@ -912,6 +928,7 @@ export const tr = {
      * söylemez.
      */
     api: {
+      AUTH_REQUIRED: "Bu işlem için Google ile oturum açmalısın.",
       SERVICE_UNAVAILABLE: "Servis şu anda kullanılamıyor. Lütfen birazdan tekrar dene.",
       SERVICE_NOT_CONFIGURED:
         "Bu özellik sunucuda yapılandırılmamış. Lütfen birazdan tekrar dene.",
