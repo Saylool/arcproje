@@ -68,8 +68,15 @@ async function sharedBillPost(
   dependencies: SharedBillRouteDependencies,
 ) {
   /* Auth gövde başlıklarından, akış okumadan ve depo yaratmadan ÖNCEDİR. */
-  const user = await dependencies.authenticate();
-  if (user === null) {
+  const authentication = await dependencies.authenticate();
+  if (authentication.status === "unavailable") {
+    return errorResponse(
+      503,
+      "SERVICE_NOT_CONFIGURED",
+      "Kimlik doğrulama servisi şu anda kullanılamıyor.",
+    );
+  }
+  if (authentication.status === "signedOut") {
     return errorResponse(
       401,
       "AUTH_REQUIRED",

@@ -63,10 +63,30 @@ describe("Google auth route siniri", () => {
   });
 
   it("OAuth origin'i istek Host/Origin/forwarded basliklarindan turetilmez", () => {
-    const source = readFileSync("src/lib/auth/trusted-origin.ts", "utf8");
-    expect(source).toContain("readAppOrigin(process.env");
-    expect(source).toContain("process.env.AUTH_URL = trustedAuthOrigin");
-    expect(source).not.toMatch(/headers\(|x-forwarded-host|referer/i);
+    const configSource = readFileSync(
+      "src/lib/auth/auth-runtime-config.ts",
+      "utf8",
+    );
+    const runtimeSource = readFileSync("src/auth.ts", "utf8");
+    expect(configSource).toContain("readAppOrigin(env, nodeEnv)");
+    expect(runtimeSource).toContain(
+      "process.env.AUTH_URL = configuration.origin",
+    );
+    expect(`${configSource}\n${runtimeSource}`).not.toMatch(
+      /headers\(|x-forwarded-host|referer/i,
+    );
+  });
+
+  it("auth sirri ortuk okunmaz veya fallback ile doldurulmaz", () => {
+    const source = [
+      "src/auth.ts",
+      "src/lib/auth/auth-config.ts",
+      "src/lib/auth/auth-runtime.ts",
+    ]
+      .map((file) => readFileSync(file, "utf8"))
+      .join("\n");
+    expect(source).toContain("secret: authentication.secret");
+    expect(source).not.toMatch(/invalid\.invalid|changeme|AUTH_SECRET\s*\?\?/);
   });
 
   it("auth kontrolu semantik tema tokenlarini kullanir", () => {

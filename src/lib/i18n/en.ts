@@ -43,6 +43,9 @@ export const en: Dictionary = {
     signOut: "Sign out",
     signedInState: "Google session",
     safeFallbackName: "Signed in",
+    unavailableShort: "Sign-in unavailable",
+    unavailable:
+      "Authentication is unavailable right now. Please try again later.",
     analysisRequired: "Sign in with Google to analyze a receipt.",
     chooseAgainAfterSignIn:
       "For your privacy, the selected image is not kept during the sign-in redirect. You will need to choose the receipt image again when you return.",

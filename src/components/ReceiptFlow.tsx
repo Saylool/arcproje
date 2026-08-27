@@ -77,9 +77,9 @@ function readReceiptField(payload: unknown): unknown {
 }
 
 export function ReceiptFlow({
-  isAuthenticated,
+  authStatus,
 }: {
-  isAuthenticated: boolean;
+  authStatus: "authenticated" | "signedOut" | "unavailable";
 }) {
   const { t, locale } = useTranslator();
   const [file, setFile] = useState<File | null>(null);
@@ -181,7 +181,7 @@ export function ReceiptFlow({
     if (file === null || isAnalyzingRef.current) {
       return;
     }
-    if (!isAuthenticated) {
+    if (authStatus !== "authenticated") {
       /* FormData yaratılmaz ve dosya API'ye gönderilmez. */
       setShowAuthPrompt(true);
       return;
@@ -314,16 +314,26 @@ export function ReceiptFlow({
                 </p>
               </div>
 
-              {showAuthPrompt && !isAuthenticated && (
+              {showAuthPrompt && authStatus !== "authenticated" && (
                 <div
                   role="alert"
                   className="flex flex-col items-start gap-2 rounded-2xl border border-brand-line bg-brand-soft px-3 py-3 text-sm text-brand-ink"
                 >
-                  <p>{t("auth.analysisRequired")}</p>
-                  <p className="text-xs leading-relaxed">
-                    {t("auth.chooseAgainAfterSignIn")}
+                  <p>
+                    {t(
+                      authStatus === "unavailable"
+                        ? "auth.unavailable"
+                        : "auth.analysisRequired",
+                    )}
                   </p>
-                  <GoogleSignInButton />
+                  {authStatus === "signedOut" && (
+                    <>
+                      <p className="text-xs leading-relaxed">
+                        {t("auth.chooseAgainAfterSignIn")}
+                      </p>
+                      <GoogleSignInButton />
+                    </>
+                  )}
                 </div>
               )}
 

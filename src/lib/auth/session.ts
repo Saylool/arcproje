@@ -4,26 +4,56 @@ export type AuthenticatedAppUser = Readonly<{
   image: string | null;
 }>;
 
-export type AuthenticateRequest = () => Promise<AuthenticatedAppUser | null>;
+export type AuthenticationResult =
+  | { status: "authenticated"; user: AuthenticatedAppUser }
+  | { status: "signedOut" }
+  | { status: "unavailable" };
+
+type ResolveRuntime = () =>
+  | import("./auth-runtime").AuthenticationRuntimeResolution
+  | Promise<import("./auth-runtime").AuthenticationRuntimeResolution>;
+
+export type AuthenticateRequest = () => Promise<AuthenticationResult>;
+
+const resolveDefaultRuntime: ResolveRuntime = async () => {
+  const { resolveAuthenticationRuntime } = await import("@/auth");
+  return resolveAuthenticationRuntime();
+};
 
 /** Sunucu oturumundan yalnızca güvenli, minimal uygulama kimliğini çıkarır. */
-export const authenticateRequest: AuthenticateRequest = async () => {
-  try {
-    /* Test taşıma katmanı Auth.js/NextRequest modüllerini yüklemek zorunda kalmaz. */
-    const { auth } = await import("@/auth");
-    const session = await auth();
-    const sessionUser = session?.user;
-    const id = sessionUser?.id;
-    if (sessionUser === undefined || typeof id !== "string" || id.length === 0) {
-      return null;
+export function createAuthenticateRequest(
+  resolveRuntime: ResolveRuntime = resolveDefaultRuntime,
+): AuthenticateRequest {
+  return async () => {
+    const resolved = await resolveRuntime();
+    if (resolved.status === "unavailable") {
+      return { status: "unavailable" };
     }
-    return {
-      id,
-      name: typeof sessionUser.name === "string" ? sessionUser.name : null,
-      image: typeof sessionUser.image === "string" ? sessionUser.image : null,
-    };
-  } catch {
-    // Eksik/bozuk auth veya veritabanı yapılandırması fail-closed kalır.
-    return null;
-  }
-};
+
+    try {
+      const session = await resolved.runtime.readSession();
+      const sessionUser = session?.user;
+      const id = sessionUser?.id;
+      if (
+        sessionUser === undefined ||
+        typeof id !== "string" ||
+        id.length === 0
+      ) {
+        return { status: "signedOut" };
+      }
+      return {
+        status: "authenticated",
+        user: {
+          id,
+          name: typeof sessionUser.name === "string" ? sessionUser.name : null,
+          image:
+            typeof sessionUser.image === "string" ? sessionUser.image : null,
+        },
+      };
+    } catch {
+      return { status: "unavailable" };
+    }
+  };
+}
+
+export const authenticateRequest = createAuthenticateRequest();

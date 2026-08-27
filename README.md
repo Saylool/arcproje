@@ -33,12 +33,31 @@ cp .env.example .env.local
 | `DATABASE_URL` | hayır (Part 1) | Neon Postgres bağlantısı; paylaşılan ortak hesap deposu. **Yalnızca sunucuda okunur.** |
 | `SHARED_BILL_AUTH_SECRET` | evet (borçlu bağlantısı) | Cüzdan challenge zarfının HMAC sırrı. **Yalnızca sunucuda okunur.** |
 | `APP_ORIGIN` | üretimde evet | Güvenilen açık uygulama origin'i; OAuth ve cüzdan challenge hedefi istemci Host başlıklarından türetilmez. |
-| `AUTH_SECRET` | Google girişinde evet | Auth.js JWT/cookie şifreleme sırrı (en az 32 rastgele karakter). **Yalnızca sunucuda okunur.** |
+| `AUTH_SECRET` | Google girişinde evet | Auth.js JWT/cookie şifreleme sırrı: tam 32 rastgele baytı temsil eden **tam 64 küçük hexadecimal karakter** (`^[0-9a-f]{64}$`). **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_ID` | Google girişinde evet | Google OAuth Web client ID. **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_SECRET` | Google girişinde evet | Google OAuth Web client secret. **Yalnızca sunucuda okunur.** |
 
 Bu değişkenlerin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
 paketine girmez.
+
+`AUTH_SECRET` kriptografik rastgelelikle üretilmelidir. macOS'ta değeri terminal
+çıktısına yazmadan doğrudan panoya almak için:
+
+```bash
+openssl rand -hex 32 | tr -d '\n' | pbcopy
+```
+
+Üretilen değer değiştirilmeden kullanılmalı; başında/sonunda boşluk, büyük hex
+harfi veya başka karakter bulunmamalıdır. `AUTH_SECRET`, `RATE_QUOTE_SECRET` ve
+`SHARED_BILL_AUTH_SECRET` üç ayrı sunucu sırrıdır; aynı değer paylaşılmaz.
+Hiçbiri `NEXT_PUBLIC_` adıyla tanımlanmaz veya istemciye gönderilmez.
+
+`APP_ORIGIN`, `AUTH_SECRET`, `AUTH_GOOGLE_ID` ya da `AUTH_GOOGLE_SECRET` eksik
+veya geçersizse Auth.js başlatılmaz. OAuth uç noktaları ile Google korumalı
+creator API'leri ayrıntı sızdırmayan, `Cache-Control: no-store` taşıyan
+`503 SERVICE_NOT_CONFIGURED` döndürür. Geçerli yapılandırmada yalnızca oturum
+yoksa creator API'leri `401 AUTH_REQUIRED` döndürür. Borçlu cüzdan ve kur
+rotaları bu Google yapılandırmasından bağımsız kalır.
 
 `DATABASE_URL` tanımlı olmasa bile uygulama ve testler derlenir; yalnızca
 `POST /api/shared-bills` kontrollü bir 503 döner. Şema ve geçiş için
@@ -115,8 +134,10 @@ yapılandırmaz. Daha sonra şu adımlar elle uygulanmalıdır:
    - `http://localhost:3000/api/auth/callback/google`
    - `https://arcproje-seven.vercel.app/api/auth/callback/google`
 4. Yerel sunucuda boş örneklerden `AUTH_SECRET`, `AUTH_GOOGLE_ID` ve
-   `AUTH_GOOGLE_SECRET` değerlerini güvenli biçimde tanımla; `APP_ORIGIN`
-   yerelde `http://localhost:3000` olabilir.
+   `AUTH_GOOGLE_SECRET` değerlerini güvenli biçimde tanımla; Google girişini
+   kullanmak için `APP_ORIGIN` değerini de açıkça tanımla (yerelde
+   `http://localhost:3000` olabilir). `AUTH_SECRET` için yukarıdaki 32 rastgele
+   bayt / 64 küçük hex üretim komutunu kullan.
 5. Vercel'de aynı üç server-only değişkeni ve
    `APP_ORIGIN=https://arcproje-seven.vercel.app` değerini elle tanımla.
    Hiçbir sırra `NEXT_PUBLIC_` öneki verme.

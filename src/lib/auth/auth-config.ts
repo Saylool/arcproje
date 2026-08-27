@@ -2,11 +2,9 @@ import type { NextAuthConfig } from "next-auth";
 import Google, { type GoogleProfile } from "next-auth/providers/google";
 
 import { resolveGoogleIdentity } from "./app-user-service";
+import type { AuthenticationConfiguration } from "./auth-runtime-config";
 import { createNeonAppUserRepository } from "./neon-app-user-repository";
-import {
-  isTrustedAuthOriginConfigured,
-  safeAuthRedirect,
-} from "./trusted-origin";
+import { safeAuthRedirect } from "./trusted-origin";
 
 type RepositoryFactory = typeof createNeonAppUserRepository;
 
@@ -16,12 +14,16 @@ type RepositoryFactory = typeof createNeonAppUserRepository;
  * JWT oturumuna yazılmaz.
  */
 export function createAuthConfig(
+  authentication: AuthenticationConfiguration,
   createRepository: RepositoryFactory = createNeonAppUserRepository,
 ): NextAuthConfig {
-  const secureCookies = process.env.NODE_ENV === "production";
+  const secureCookies = authentication.secureCookies;
   return {
+    secret: authentication.secret,
     providers: [
       Google({
+        clientId: authentication.googleClientId,
+        clientSecret: authentication.googleClientSecret,
         authorization: { params: { scope: "openid email profile" } },
         checks: ["pkce", "state", "nonce"],
         account() {
@@ -30,7 +32,6 @@ export function createAuthConfig(
         },
         async profile(profile: GoogleProfile) {
           if (
-            !isTrustedAuthOriginConfigured ||
             profile.email_verified !== true ||
             typeof profile.sub !== "string" ||
             profile.sub.length === 0
@@ -100,7 +101,7 @@ export function createAuthConfig(
         return session;
       },
       redirect({ url }) {
-        return safeAuthRedirect(url);
+        return safeAuthRedirect(url, authentication.origin);
       },
     },
     pages: {

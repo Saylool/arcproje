@@ -10,6 +10,11 @@ export type SafeAuthUser = Readonly<{
   image: string | null;
 }>;
 
+export type SafeAuthState =
+  | { status: "authenticated"; user: SafeAuthUser }
+  | { status: "signedOut" }
+  | { status: "unavailable" };
+
 function GoogleButtonContent() {
   const { pending } = useFormStatus();
   const { t } = useTranslator();
@@ -25,12 +30,33 @@ function GoogleButtonContent() {
   );
 }
 
-export function GoogleSignInButton() {
+export function GoogleSignInButton({
+  disabled = false,
+}: {
+  disabled?: boolean;
+}) {
+  if (disabled) {
+    return (
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        className="inline-flex min-h-9 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-faint opacity-60"
+      >
+        <UnavailableLabel />
+      </button>
+    );
+  }
   return (
     <form action={startGoogleSignIn}>
       <GoogleButtonContent />
     </form>
   );
+}
+
+function UnavailableLabel() {
+  const { t } = useTranslator();
+  return <>{t("auth.unavailableShort")}</>;
 }
 
 function SignOutButton() {
@@ -48,10 +74,22 @@ function SignOutButton() {
   );
 }
 
-export function AuthControl({ user }: { user: SafeAuthUser | null }) {
+export function AuthControl({ state }: { state: SafeAuthState }) {
   const { t } = useTranslator();
 
-  if (user === null) return <GoogleSignInButton />;
+  if (state.status === "signedOut") return <GoogleSignInButton />;
+  if (state.status === "unavailable") {
+    return (
+      <span
+        role="status"
+        className="rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-faint"
+      >
+        {t("auth.unavailableShort")}
+      </span>
+    );
+  }
+
+  const { user } = state;
 
   return (
     <div

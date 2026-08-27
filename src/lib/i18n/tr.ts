@@ -46,6 +46,9 @@ export const tr = {
     signOut: "Çıkış yap",
     signedInState: "Google oturumu",
     safeFallbackName: "Oturum açık",
+    unavailableShort: "Giriş kullanılamıyor",
+    unavailable:
+      "Kimlik doğrulama şu anda kullanılamıyor. Lütfen daha sonra yeniden dene.",
     analysisRequired: "Fişi analiz etmek için Google ile oturum açmalısın.",
     chooseAgainAfterSignIn:
       "Gizliliğin için seçtiğin görsel giriş yönlendirmesinde tutulmaz. Döndüğünde fiş görselini yeniden seçmen gerekecek.",

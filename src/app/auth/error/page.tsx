@@ -9,7 +9,10 @@ export default async function AuthenticationErrorPage() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-xl flex-col gap-8 px-4 py-10 sm:px-6 sm:py-16">
       <header>
-        <AppHeader titleKey="metadata.authErrorTitle" authUser={null} />
+        <AppHeader
+          titleKey="metadata.authErrorTitle"
+          authState={{ status: "signedOut" }}
+        />
       </header>
       <section className="rounded-3xl border border-danger-line bg-danger-surface p-5 shadow-card">
         <h1 className="text-xl font-semibold text-danger-ink">

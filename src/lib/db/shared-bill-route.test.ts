@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  POST,
-  createSharedBillPost,
-} from "@/app/api/shared-bills/route";
+import { createSharedBillPost } from "@/app/api/shared-bills/route";
 
 /**
  * `POST /api/shared-bills` tasima katmani.
@@ -24,7 +21,10 @@ function jsonRequest(body: string, headers: Record<string, string> = {}) {
 }
 
 const authenticatedPOST = createSharedBillPost({
-  authenticate: async () => ({ id: "app-user", name: null, image: null }),
+  authenticate: async () => ({
+    status: "authenticated",
+    user: { id: "app-user", name: null, image: null },
+  }),
 });
 
 describe("icerik turu", () => {
@@ -100,7 +100,7 @@ describe("Google oturum kapisi", () => {
     const readBody = vi.fn();
     const createRepository = vi.fn();
     const response = await createSharedBillPost({
-      authenticate: async () => null,
+      authenticate: async () => ({ status: "signedOut" }),
       readBody,
       createRepository,
     })(jsonRequest('{"manifest":"hassas"}'));
@@ -119,8 +119,33 @@ describe("Google oturum kapisi", () => {
     expect(createRepository).not.toHaveBeenCalled();
   });
 
-  it("varsayilan POST oturumsuzken redirect HTML yerine JSON 401 doner", async () => {
-    const response = await POST(jsonRequest("{}"));
+  it("auth yapilandirmasi gecersizken govde ve depodan once genel 503 doner", async () => {
+    const readBody = vi.fn();
+    const createRepository = vi.fn();
+    const response = await createSharedBillPost({
+      authenticate: async () => ({ status: "unavailable" }),
+      readBody,
+      createRepository,
+    })(jsonRequest('{"manifest":"hassas"}'));
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe(
+      "no-store, private, max-age=0",
+    );
+    expect(await response.json()).toEqual({
+      error: {
+        code: "SERVICE_NOT_CONFIGURED",
+        message: "Kimlik doğrulama servisi şu anda kullanılamıyor.",
+      },
+    });
+    expect(readBody).not.toHaveBeenCalled();
+    expect(createRepository).not.toHaveBeenCalled();
+  });
+
+  it("oturumsuz POST redirect HTML yerine JSON 401 doner", async () => {
+    const response = await createSharedBillPost({
+      authenticate: async () => ({ status: "signedOut" }),
+    })(jsonRequest("{}"));
     expect(response.status).toBe(401);
     expect(response.headers.get("content-type")).toContain("application/json");
     expect((await response.json()).error.code).toBe("AUTH_REQUIRED");
@@ -144,7 +169,10 @@ describe("Google oturum kapisi", () => {
       });
     const repository = {} as never;
     const route = createSharedBillPost({
-      authenticate: async () => ({ id: "app-user", name: null, image: null }),
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: "app-user", name: null, image: null },
+      }),
       createRepository: async () => repository,
       createBill,
     });

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-import { AuthControl, type SafeAuthUser } from "@/components/AuthControl";
+import { AuthControl, type SafeAuthState } from "@/components/AuthControl";
 import { LanguageSelect } from "@/components/LanguageSelect";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTranslator } from "@/lib/i18n/context";
@@ -26,12 +26,12 @@ import type { TranslationKey } from "@/lib/i18n/dictionary";
 export function AppHeader({
   titleKey,
   className,
-  authUser,
+  authState,
 }: {
   titleKey?: TranslationKey;
   className?: string;
   /** `undefined`: bu sayfada Google kontrolü hiç gösterilmez (borçlu akışı). */
-  authUser?: SafeAuthUser | null;
+  authState?: SafeAuthState;
 }) {
   const { t, locale } = useTranslator();
 
@@ -56,7 +56,7 @@ export function AppHeader({
         </span>
       </div>
       <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-end gap-2">
-        {authUser !== undefined && <AuthControl user={authUser} />}
+        {authState !== undefined && <AuthControl state={authState} />}
         <LanguageSelect />
         <ThemeToggle />
       </div>

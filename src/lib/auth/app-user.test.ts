@@ -5,6 +5,15 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthConfig } from "./auth-config";
 import { createFakeAppUserRepository } from "./app-user-repository.fixture";
 import { resolveGoogleIdentity } from "./app-user-service";
+import type { AuthenticationConfiguration } from "./auth-runtime-config";
+
+const AUTHENTICATION: AuthenticationConfiguration = {
+  origin: "https://app.example.test",
+  secret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  googleClientId: "google-client-id.example.test",
+  googleClientSecret: "google-client-secret-test-value",
+  secureCookies: false,
+};
 
 const VERIFIED = {
   provider: "google",
@@ -126,7 +135,10 @@ describe("uygulama kullanici kimligi", () => {
 
 describe("OAuth token ve oturum siniri", () => {
   it("yalnizca Google, temel scope ve dogrulanmis e-posta kabul eder", async () => {
-    const config = createAuthConfig(async () => createFakeAppUserRepository());
+    const config = createAuthConfig(
+      AUTHENTICATION,
+      async () => createFakeAppUserRepository(),
+    );
     const provider = config.providers[0] as unknown as {
       id: string;
       options: {
@@ -170,7 +182,10 @@ describe("OAuth token ve oturum siniri", () => {
   });
 
   it("JWT callback access, refresh ve ID tokenlarini atar", async () => {
-    const config = createAuthConfig(async () => createFakeAppUserRepository());
+    const config = createAuthConfig(
+      AUTHENTICATION,
+      async () => createFakeAppUserRepository(),
+    );
     const jwt = config.callbacks?.jwt as unknown as (input: {
       token: Record<string, unknown>;
       user: Record<string, unknown>;
@@ -205,7 +220,7 @@ describe("OAuth token ve oturum siniri", () => {
 
   it("Auth.js profil siniri dogrulanmamis e-postada depo yaratmaz", async () => {
     const createRepository = vi.fn(async () => createFakeAppUserRepository());
-    const config = createAuthConfig(createRepository);
+    const config = createAuthConfig(AUTHENTICATION, createRepository);
     const provider = config.providers[0] as unknown as {
       options: {
         profile: (profile: Record<string, unknown>) => Promise<unknown>;
@@ -222,7 +237,10 @@ describe("OAuth token ve oturum siniri", () => {
   });
 
   it("auth loglayicisi hassas argumanlari yazmaz", () => {
-    const config = createAuthConfig(async () => createFakeAppUserRepository());
+    const config = createAuthConfig(
+      AUTHENTICATION,
+      async () => createFakeAppUserRepository(),
+    );
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
     config.logger?.error?.({ type: "secret", access_token: "token-value" } as never);
@@ -235,7 +253,10 @@ describe("OAuth token ve oturum siniri", () => {
   });
 
   it("oturum sunucu cookie'sidir ve tarayici depolamasi kullanilmaz", () => {
-    const config = createAuthConfig(async () => createFakeAppUserRepository());
+    const config = createAuthConfig(
+      AUTHENTICATION,
+      async () => createFakeAppUserRepository(),
+    );
     const cookie = config.cookies?.sessionToken;
     expect(config.session?.strategy).toBe("jwt");
     expect(cookie).toBeDefined();
@@ -255,7 +276,10 @@ describe("OAuth token ve oturum siniri", () => {
   it("uretim oturum cookie'si Secure ve __Secure- oneklidir", () => {
     vi.stubEnv("NODE_ENV", "production");
     try {
-      const config = createAuthConfig(async () => createFakeAppUserRepository());
+      const config = createAuthConfig(
+        { ...AUTHENTICATION, secureCookies: true },
+        async () => createFakeAppUserRepository(),
+      );
       expect(config.cookies?.sessionToken?.name).toBe(
         "__Secure-authjs.session-token",
       );

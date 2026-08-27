@@ -1,11 +1,14 @@
 "use server";
 
-import { signIn, signOut } from "@/auth";
+import { resolveAuthenticationRuntime } from "@/auth";
+import { createAuthenticationActions } from "@/lib/auth/auth-action-service";
+
+const actions = createAuthenticationActions(resolveAuthenticationRuntime);
 
 export async function startGoogleSignIn() {
-  await signIn("google", { redirectTo: "/" });
+  await actions.beginGoogleSignIn();
 }
 
 export async function endGoogleSession() {
-  await signOut({ redirectTo: "/" });
+  await actions.endSession();
 }

@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import {
-  POST,
-  createReceiptAnalyzePost,
-} from "@/app/api/receipts/analyze/route";
+import { createReceiptAnalyzePost } from "@/app/api/receipts/analyze/route";
 
 function multipartRequest(): Request {
   const body = new FormData();
@@ -21,7 +18,9 @@ function multipartRequest(): Request {
 
 describe("fis analizi Google oturum kapisi", () => {
   it("oturumsuz istek genel, no-store JSON 401 doner", async () => {
-    const response = await POST(multipartRequest());
+    const response = await createReceiptAnalyzePost({
+      authenticate: async () => ({ status: "signedOut" }),
+    })(multipartRequest());
     expect(response.status).toBe(401);
     expect(response.headers.get("content-type")).toContain("application/json");
     expect(response.headers.get("cache-control")).toBe(
@@ -41,13 +40,39 @@ describe("fis analizi Google oturum kapisi", () => {
     const configured = vi.fn(() => true);
     const extract = vi.fn();
     const route = createReceiptAnalyzePost({
-      authenticate: async () => null,
+      authenticate: async () => ({ status: "signedOut" }),
       configured,
       extract,
     });
 
     const response = await route(request);
     expect(response.status).toBe(401);
+    expect(formData).not.toHaveBeenCalled();
+    expect(configured).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+  });
+
+  it("auth yapilandirmasi gecersizken govde, dosya ve OpenAI isinden once genel 503 doner", async () => {
+    const request = multipartRequest();
+    const formData = vi.spyOn(request, "formData");
+    const configured = vi.fn(() => true);
+    const extract = vi.fn();
+    const response = await createReceiptAnalyzePost({
+      authenticate: async () => ({ status: "unavailable" }),
+      configured,
+      extract,
+    })(request);
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("cache-control")).toBe(
+      "no-store, private, max-age=0",
+    );
+    expect(await response.json()).toEqual({
+      error: {
+        code: "SERVICE_NOT_CONFIGURED",
+        message: "Kimlik doğrulama servisi şu anda kullanılamıyor.",
+      },
+    });
     expect(formData).not.toHaveBeenCalled();
     expect(configured).not.toHaveBeenCalled();
     expect(extract).not.toHaveBeenCalled();
@@ -62,7 +87,10 @@ describe("fis analizi Google oturum kapisi", () => {
       };
     });
     const route = createReceiptAnalyzePost({
-      authenticate: async () => ({ id: "app-user", name: null, image: null }),
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: "app-user", name: null, image: null },
+      }),
       configured: () => true,
       extract,
     });

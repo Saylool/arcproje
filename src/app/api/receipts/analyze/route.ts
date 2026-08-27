@@ -94,8 +94,15 @@ async function receiptAnalyzePost(
    * İLK işlem auth'tur. Gövde türüne, boyutuna veya FormData'ya dahi auth
    * sonucundan önce bakılmaz; yetkisiz görsel belleğe alınamaz.
    */
-  const user = await dependencies.authenticate();
-  if (user === null) {
+  const authentication = await dependencies.authenticate();
+  if (authentication.status === "unavailable") {
+    return errorResponse(
+      503,
+      "SERVICE_NOT_CONFIGURED",
+      "Kimlik doğrulama servisi şu anda kullanılamıyor.",
+    );
+  }
+  if (authentication.status === "signedOut") {
     return errorResponse(
       401,
       "AUTH_REQUIRED",
