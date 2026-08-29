@@ -68,11 +68,14 @@ async function seedBill(repository: ReturnType<typeof createFakeSharedBillReposi
     message: typed.message,
   });
 
-  const stored = await repository.createSharedBill({
-    manifest: created.manifest,
-    debts: created.debts,
-    signature,
-  });
+  const stored = await repository.createSharedBill(
+    {
+      manifest: created.manifest,
+      debts: created.debts,
+      signature,
+    },
+    { createdByUserId: null },
+  );
   if (!stored.ok) throw new Error("depoya yazilamadi");
 
   return { recipient, debtors, manifest: created.manifest, debts: created.debts };

@@ -1,4 +1,5 @@
 import { AppHeader } from "@/components/AppHeader";
+import { MyBillsPanel } from "@/components/MyBillsPanel";
 import { ReceiptFlow } from "@/components/ReceiptFlow";
 import { readSafeAuthState } from "@/lib/auth/safe-auth-state";
 
@@ -12,6 +13,13 @@ export default async function Home() {
       </header>
 
       <ReceiptFlow authStatus={authState.status} />
+
+      {/*
+        Sahiplik listesi YALNIZCA oturum açıkken oluşturulur. Oturumsuz bir
+        ziyaretçide bileşen hiç render edilmez, bu yüzden gereksiz bir istek de
+        atılmaz ve oturum açılması gerektiği başlıktaki kontrolle zaten söylenir.
+      */}
+      {authState.status === "authenticated" && <MyBillsPanel />}
     </main>
   );
 }

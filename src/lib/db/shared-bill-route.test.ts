@@ -182,3 +182,76 @@ describe("Google oturum kapisi", () => {
     expect(createBill).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("olusturan kullanicinin atfi", () => {
+  const SESSION_USER = "55555555-5555-4555-8555-555555555555";
+
+  function postWith(userId: string) {
+    const createBill = vi.fn(async () => ({
+      ok: true as const,
+      billId: `0x${"6d".repeat(32)}`,
+      path: `/pay/0x${"6d".repeat(32)}`,
+      expiresAt: 1_700_600_000,
+      created: true,
+    }));
+    const POST = createSharedBillPost({
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: userId, name: null, image: null },
+      }),
+      createRepository: async () => ({}) as never,
+      createBill,
+    });
+    return { POST, createBill };
+  }
+
+  it("oturumdaki kullanici kimligi is katmanina gecer", async () => {
+    const { POST, createBill } = postWith(SESSION_USER);
+    const response = await POST(jsonRequest(JSON.stringify({ a: 1 })));
+
+    expect(response.status).toBe(201);
+    expect(createBill).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByUserId: SESSION_USER }),
+    );
+  });
+
+  it("kimlik bicimsizse hesap YINE olusur, yalnizca sahipsiz kalir", async () => {
+    /*
+     * Atif ugruna hesap kaybedilmez: dogrulamanin hicbir adimi bu degere
+     * bagli degildir. (Okuma yolunda tercih TERSIDIR: orada bos liste yerine
+     * kontrollu hata donulur.)
+     */
+    const { POST, createBill } = postWith("app-user");
+    const response = await POST(jsonRequest(JSON.stringify({ a: 1 })));
+
+    expect(response.status).toBe(201);
+    expect(createBill).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByUserId: null }),
+    );
+  });
+
+  it("yanit sahiplik kimligini ISTEMCIYE sizdirmaz", async () => {
+    const { POST } = postWith(SESSION_USER);
+    const response = await POST(jsonRequest(JSON.stringify({ a: 1 })));
+    const text = await response.text();
+
+    expect(text).not.toContain(SESSION_USER);
+    expect(text).not.toMatch(/createdByUserId|appUserId/);
+  });
+
+  it("govde bir kullanici kimligi ONERSE bile dikkate alinmaz", async () => {
+    const { POST, createBill } = postWith(SESSION_USER);
+    await POST(
+      jsonRequest(
+        JSON.stringify({
+          createdByUserId: "66666666-6666-4666-8666-666666666666",
+          appUserId: "kotucul",
+        }),
+      ),
+    );
+
+    expect(createBill).toHaveBeenCalledWith(
+      expect.objectContaining({ createdByUserId: SESSION_USER }),
+    );
+  });
+});

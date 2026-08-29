@@ -1,10 +1,13 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  CreatedBillSummary,
   CreateSharedBillOutcome,
+  ListCreatedBillsOutcome,
   ResolveAccessInput,
   ResolveAccessOutcome,
   SessionLookupOutcome,
+  SharedBillAttribution,
   SharedBillRecord,
   SharedBillRepository,
   SharedBillStatus,
@@ -49,6 +52,13 @@ export type FakeStoredBill = {
   manifest: SharedBillManifest;
   signature: string;
   status: SharedBillStatus;
+  /**
+   * Hesabı oluşturan uygulama kullanıcısı. İMZALANAN İÇERİĞİN PARÇASI
+   * DEĞİLDİR ve borçlu akışının hiçbir yolunda okunmaz.
+   */
+  createdByUserId: string | null;
+  /** Yazım sırası; gerçek deponun `created_at DESC` sıralamasının karşılığı. */
+  writeSequence: number;
   /** Ödeme durumu değiştiği için satırlar DEĞİŞTİRİLEBİLİR tutulur. */
   debts: StoredSharedBillDebt[];
 };
@@ -95,6 +105,7 @@ export function createFakeSharedBillRepository(
   /** Deneme yaratılma sırası; "en son deneme" belirlenimci olsun diye. */
   const attemptOrder: string[] = [];
   let calls = 0;
+  let writeSequence = 0;
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -126,6 +137,7 @@ export function createFakeSharedBillRepository(
 
     async createSharedBill(
       record: SharedBillRecord,
+      attribution: SharedBillAttribution,
     ): Promise<CreateSharedBillOutcome> {
       calls += 1;
       if (repository.controls.failWithUnavailable === true) {
@@ -149,6 +161,10 @@ export function createFakeSharedBillRepository(
           existing.manifest.recipient.toLowerCase() ===
             manifest.recipient.toLowerCase() &&
           existing.manifest.debtCount === manifest.debtCount;
+        /*
+         * Tekrar kabul edilse bile SAHİP DEĞİŞMEZ. Aynı imzalı gövdeyi ele
+         * geçiren başka bir oturum, hesabı kendi üstüne alamaz.
+         */
         return identical
           ? { ok: true, created: false }
           : { ok: false, reason: "idConflict" };
@@ -177,11 +193,14 @@ export function createFakeSharedBillRepository(
         return { ok: false, reason: "unavailable" };
       }
 
+      writeSequence += 1;
       bills.set(manifest.billId.toLowerCase(), {
         billId: manifest.billId,
         manifest,
         signature,
         status: "open",
+        createdByUserId: attribution.createdByUserId,
+        writeSequence,
         // KANONİK indeks: satırlar zaten kanonik sırada gelir.
         debts: debts.map((debt, leafIndex) =>
           Object.freeze({
@@ -197,6 +216,57 @@ export function createFakeSharedBillRepository(
         ),
       });
       return { ok: true, created: true };
+    },
+
+    async listBillsCreatedBy(input: {
+      createdByUserId: string;
+      limit: number;
+    }): Promise<ListCreatedBillsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+
+      /*
+       * Süzme burada da SORGUNUN karşılığında yapılır: eşleşmeyen hiçbir satır
+       * çağırana ulaşmaz. Boş bir kimlik hiçbir şeyle eşleşmez.
+       */
+      const owned =
+        input.createdByUserId.length === 0
+          ? []
+          : [...bills.values()].filter(
+              (bill) => bill.createdByUserId === input.createdByUserId,
+            );
+
+      const summaries: CreatedBillSummary[] = owned
+        // `created_at DESC` karşılığı: en son yazılan önce.
+        .sort((left, right) => right.writeSequence - left.writeSequence)
+        .slice(0, Math.max(0, input.limit))
+        .map((bill) => {
+          // Para BigInt ile toplanır; kayan nokta hiç devreye girmez.
+          let total = BigInt(0);
+          let paid = BigInt(0);
+          let paidCount = 0;
+          for (const debt of bill.debts) {
+            total += BigInt(debt.tryMinor);
+            if (debt.paymentStatus === "paid") {
+              paid += BigInt(debt.tryMinor);
+              paidCount += 1;
+            }
+          }
+          return Object.freeze({
+            billId: bill.billId,
+            issuedAt: bill.manifest.issuedAt,
+            expiresAt: bill.manifest.expiresAt,
+            status: bill.status,
+            debtCount: bill.manifest.debtCount,
+            paidCount,
+            totalTryMinor: total.toString(),
+            paidTryMinor: paid.toString(),
+          });
+        });
+
+      return { ok: true, bills: Object.freeze(summaries) };
     },
 
     async resolveAccess(

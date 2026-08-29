@@ -91,3 +91,139 @@ export async function createSharedBillOnServer(
     expiresAt,
   };
 }
+
+/* ------------------------------------------------------------------------ */
+/* OLUSTURULAN HESAPLARIN LISTESI                                            */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Oturum acmis kullanicinin KENDI olusturdugu hesaplar.
+ *
+ * Istek hicbir kullanici kimligi TASIMAZ: sunucu suzmeyi kendi oturumundan
+ * yapar. Boyle bir parametre gonderilseydi, oturum acmis herkes baskasinin
+ * listesini isteyebilirdi.
+ *
+ * Yanit KATI dogrulanir ve TUMU-YA-DA-HICBIRI kabul edilir: tek bir satir bile
+ * beklenen bicimde degilse liste hic gosterilmez. Eksik bir liste, kullanicinin
+ * "hesabim kaybolmus" diye yanlis sonuc cikarmasina yol acardi.
+ */
+export type MyBillSummary = Readonly<{
+  billId: string;
+  /** Kimlikten YENIDEN kurulur; sunucunun metnine guvenilmez. */
+  path: string;
+  issuedAt: number;
+  expiresAt: number;
+  status: "open" | "closed";
+  debtCount: number;
+  paidCount: number;
+  /** KANONIK ondalik tam sayi metni; `number`a indirgenmez. */
+  totalTryMinor: string;
+  paidTryMinor: string;
+}>;
+
+export type ListMyBillsResponse =
+  | { ok: true; bills: readonly MyBillSummary[] }
+  | { ok: false; message: string; code?: string };
+
+const CANONICAL_MINOR = /^(0|[1-9][0-9]{0,29})$/;
+const MAX_DEBTS_PER_BILL = 50;
+
+function isSafeEpoch(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+}
+
+function toMyBillSummary(value: unknown): MyBillSummary | null {
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const row = value as Record<string, unknown>;
+  const { billId, issuedAt, expiresAt, status, totalTryMinor, paidTryMinor } =
+    row;
+  const debtCount = row.debtCount;
+  const paidCount = row.paidCount;
+
+  if (
+    typeof billId !== "string" ||
+    !BILL_ID.test(billId) ||
+    !isSafeEpoch(issuedAt) ||
+    !isSafeEpoch(expiresAt) ||
+    expiresAt <= issuedAt ||
+    (status !== "open" && status !== "closed") ||
+    typeof debtCount !== "number" ||
+    !Number.isSafeInteger(debtCount) ||
+    debtCount < 1 ||
+    debtCount > MAX_DEBTS_PER_BILL ||
+    typeof paidCount !== "number" ||
+    !Number.isSafeInteger(paidCount) ||
+    paidCount < 0 ||
+    paidCount > debtCount ||
+    typeof totalTryMinor !== "string" ||
+    !CANONICAL_MINOR.test(totalTryMinor) ||
+    typeof paidTryMinor !== "string" ||
+    !CANONICAL_MINOR.test(paidTryMinor) ||
+    BigInt(paidTryMinor) > BigInt(totalTryMinor)
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    billId,
+    // Yol SUNUCUDAN gelen metinden degil, dogrulanmis kimlikten kurulur.
+    path: `${SHARED_BILL_ROUTE}/${billId}`,
+    issuedAt,
+    expiresAt,
+    status,
+    debtCount,
+    paidCount,
+    totalTryMinor,
+    paidTryMinor,
+  });
+}
+
+export async function listMyBillsFromServer(
+  fetchImpl: typeof fetch = fetch,
+): Promise<ListMyBillsResponse> {
+  const failure = translate(DEFAULT_LOCALE, "myBills.failed");
+
+  let response: Response;
+  try {
+    response = await fetchImpl(SHARED_BILLS_ENDPOINT, {
+      method: "GET",
+      cache: "no-store",
+    });
+  } catch {
+    return { ok: false, message: failure };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return { ok: false, message: failure };
+  }
+
+  if (!response.ok) {
+    const code = readApiErrorCode(payload);
+    return code === null
+      ? { ok: false, message: failure }
+      : { ok: false, message: failure, code };
+  }
+
+  if (typeof payload !== "object" || payload === null) {
+    return { ok: false, message: failure };
+  }
+  const rows = (payload as { bills?: unknown }).bills;
+  if (!Array.isArray(rows)) {
+    return { ok: false, message: failure };
+  }
+
+  const bills: MyBillSummary[] = [];
+  for (const row of rows) {
+    const summary = toMyBillSummary(row);
+    if (summary === null) {
+      return { ok: false, message: failure };
+    }
+    bills.push(summary);
+  }
+  return { ok: true, bills: Object.freeze(bills) };
+}

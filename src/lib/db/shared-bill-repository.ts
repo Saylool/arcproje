@@ -24,6 +24,47 @@ export type SharedBillRecord = Readonly<{
 }>;
 
 /**
+ * Hesabı oluşturan uygulama kullanıcısı. İMZALANAN İÇERİĞİN PARÇASI DEĞİLDİR.
+ *
+ * Bilerek `SharedBillRecord`un DIŞINDA, ayrı bir argüman olarak taşınır:
+ * böylece atıf, manifeste ya da Merkle yapraklarına yanlışlıkla karışamaz.
+ * Kayıt imzalanan içeriktir; bu ise yalnızca sunucunun tuttuğu bir not.
+ *
+ * `null`: oturum kimliği yoksa ya da tanınmıyorsa. Hesap yine oluşturulur —
+ * atıf, hesabın kendisinden daha az önemlidir.
+ */
+export type SharedBillAttribution = Readonly<{
+  /** `app_users.user_id` (uuid) ya da atıf yoksa `null`. */
+  createdByUserId: string | null;
+}>;
+
+/**
+ * Oluşturan kişiye gösterilen hesap ÖZETİ.
+ *
+ * Bilerek asgaridir: borçlu adresleri, etiketler, borç anahtarları, taahhüt
+ * ve imza YOKTUR. Oluşturan kişi bu bilgileri zaten kendi cihazında üretmişti;
+ * sunucu onları geri yaymak zorunda değil.
+ */
+export type CreatedBillSummary = Readonly<{
+  billId: string;
+  /** Unix saniye; imzalı manifestten. */
+  issuedAt: number;
+  expiresAt: number;
+  status: SharedBillStatus;
+  debtCount: number;
+  /** `paid` durumundaki borç satırı sayısı. */
+  paidCount: number;
+  /** KANONİK ondalık tam sayı metni; `number`a ASLA indirgenmez. */
+  totalTryMinor: string;
+  paidTryMinor: string;
+}>;
+
+export type ListCreatedBillsOutcome =
+  | { ok: true; bills: readonly CreatedBillSummary[] }
+  /** Depo yapılandırılmamış veya erişilemiyor. Boş listeyle KARIŞTIRILMAZ. */
+  | { ok: false; reason: "unavailable" };
+
+/**
  * Hesabın durumu.
  *
  * `open` yalnızca "hesap hâlâ paylaşılabilir" demektir. Ödemenin yapıldığını
@@ -128,7 +169,27 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * Kısmi bir yazma bırakmaz: satırlardan biri reddedilirse hesap da
    * yazılmaz. Çağıran, doğrulamanın TAMAMINI bu çağrıdan ÖNCE yapmış olmalıdır.
    */
-  createSharedBill(record: SharedBillRecord): Promise<CreateSharedBillOutcome>;
+  createSharedBill(
+    record: SharedBillRecord,
+    attribution: SharedBillAttribution,
+  ): Promise<CreateSharedBillOutcome>;
+
+  /**
+   * Yalnızca VERİLEN uygulama kullanıcısının oluşturduğu hesapları döndürür.
+   *
+   * Süzme depo sorgusunun KENDİSİNDE yapılır; çağıranın döndükten sonra
+   * filtrelemesi beklenmez. Kimliği istemci veremez: rota onu her zaman
+   * sunucudaki oturumdan alır.
+   *
+   * Süresi dolmuş ve kapanmış hesaplar da DÖNER: oluşturan kişi kendi
+   * geçmişini görmelidir. Borçlu tarafındaki `notFound` gizliliği bu listeyi
+   * bağlamaz, çünkü burada okuyan kişi hesabın sahibidir.
+   */
+  listBillsCreatedBy(input: {
+    createdByUserId: string;
+    /** Üst sınır; çağıran her zaman sonlu bir değer verir. */
+    limit: number;
+  }): Promise<ListCreatedBillsOutcome>;
 
   /**
    * Erişimi ATOMİK olarak çözer: nonce'u tüketir VE oturumu yaratır.

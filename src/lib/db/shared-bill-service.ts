@@ -67,8 +67,16 @@ export async function createSharedBillFromSubmission(input: {
   bodyText: string;
   repository: SharedBillRepository;
   nowMs: number;
+  /**
+   * Hesabı oluşturan uygulama kullanıcısı. Rota bunu HER ZAMAN sunucudaki
+   * oturumdan verir; istek gövdesinden ASLA okunmaz.
+   *
+   * Atıf, doğrulamanın hiçbir adımını etkilemez: imza, taahhüt, tutarlar ve
+   * zaman penceresi bu değer `null` olsa da aynı şekilde denetlenir.
+   */
+  createdByUserId: string | null;
 }): Promise<SharedBillServiceResult> {
-  const { bodyText, repository, nowMs } = input;
+  const { bodyText, repository, nowMs, createdByUserId } = input;
 
   /*
    * Yinelenen anahtar taraması AYRIŞTIRMADAN ÖNCE çalışır: `JSON.parse` bu
@@ -122,11 +130,18 @@ export async function createSharedBillFromSubmission(input: {
   }
 
   // Doğrulama BİTTİKTEN sonra veritabanı işlemi açılır.
-  const stored = await repository.createSharedBill({
-    manifest: bill.manifest,
-    debts: bill.debts,
-    signature: bill.signature,
-  });
+  const stored = await repository.createSharedBill(
+    {
+      manifest: bill.manifest,
+      debts: bill.debts,
+      signature: bill.signature,
+    },
+    /*
+     * Atıf imzalı kaydın DIŞINDA, ayrı bir argüman olarak geçer. `bill` yalnız
+     * doğrulanmış ve imzalanmış içeriktir; sahiplik ona karışmaz.
+     */
+    { createdByUserId },
+  );
 
   if (!stored.ok) {
     if (stored.reason === "idConflict") {
