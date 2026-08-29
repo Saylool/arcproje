@@ -65,6 +65,8 @@ const CONSTRAINT_CODES = new Set([
 
 /** Hesap satırının birincil anahtar kısıtı; çakışma bundan tanınır. */
 const BILL_PRIMARY_KEY_CONSTRAINT = "shared_bills_pkey";
+/** 0003 ile gelen sahiplik yabancı anahtarı. */
+const OWNER_FOREIGN_KEY_CONSTRAINT = "shared_bills_created_by_app_user";
 
 function readErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) {
@@ -708,13 +710,16 @@ export async function createNeonSharedBillRepository(
     ): Promise<CreateSharedBillOutcome> {
       const { manifest, debts, signature } = record;
 
-      try {
-        /*
-         * Hesap ve TÜM borç satırları TEK bir Postgres işleminde yazılır.
-         * Satırlardan biri kısıtı ihlal ederse işlem tümüyle geri alınır ve
-         * kullanılabilir kısmi bir hesap kalmaz.
-         */
-        await sql.transaction((txn) => [
+      /*
+       * Hesap ve TÜM borç satırları TEK bir Postgres işleminde yazılır.
+       * Satırlardan biri kısıtı ihlal ederse işlem tümüyle geri alınır ve
+       * kullanılabilir kısmi bir hesap kalmaz.
+       *
+       * Atıf PARAMETRE olarak alınır: yabancı anahtar reddederse aynı yazım
+       * atıfsız yeniden denenebilsin.
+       */
+      const insert = (createdByUserId: string | null) =>
+        sql.transaction((txn) => [
           txn.query(INSERT_BILL, [
             manifest.billId,
             SHARED_BILL_SCHEMA_VERSION,
@@ -730,7 +735,7 @@ export async function createNeonSharedBillRepository(
              * Atıf İMZALANMAZ ve manifestin parçası değildir; imzalanan
              * baytlar bu sütundan etkilenmez.
              */
-            attribution.createdByUserId,
+            createdByUserId,
           ]),
           txn.query(INSERT_DEBTS, [
             manifest.billId,
@@ -742,6 +747,9 @@ export async function createNeonSharedBillRepository(
             debts.map((_, index) => index),
           ]),
         ]);
+
+      try {
+        await insert(attribution.createdByUserId);
         return { ok: true, created: true };
       } catch (error) {
         const code = readErrorCode(error);
@@ -779,6 +787,31 @@ export async function createNeonSharedBillRepository(
               : { ok: false, reason: "idConflict" };
           } catch {
             return { ok: false, reason: "unavailable" };
+          }
+        }
+
+        /*
+         * ATIF UĞRUNA HESAP KAYBEDİLMEZ.
+         *
+         * Oturumun açılmasıyla yazım arasında kullanıcı satırı silinmişse
+         * yabancı anahtar reddeder. Hesap o zaman ATIFSIZ yazılır: borçlunun
+         * ödeyeceği hesabın hiç var olmaması, sahibinin bilinmemesinden çok
+         * daha kötüdür ve doğrulamanın hiçbir adımı bu değere bağlı değildir.
+         *
+         * Yeniden deneme GÜVENLİDİR: ilk işlem tümüyle geri alınmıştır, geride
+         * kısmi bir kayıt kalmaz. Atıf zaten `null` iken bu dal çalışmaz, bu
+         * yüzden ikinciden fazla deneme İMKÂNSIZDIR.
+         */
+        if (
+          code === FOREIGN_KEY_VIOLATION &&
+          readConstraintName(error) === OWNER_FOREIGN_KEY_CONSTRAINT &&
+          attribution.createdByUserId !== null
+        ) {
+          try {
+            await insert(null);
+            return { ok: true, created: true };
+          } catch {
+            return { ok: false, reason: "constraint" };
           }
         }
 

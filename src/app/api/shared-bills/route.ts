@@ -258,7 +258,7 @@ async function sharedBillList(dependencies: SharedBillListDependencies) {
   }
 
   return NextResponse.json(
-    { bills: listed.bills },
+    { bills: listed.bills, hasMore: listed.hasMore },
     { status: 200, headers: NO_STORE_HEADERS },
   );
 }

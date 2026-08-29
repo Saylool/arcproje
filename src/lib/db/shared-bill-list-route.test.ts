@@ -84,7 +84,7 @@ describe("oturum kapisi", () => {
 describe("suzme olcutu", () => {
   it("depoya YALNIZCA oturumdaki kullanici kimligi gecer", async () => {
     const repository = {} as SharedBillRepository;
-    const listBills = vi.fn(async () => ({ ok: true as const, bills: [] }));
+    const listBills = vi.fn(async () => ({ ok: true as const, bills: [], hasMore: false }));
     const GET = createSharedBillList({
       authenticate: authenticated,
       createRepository: async () => repository,
@@ -126,7 +126,7 @@ describe("basarili yanit", () => {
     const GET = createSharedBillList({
       authenticate: authenticated,
       createRepository: async () => ({}) as SharedBillRepository,
-      listBills: async () => ({ ok: true as const, bills: [summary] }),
+      listBills: async () => ({ ok: true as const, bills: [summary], hasMore: false }),
     });
 
     const response = await GET();
@@ -144,7 +144,7 @@ describe("basarili yanit", () => {
     const GET = createSharedBillList({
       authenticate: authenticated,
       createRepository: async () => ({}) as SharedBillRepository,
-      listBills: async () => ({ ok: true as const, bills: [summary] }),
+      listBills: async () => ({ ok: true as const, bills: [summary], hasMore: false }),
     });
 
     const response = await GET();

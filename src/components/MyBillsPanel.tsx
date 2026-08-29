@@ -30,6 +30,8 @@ type LoadState =
   | {
       kind: "ready";
       bills: readonly MyBillSummary[];
+      /** Ust sinirdan fazlasi var mi? Kirpma kullaniciya SOYLENIR. */
+      hasMore: boolean;
       /**
        * Listenin OKUNDUĞU an. Süre dolumu render sırasında `Date.now()`
        * okunarak değil, bu sabit ana göre hesaplanır: render saf kalır ve
@@ -171,7 +173,12 @@ export function MyBillsPanel() {
       }
       setState(
         result.ok
-          ? { kind: "ready", bills: result.bills, loadedAtMs: Date.now() }
+          ? {
+              kind: "ready",
+              bills: result.bills,
+              hasMore: result.hasMore,
+              loadedAtMs: Date.now(),
+            }
           : { kind: "failed" },
       );
     })();
@@ -245,6 +252,16 @@ export function MyBillsPanel() {
             />
           ))}
         </ul>
+      )}
+
+      {/*
+        Liste sinira dayandiysa bu SOYLENIR. Sessiz kirpma, kullanicinin
+        "bir hesabim kaybolmus" diye dusunmesine yol acardi.
+      */}
+      {state.kind === "ready" && state.hasMore && (
+        <p className="text-[11px] text-ink-faint">
+          {t("myBills.truncated", { count: String(state.bills.length) })}
+        </p>
       )}
 
       {/*

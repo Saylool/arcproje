@@ -34,7 +34,18 @@ export type CreatedBillListEntry = CreatedBillSummary &
   Readonly<{ path: string }>;
 
 export type SharedBillListingResult =
-  | { ok: true; bills: readonly CreatedBillListEntry[] }
+  | {
+      ok: true;
+      bills: readonly CreatedBillListEntry[];
+      /**
+       * Üst sınırdan FAZLA hesap var mı?
+       *
+       * Sessiz kırpma yapılmaz: liste dolduğunda kullanıcı bunun bir sınır
+       * olduğunu görmeli, yoksa eksik listeye bakıp "bir hesabım kaybolmuş"
+       * sonucuna varabilir.
+       */
+      hasMore: boolean;
+    }
   | { ok: false; status: number; code: string; message: string };
 
 export async function listSharedBillsCreatedBy(input: {
@@ -60,9 +71,13 @@ export async function listSharedBillsCreatedBy(input: {
     };
   }
 
+  /*
+   * BİR FAZLASI istenir: dönen satır sayısı sınırı aşıyorsa daha fazlası
+   * olduğu KESİN bilinir. Ayrı bir sayım sorgusu gerekmez.
+   */
   const listed = await repository.listBillsCreatedBy({
     createdByUserId,
-    limit: MAX_LISTED_BILLS,
+    limit: MAX_LISTED_BILLS + 1,
   });
 
   if (!listed.ok) {
@@ -75,12 +90,16 @@ export async function listSharedBillsCreatedBy(input: {
     };
   }
 
+  const hasMore = listed.bills.length > MAX_LISTED_BILLS;
   return {
     ok: true,
+    hasMore,
     bills: Object.freeze(
-      listed.bills.map((bill) =>
-        Object.freeze({ ...bill, path: buildSharedBillPath(bill.billId) }),
-      ),
+      listed.bills
+        .slice(0, MAX_LISTED_BILLS)
+        .map((bill) =>
+          Object.freeze({ ...bill, path: buildSharedBillPath(bill.billId) }),
+        ),
     ),
   };
 }

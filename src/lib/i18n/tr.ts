@@ -374,6 +374,8 @@ export const tr = {
     refresh: "Yenile",
     loading: "Hesapların yükleniyor…",
     empty: "Bu hesapla henüz ortak ödeme bağlantısı oluşturmadın.",
+    truncated:
+      "Yalnızca en yeni {count} hesap gösteriliyor; daha eskileri bu listede yok.",
     failed: "Hesap listen şu anda okunamıyor. Lütfen birazdan tekrar dene.",
     copyLink: "Bağlantıyı kopyala",
     copied: "Kopyalandı",

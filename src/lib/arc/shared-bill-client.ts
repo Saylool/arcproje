@@ -122,7 +122,12 @@ export type MyBillSummary = Readonly<{
 }>;
 
 export type ListMyBillsResponse =
-  | { ok: true; bills: readonly MyBillSummary[] }
+  | {
+      ok: true;
+      bills: readonly MyBillSummary[];
+      /** Ust sinirdan FAZLA hesap var mi? Sessiz kirpma YAPILMAZ. */
+      hasMore: boolean;
+    }
   | { ok: false; message: string; code?: string };
 
 const CANONICAL_MINOR = /^(0|[1-9][0-9]{0,29})$/;
@@ -212,8 +217,9 @@ export async function listMyBillsFromServer(
   if (typeof payload !== "object" || payload === null) {
     return { ok: false, message: failure };
   }
-  const rows = (payload as { bills?: unknown }).bills;
-  if (!Array.isArray(rows)) {
+  const record = payload as { bills?: unknown; hasMore?: unknown };
+  const rows = record.bills;
+  if (!Array.isArray(rows) || typeof record.hasMore !== "boolean") {
     return { ok: false, message: failure };
   }
 
@@ -225,5 +231,5 @@ export async function listMyBillsFromServer(
     }
     bills.push(summary);
   }
-  return { ok: true, bills: Object.freeze(bills) };
+  return { ok: true, bills: Object.freeze(bills), hasMore: record.hasMore };
 }

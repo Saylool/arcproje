@@ -64,6 +64,15 @@ describe("panel metinleri", () => {
     expectShows(panel, "myBills.statusExpired", "Süresi doldu");
   });
 
+  it("liste kirpildiysa bu SOYLENIR", () => {
+    /*
+     * Sessiz kirpma, kullanicinin "bir hesabim kaybolmus" diye dusunmesine
+     * yol acardi. Bu cumle silinirse test duser.
+     */
+    expectShows(panel, "myBills.truncated", "en yeni {count} hesap");
+    expect(code).toContain("state.hasMore");
+  });
+
   it("YETKI SINIRI kullaniciya acikca soylenir", () => {
     /*
      * Sahipligin bir odeme yetkisi olmadigi yalnizca kodda degil, EKRANDA da

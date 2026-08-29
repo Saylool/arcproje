@@ -41,7 +41,7 @@ function respondWith(payload: unknown, status = 200) {
 
 describe("istek sekli", () => {
   it("hicbir kullanici kimligi TASIMAZ", async () => {
-    const fetchImpl = respondWith({ bills: [] });
+    const fetchImpl = respondWith({ bills: [], hasMore: false });
     await listMyBillsFromServer(fetchImpl);
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
@@ -64,7 +64,7 @@ describe("istek sekli", () => {
 describe("yanit dogrulamasi", () => {
   it("gecerli listeyi kabul eder", async () => {
     const result = await listMyBillsFromServer(
-      respondWith({ bills: [validRow()] }),
+      respondWith({ bills: [validRow()], hasMore: false }),
     );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -73,7 +73,7 @@ describe("yanit dogrulamasi", () => {
   });
 
   it("bos liste gecerlidir", async () => {
-    const result = await listMyBillsFromServer(respondWith({ bills: [] }));
+    const result = await listMyBillsFromServer(respondWith({ bills: [], hasMore: false }));
     expect(result.ok && result.bills).toEqual([]);
   });
 
@@ -81,6 +81,7 @@ describe("yanit dogrulamasi", () => {
     const result = await listMyBillsFromServer(
       respondWith({
         bills: [validRow({ path: "https://kotucul.example/calinti" })],
+        hasMore: false,
       }),
     );
     expect(result.ok).toBe(true);
@@ -90,7 +91,7 @@ describe("yanit dogrulamasi", () => {
 
   it("tek satir bile bozuksa liste HIC gosterilmez", async () => {
     const result = await listMyBillsFromServer(
-      respondWith({ bills: [validRow(), validRow({ billId: "0xkisa" })] }),
+      respondWith({ bills: [validRow(), validRow({ billId: "0xkisa" })], hasMore: false }),
     );
     expect(result.ok).toBe(false);
   });
@@ -98,7 +99,7 @@ describe("yanit dogrulamasi", () => {
   it("kanonik olmayan tutar reddedilir", async () => {
     for (const bad of ["019134", "191.34", "-1", "1e5", "", " 19134"]) {
       const result = await listMyBillsFromServer(
-        respondWith({ bills: [validRow({ totalTryMinor: bad })] }),
+        respondWith({ bills: [validRow({ totalTryMinor: bad })], hasMore: false }),
       );
       expect(result.ok, bad).toBe(false);
     }
@@ -116,14 +117,19 @@ describe("yanit dogrulamasi", () => {
     ];
     for (const over of inconsistent) {
       const result = await listMyBillsFromServer(
-        respondWith({ bills: [validRow(over)] }),
+        respondWith({ bills: [validRow(over)], hasMore: false }),
       );
       expect(result.ok, JSON.stringify(over)).toBe(false);
     }
   });
 
   it("liste alani dizi degilse reddedilir", async () => {
-    for (const payload of [{}, { bills: null }, { bills: "yok" }, []]) {
+    for (const payload of [
+      {},
+      { bills: null, hasMore: false },
+      { bills: "yok", hasMore: false },
+      [],
+    ]) {
       const result = await listMyBillsFromServer(respondWith(payload));
       expect(result.ok, JSON.stringify(payload)).toBe(false);
     }
@@ -158,5 +164,25 @@ describe("hata yollari", () => {
     if (result.ok) return;
     expect(result.code).toBe("AUTH_REQUIRED");
     expect(result.message).not.toContain("sunucu metni");
+  });
+});
+
+describe("kirpma bayragi", () => {
+  it("hasMore tasinir", async () => {
+    const result = await listMyBillsFromServer(
+      respondWith({ bills: [validRow()], hasMore: true }),
+    );
+    expect(result.ok && result.hasMore).toBe(true);
+  });
+
+  it("hasMore eksik veya boolean degilse yanit reddedilir", async () => {
+    for (const bad of [undefined, "true", 1, null]) {
+      const payload =
+        bad === undefined
+          ? { bills: [validRow()] }
+          : { bills: [validRow()], hasMore: bad };
+      const result = await listMyBillsFromServer(respondWith(payload));
+      expect(result.ok, JSON.stringify(payload)).toBe(false);
+    }
   });
 });

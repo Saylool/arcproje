@@ -342,6 +342,8 @@ export const en: Dictionary = {
     refresh: "Refresh",
     loading: "Loading your bills…",
     empty: "You have not created a shared payment link with this account yet.",
+    truncated:
+      "Showing only your {count} most recent bills; older ones are not in this list.",
     failed: "Your bill list cannot be read right now. Please try again shortly.",
     copyLink: "Copy link",
     copied: "Copied",
