@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 
+import {
+  authenticateRequest,
+  type AuthenticateRequest,
+} from "@/lib/auth/session";
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
 import { createSharedBillFromSubmission } from "@/lib/db/shared-bill-service";
 import { readBoundedBody } from "@/lib/http/bounded-body";
@@ -39,7 +43,47 @@ function errorResponse(status: number, code: string, message: string) {
   );
 }
 
-export async function POST(request: Request) {
+type SharedBillRouteDependencies = Readonly<{
+  authenticate: AuthenticateRequest;
+  readBody: typeof readBoundedBody;
+  createRepository: typeof createNeonSharedBillRepository;
+  createBill: typeof createSharedBillFromSubmission;
+}>;
+
+export function createSharedBillPost(
+  dependencies: Partial<SharedBillRouteDependencies> = {},
+) {
+  const resolved: SharedBillRouteDependencies = {
+    authenticate: dependencies.authenticate ?? authenticateRequest,
+    readBody: dependencies.readBody ?? readBoundedBody,
+    createRepository:
+      dependencies.createRepository ?? createNeonSharedBillRepository,
+    createBill: dependencies.createBill ?? createSharedBillFromSubmission,
+  };
+  return (request: Request) => sharedBillPost(request, resolved);
+}
+
+async function sharedBillPost(
+  request: Request,
+  dependencies: SharedBillRouteDependencies,
+) {
+  /* Auth gövde başlıklarından, akış okumadan ve depo yaratmadan ÖNCEDİR. */
+  const authentication = await dependencies.authenticate();
+  if (authentication.status === "unavailable") {
+    return errorResponse(
+      503,
+      "SERVICE_NOT_CONFIGURED",
+      "Kimlik doğrulama servisi şu anda kullanılamıyor.",
+    );
+  }
+  if (authentication.status === "signedOut") {
+    return errorResponse(
+      401,
+      "AUTH_REQUIRED",
+      "Bu işlem için oturum açman gerekiyor.",
+    );
+  }
+
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("application/json")) {
     return errorResponse(
@@ -58,7 +102,7 @@ export async function POST(request: Request) {
     return errorResponse(413, "BODY_TOO_LARGE", "İstek gövdesi çok büyük.");
   }
 
-  const bounded = await readBoundedBody(
+  const bounded = await dependencies.readBody(
     request,
     MAX_BODY_BYTES,
     BODY_READ_DEADLINE_MS,
@@ -88,7 +132,7 @@ export async function POST(request: Request) {
    * Depo YOKSA kontrollü 503. Üretimde sessizce belleğe düşülmez: aksi hâlde
    * kullanıcı çalıştığını sanır ve bağlantı ilk soğuk başlangıçta kaybolurdu.
    */
-  const repository = await createNeonSharedBillRepository();
+  const repository = await dependencies.createRepository();
   if (repository === null) {
     return errorResponse(
       503,
@@ -97,7 +141,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const result = await createSharedBillFromSubmission({
+  const result = await dependencies.createBill({
     bodyText: bounded.text,
     repository,
     nowMs: Date.now(),
@@ -119,3 +163,5 @@ export async function POST(request: Request) {
     },
   );
 }
+
+export const POST = createSharedBillPost();

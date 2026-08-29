@@ -11,6 +11,7 @@ import { ParticipantAssignment } from "@/components/ParticipantAssignment";
 import { ProgressSteps, type FlowStepId } from "@/components/ProgressSteps";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
+import { GoogleSignInButton } from "@/components/AuthControl";
 import { readApiErrorCode } from "@/lib/i18n/api-errors";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
@@ -75,7 +76,11 @@ function readReceiptField(payload: unknown): unknown {
   return null;
 }
 
-export function ReceiptFlow() {
+export function ReceiptFlow({
+  authStatus,
+}: {
+  authStatus: "authenticated" | "signedOut" | "unavailable";
+}) {
   const { t, locale } = useTranslator();
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<AnalysisStatus>("idle");
@@ -89,6 +94,7 @@ export function ReceiptFlow() {
   // Yeni bir analiz geldiğinde düzenleyicinin taslak input'ları sıfırlansın.
   const [analysisKey, setAnalysisKey] = useState(0);
   const isAnalyzingRef = useRef(false);
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
 
   const [screen, setScreen] = useState<FlowScreen>("receipt");
   /*
@@ -126,6 +132,7 @@ export function ReceiptFlow() {
       setAssignment(createInitialAssignmentState(t("participants.defaultName")));
       setDebtResult(null);
       setDebtError(null);
+      setShowAuthPrompt(false);
     },
     [t],
   );
@@ -172,6 +179,11 @@ export function ReceiptFlow() {
   const analyze = async () => {
     // Aynı isteğin tekrar gönderilmesini engelle.
     if (file === null || isAnalyzingRef.current) {
+      return;
+    }
+    if (authStatus !== "authenticated") {
+      /* FormData yaratılmaz ve dosya API'ye gönderilmez. */
+      setShowAuthPrompt(true);
       return;
     }
     isAnalyzingRef.current = true;
@@ -301,6 +313,29 @@ export function ReceiptFlow() {
                   {t("flow.uploadNotice")}
                 </p>
               </div>
+
+              {showAuthPrompt && authStatus !== "authenticated" && (
+                <div
+                  role="alert"
+                  className="flex flex-col items-start gap-2 rounded-2xl border border-brand-line bg-brand-soft px-3 py-3 text-sm text-brand-ink"
+                >
+                  <p>
+                    {t(
+                      authStatus === "unavailable"
+                        ? "auth.unavailable"
+                        : "auth.analysisRequired",
+                    )}
+                  </p>
+                  {authStatus === "signedOut" && (
+                    <>
+                      <p className="text-xs leading-relaxed">
+                        {t("auth.chooseAgainAfterSignIn")}
+                      </p>
+                      <GoogleSignInButton />
+                    </>
+                  )}
+                </div>
+              )}
 
               {isAnalyzing && (
                 <p className="rounded-2xl bg-brand-soft px-3 py-2.5 text-xs leading-relaxed text-brand-ink sm:text-sm">

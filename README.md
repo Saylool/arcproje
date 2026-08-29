@@ -4,8 +4,9 @@ Ortak hesabı adil biçimde bölmek için küçük bir hackathon MVP'si. Hedefle
 fişin fotoğrafını yükle → fişteki ürünleri kişilere dağıt → herkesin borcunu hesapla →
 Arc Testnet üzerinden USDC ile öde.
 
-> Bu depo şu anda akışın **ilk iki parçasını** içeriyor: fiş yükleme ve fiş analizi
-> (ürünlerin okunup düzenlenebilir biçimde gösterilmesi).
+> Bu depo fiş analizi, paylaşım/borç hesabı, Arc Testnet ödeme akışı ve creator
+> işlemleri için Google oturum temelini içerir. Kota uygulaması bu değişikliğin
+> parçası değildir.
 
 ## Kurulum ve çalıştırma
 
@@ -30,9 +31,33 @@ cp .env.example .env.local
 | `COINGECKO_DEMO_API_KEY` | evet | USDC/TRY kuru için CoinGecko Demo anahtarı. **Yalnızca sunucuda okunur.** |
 | `RATE_QUOTE_SECRET` | evet | Kur teklifini imzalayan HMAC sırrı. **Yalnızca sunucuda okunur.** |
 | `DATABASE_URL` | hayır (Part 1) | Neon Postgres bağlantısı; paylaşılan ortak hesap deposu. **Yalnızca sunucuda okunur.** |
+| `SHARED_BILL_AUTH_SECRET` | evet (borçlu bağlantısı) | Cüzdan challenge zarfının HMAC sırrı. **Yalnızca sunucuda okunur.** |
+| `APP_ORIGIN` | üretimde evet | Güvenilen açık uygulama origin'i; OAuth ve cüzdan challenge hedefi istemci Host başlıklarından türetilmez. |
+| `AUTH_SECRET` | Google girişinde evet | Auth.js JWT/cookie şifreleme sırrı: tam 32 rastgele baytı temsil eden **tam 64 küçük hexadecimal karakter** (`^[0-9a-f]{64}$`). **Yalnızca sunucuda okunur.** |
+| `AUTH_GOOGLE_ID` | Google girişinde evet | Google OAuth Web client ID. **Yalnızca sunucuda okunur.** |
+| `AUTH_GOOGLE_SECRET` | Google girişinde evet | Google OAuth Web client secret. **Yalnızca sunucuda okunur.** |
 
 Bu değişkenlerin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
 paketine girmez.
+
+`AUTH_SECRET` kriptografik rastgelelikle üretilmelidir. macOS'ta değeri terminal
+çıktısına yazmadan doğrudan panoya almak için:
+
+```bash
+openssl rand -hex 32 | tr -d '\n' | pbcopy
+```
+
+Üretilen değer değiştirilmeden kullanılmalı; başında/sonunda boşluk, büyük hex
+harfi veya başka karakter bulunmamalıdır. `AUTH_SECRET`, `RATE_QUOTE_SECRET` ve
+`SHARED_BILL_AUTH_SECRET` üç ayrı sunucu sırrıdır; aynı değer paylaşılmaz.
+Hiçbiri `NEXT_PUBLIC_` adıyla tanımlanmaz veya istemciye gönderilmez.
+
+`APP_ORIGIN`, `AUTH_SECRET`, `AUTH_GOOGLE_ID` ya da `AUTH_GOOGLE_SECRET` eksik
+veya geçersizse Auth.js başlatılmaz. OAuth uç noktaları ile Google korumalı
+creator API'leri ayrıntı sızdırmayan, `Cache-Control: no-store` taşıyan
+`503 SERVICE_NOT_CONFIGURED` döndürür. Geçerli yapılandırmada yalnızca oturum
+yoksa creator API'leri `401 AUTH_REQUIRED` döndürür. Borçlu cüzdan ve kur
+rotaları bu Google yapılandırmasından bağımsız kalır.
 
 `DATABASE_URL` tanımlı olmasa bile uygulama ve testler derlenir; yalnızca
 `POST /api/shared-bills` kontrollü bir 503 döner. Şema ve geçiş için
@@ -46,6 +71,82 @@ npm run dev
 ```
 
 Uygulama `http://localhost:3000` adresinde açılır.
+
+## Google kimlik doğrulama temeli
+
+Ana creator arayüzü oturum açmadan görüntülenebilir. Aşağıdaki pahalı/yazıcı
+işlemler sunucuda Google oturumu gerektirir ve oturum yoksa gövde okunmadan
+genel, önbelleksiz `401 AUTH_REQUIRED` JSON yanıtı döner:
+
+- `POST /api/receipts/analyze`
+- `POST /api/shared-bills`
+
+Fiş seçimi oturum yönlendirmesinde tutulmaz veya yüklenmez. Kullanıcı Google
+girişinden döndüğünde görseli yeniden seçer. Fiş görseli yalnızca kimliği
+doğrulanmış kullanıcı **Fişi analiz et** işlemini açıkça başlattığında
+OpenAI'ye gönderilir; sunucuda veya kullanıcı tablosunda saklanmaz.
+
+### Kimlik, oturum ve saklanan veri
+
+Auth.js v5 ve resmi Google OIDC provider kullanılır. OAuth state, PKCE, nonce,
+callback doğrulaması ve güvenli cookie davranışı kütüphanenin sınırındadır.
+İstenen scope tam olarak `openid email profile`dır; Google API erişimi yoktur.
+
+Uygulama kimliği e-posta değildir: `provider = google` ile Google'ın kararlı
+provider account ID'si (`sub`) birlikte benzersizdir. Her hesap için rastgele,
+opak bir uygulama kullanıcı UUID'si üretilir. Aynı e-postayı bildiren iki ayrı
+Google hesabı birleşmez; aynı Google hesabının eşzamanlı ilk girişleri Postgres
+`ON CONFLICT` upsert ile tek kayda çözülür.
+
+`app_users` yalnızca opak kullanıcı ID'si, provider/provider hesap ID'si,
+normalize e-posta, doğrulanma bayrağı, isteğe bağlı görünen ad/avatar ve zaman
+damgalarını saklar. E-posta profil metadatasıdır; yetkilendirme anahtarı değildir.
+Google access token, refresh token ve ID token **hiçbir veritabanına veya oturum
+JWT'sine yazılmaz ve loglanmaz**. Auth.js adapter kullanılmaz. Oturum, yalnızca
+minimal uygulama kullanıcı kimliğini ve güvenli görünen profil alanlarını taşıyan,
+`HttpOnly`, `SameSite=Lax` ve üretimde `Secure` şifreli JWT-cookie'dir; browser
+storage kullanılmaz.
+
+### Cüzdan-only kalan borçlu akışı
+
+Google oturumu aşağıdaki sayfa ve API'lerde istenmez; global auth middleware'i
+yoktur:
+
+- `/pay`, `/pay/[billId]`
+- `/api/shared-bills/[billId]/challenge`, `/resolve`, `/me`
+- `/api/shared-bills/[billId]/payment/*`
+- `/api/rates/usdc-try`, `/api/rates/verify`
+
+Borçlu kendi borcunu yalnızca mevcut cüzdan challenge/imza oturumuyla görür ve
+öder. Google oturumu cüzdan sahipliği kanıtının yerini alamaz; borçlu cüzdanı
+Google kullanıcısıyla ilişkilendirilmez ve creator'ın Google profili paylaşılmaz.
+
+### Google Cloud ve dağıtım için elle yapılacaklar
+
+Bu depodaki değişiklik Google Cloud, Vercel veya Neon'u kendiliğinden
+yapılandırmaz. Daha sonra şu adımlar elle uygulanmalıdır:
+
+1. Google Cloud Console'da OAuth consent screen ve **Web application** client
+   oluştur; yalnızca temel OpenID profil/e-posta izinlerini kullan.
+2. Authorized JavaScript origins listesine `http://localhost:3000` ve
+   `https://arcproje-seven.vercel.app` ekle.
+3. Authorized redirect URIs listesine şunları birebir ekle:
+   - `http://localhost:3000/api/auth/callback/google`
+   - `https://arcproje-seven.vercel.app/api/auth/callback/google`
+4. Yerel sunucuda boş örneklerden `AUTH_SECRET`, `AUTH_GOOGLE_ID` ve
+   `AUTH_GOOGLE_SECRET` değerlerini güvenli biçimde tanımla; Google girişini
+   kullanmak için `APP_ORIGIN` değerini de açıkça tanımla (yerelde
+   `http://localhost:3000` olabilir). `AUTH_SECRET` için yukarıdaki 32 rastgele
+   bayt / 64 küçük hex üretim komutunu kullan.
+5. Vercel'de aynı üç server-only değişkeni ve
+   `APP_ORIGIN=https://arcproje-seven.vercel.app` değerini elle tanımla.
+   Hiçbir sırra `NEXT_PUBLIC_` öneki verme.
+6. İncelenen `migrations/0002_app_users.sql` geçişini hedef Neon ortamına
+   ayrıca ve kontrollü biçimde uygula. Uygulama şemayı istek sırasında yaratmaz.
+
+Preview deployment hostları bilerek OAuth origin listesine alınmamıştır. Auth.js
+origin'i gelen `Host`, `Origin`, `Referer` veya `X-Forwarded-Host` başlıklarından
+değil, doğrulanmış `APP_ORIGIN` değerinden kurar.
 
 Diğer komutlar:
 
