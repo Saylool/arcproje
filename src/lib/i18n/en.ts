@@ -348,7 +348,7 @@ export const en: Dictionary = {
     copied: "Copied",
     copyFailed:
       "Your browser denied clipboard access. You can open the link and copy it from the address bar.",
-    openLink: "Open",
+    openLink: "Open link",
     issuedAt: "Issued: {date}",
     expiresAt: "Expires: {date}",
     statusOpen: "Open",

@@ -109,24 +109,22 @@ function BillRow({
         {tp("billDebtorsPaid", bill.debtCount, { paid: bill.paidCount })}
       </p>
 
-      <dl className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
-        <div>
-          <dt className="sr-only">{t("myBills.issuedAt", { date: "" })}</dt>
-          <dd>
-            {t("myBills.issuedAt", {
-              date: formatDateTime(bill.issuedAt, locale),
-            })}
-          </dd>
-        </div>
-        <div>
-          <dt className="sr-only">{t("myBills.expiresAt", { date: "" })}</dt>
-          <dd>
-            {t("myBills.expiresAt", {
-              date: formatDateTime(bill.expiresAt, locale),
-            })}
-          </dd>
-        </div>
-      </dl>
+      {/*
+        Etiket ZATEN cümlenin içinde ("Veriliş: …"), bu yüzden ayrı bir
+        `<dt>` konmaz: ekran okuyucu aksi hâlde etiketi iki kez okurdu.
+      */}
+      <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
+        <span>
+          {t("myBills.issuedAt", {
+            date: formatDateTime(bill.issuedAt, locale),
+          })}
+        </span>
+        <span>
+          {t("myBills.expiresAt", {
+            date: formatDateTime(bill.expiresAt, locale),
+          })}
+        </span>
+      </p>
 
       <div className="flex flex-wrap items-center gap-2">
         <button
@@ -189,10 +187,13 @@ export function MyBillsPanel() {
   };
 
   return (
-    <section className="flex flex-col gap-3 rounded-2xl border border-line bg-muted p-4">
+    <section
+      aria-labelledby="my-bills-title"
+      className="flex flex-col gap-3 rounded-2xl border border-line bg-muted p-4"
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-ink">
+          <h2 id="my-bills-title" className="text-sm font-semibold text-ink">
             {t("myBills.title")}
           </h2>
           <p className="mt-0.5 text-xs text-ink-faint">

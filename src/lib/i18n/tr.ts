@@ -380,7 +380,7 @@ export const tr = {
     copied: "Kopyalandı",
     copyFailed:
       "Tarayıcı pano erişimini engelledi. Bağlantıyı açıp adres çubuğundan kopyalayabilirsin.",
-    openLink: "Aç",
+    openLink: "Bağlantıyı aç",
     issuedAt: "Veriliş: {date}",
     expiresAt: "Bitiş: {date}",
     statusOpen: "Açık",
