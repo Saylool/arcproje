@@ -343,7 +343,6 @@ export const en: Dictionary = {
     loading: "Loading your bills…",
     empty: "You have not created a shared payment link with this account yet.",
     failed: "Your bill list cannot be read right now. Please try again shortly.",
-    retry: "Try again",
     copyLink: "Copy link",
     copied: "Copied",
     copyFailed:

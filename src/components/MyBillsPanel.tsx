@@ -217,19 +217,15 @@ export function MyBillsPanel() {
         </p>
       )}
 
+      {/*
+        Hata halinde AYRI bir "tekrar dene" dugmesi YOKTUR: yukarudaki
+        "Yenile" ayni islevi gorur ve hemen ustundedir. Iki ayni eylemi yan
+        yana koymak, kullaniciya ikisinin farkli seyler yaptigini dusundurur.
+      */}
       {state.kind === "failed" && (
-        <div className="flex flex-wrap items-center gap-2">
-          <p role="status" className="text-xs text-warn-ink-soft">
-            {t("myBills.failed")}
-          </p>
-          <button
-            type="button"
-            onClick={reload}
-            className="rounded-full border border-line bg-card px-3 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-          >
-            {t("myBills.retry")}
-          </button>
-        </div>
+        <p role="status" className="text-xs text-warn-ink-soft">
+          {t("myBills.failed")}
+        </p>
       )}
 
       {state.kind === "ready" && state.bills.length === 0 && (

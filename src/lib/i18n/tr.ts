@@ -375,7 +375,6 @@ export const tr = {
     loading: "Hesapların yükleniyor…",
     empty: "Bu hesapla henüz ortak ödeme bağlantısı oluşturmadın.",
     failed: "Hesap listen şu anda okunamıyor. Lütfen birazdan tekrar dene.",
-    retry: "Tekrar dene",
     copyLink: "Bağlantıyı kopyala",
     copied: "Kopyalandı",
     copyFailed:
