@@ -363,6 +363,35 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   /* Ortak hesap — borçlu görünümü                                           */
   /* --------------------------------------------------------------------- */
+  /* Oluşturduğun hesaplar — sahiplik listesi                                */
+  /* --------------------------------------------------------------------- */
+  myBills: {
+    title: "Oluşturduğun hesaplar",
+    subtitle:
+      "Yalnızca bu Google hesabıyla oluşturduğun ortak ödeme bağlantıları.",
+    authorityNotice:
+      "Bu liste yalnızca bir kayıttır. Bir hesabı oluşturmuş olmak hiçbir ödeme yetkisi VERMEZ: parayı yalnızca borçlu, kendi cüzdanında imzalayarak gönderir.",
+    refresh: "Yenile",
+    loading: "Hesapların yükleniyor…",
+    empty: "Bu hesapla henüz ortak ödeme bağlantısı oluşturmadın.",
+    truncated:
+      "Yalnızca en yeni {count} hesap gösteriliyor; daha eskileri bu listede yok.",
+    failed: "Hesap listen şu anda okunamıyor. Lütfen birazdan tekrar dene.",
+    copyLink: "Bağlantıyı kopyala",
+    copied: "Kopyalandı",
+    copyFailed:
+      "Tarayıcı pano erişimini engelledi. Bağlantıyı açıp adres çubuğundan kopyalayabilirsin.",
+    openLink: "Bağlantıyı aç",
+    issuedAt: "Veriliş: {date}",
+    expiresAt: "Bitiş: {date}",
+    statusOpen: "Açık",
+    statusClosed: "Kapalı",
+    statusExpired: "Süresi doldu",
+    amountPaid: "{paid} / {total} ödendi",
+    listLabel: "Oluşturduğun ortak hesapların listesi",
+  },
+
+  /* --------------------------------------------------------------------- */
   sharedPay: {
     sectionLabel: "Ortak hesap",
     title: "Ortak hesap — kendi borcun",
@@ -1023,6 +1052,10 @@ export const tr = {
     allAssigned: {
       one: "Her ürün atandı. {count} veya daha fazla kişiyle devam edebilirsin.",
       other: "Her ürün atandı. {count} veya daha fazla kişiyle devam edebilirsin.",
+    },
+    billDebtorsPaid: {
+      one: "{paid}/{count} borçlu ödedi",
+      other: "{paid}/{count} borçlu ödedi",
     },
   },
 } as const satisfies DictionaryShape;

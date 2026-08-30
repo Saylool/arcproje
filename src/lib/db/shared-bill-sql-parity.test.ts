@@ -128,3 +128,55 @@ describe("bellek içi depo: hesap TÜM borçlar onaylanınca kapanır", () => {
     ).toBe("closed");
   });
 });
+
+describe("sahiplik SQL'i", () => {
+  it("hesap yazimi sahiplik sutununu tasir", () => {
+    const start = neon.indexOf("const INSERT_BILL");
+    const query = neon.slice(start, neon.indexOf("`;", start));
+    expect(query).toContain("created_by_user_id");
+  });
+
+  it("yabanci anahtar reddederse hesap ATIFSIZ yeniden yazilir", () => {
+    /*
+     * Kullanici satiri oturum ile yazim arasinda silinmisse hesap
+     * KAYBEDILMEZ. Dal, YALNIZCA sahiplik kisitina bagli olmalidir: baska bir
+     * yabanci anahtar ihlalini sessizce yutmak, gercek bir veri hatasini
+     * gizlerdi.
+     */
+    expect(neon).toContain(
+      'const OWNER_FOREIGN_KEY_CONSTRAINT = "shared_bills_created_by_app_user";',
+    );
+    const start = neon.indexOf("code === FOREIGN_KEY_VIOLATION");
+    expect(start).toBeGreaterThan(-1);
+    const branch = neon.slice(start, start + 500);
+    expect(branch).toContain("OWNER_FOREIGN_KEY_CONSTRAINT");
+    expect(branch).toContain("attribution.createdByUserId !== null");
+    expect(branch).toContain("await insert(null)");
+  });
+
+  it("yeniden deneme TEK seferliktir; dongu yoktur", () => {
+    const start = neon.indexOf("code === FOREIGN_KEY_VIOLATION");
+    const branch = neon.slice(start, start + 500);
+    expect(branch).not.toMatch(/\bwhile\b|\bfor\b|createSharedBill\(/);
+    // Atif zaten null iken dal calismaz: sonsuz yeniden deneme imkansizdir.
+    expect(branch).toContain("attribution.createdByUserId !== null");
+  });
+
+  it("sahip listesi sorgusu borclu verisini SECMEZ", () => {
+    const start = neon.indexOf("const SELECT_BILLS_CREATED_BY");
+    expect(start).toBeGreaterThan(-1);
+    const query = neon.slice(start, neon.indexOf("`;", start));
+    expect(query).toContain("WHERE b.created_by_user_id = $1");
+    expect(query).toContain("LIMIT $2");
+    for (const forbidden of [
+      "debtor_address",
+      "debtor_label",
+      "debt_key",
+      "recipient_signature",
+      "recipient_address",
+      "debts_root",
+    ]) {
+      expect(query, forbidden).not.toContain(forbidden);
+    }
+  });
+});

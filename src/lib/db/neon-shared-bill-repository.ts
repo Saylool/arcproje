@@ -5,10 +5,13 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  CreatedBillSummary,
   CreateSharedBillOutcome,
+  ListCreatedBillsOutcome,
   ResolveAccessInput,
   ResolveAccessOutcome,
   SessionLookupOutcome,
+  SharedBillAttribution,
   SharedBillRecord,
   SharedBillRepository,
   StoredSharedBill,
@@ -62,6 +65,8 @@ const CONSTRAINT_CODES = new Set([
 
 /** Hesap satırının birincil anahtar kısıtı; çakışma bundan tanınır. */
 const BILL_PRIMARY_KEY_CONSTRAINT = "shared_bills_pkey";
+/** 0003 ile gelen sahiplik yabancı anahtarı. */
+const OWNER_FOREIGN_KEY_CONSTRAINT = "shared_bills_created_by_app_user";
 
 function readErrorCode(error: unknown): string | null {
   if (typeof error !== "object" || error === null) {
@@ -82,8 +87,9 @@ function readConstraintName(error: unknown): string | null {
 const INSERT_BILL = `
 INSERT INTO shared_bills (
   bill_id, schema_version, chain_id, recipient_address, recipient_label,
-  debts_root, debt_count, issued_at, expires_at, recipient_signature, status
-) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8), to_timestamp($9), $10, 'open')
+  debts_root, debt_count, issued_at, expires_at, recipient_signature, status,
+  created_by_user_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, to_timestamp($8), to_timestamp($9), $10, 'open', $11)
 `;
 
 /**
@@ -201,6 +207,109 @@ type ExistingRow = {
   recipient_signature: unknown;
   debt_count: unknown;
 };
+
+/*
+ * Oluşturan kişinin KENDİ hesap listesi.
+ *
+ * Süzme `WHERE b.created_by_user_id = $1` ile SORGUNUN İÇİNDE yapılır: rota
+ * hiçbir zaman "hepsini çek, sonra filtrele" yapmaz. Kimlik istemciden değil,
+ * sunucudaki oturumdan gelir.
+ *
+ * Borçlu adresi, etiket, borç anahtarı, taahhüt ve imza SEÇİLMEZ. Toplamlar
+ * `numeric`ten `text`e çevrilir: para hiçbir adımda `number` olmaz.
+ *
+ * Sıralama SUNUCU zamanına göredir; `issued_at` istemci tarafından üretilir ve
+ * sıraya esas alınmaz.
+ */
+const SELECT_BILLS_CREATED_BY = `
+SELECT b.bill_id,
+       extract(epoch from b.issued_at)::bigint  AS issued_at,
+       extract(epoch from b.expires_at)::bigint AS expires_at,
+       b.status,
+       b.debt_count,
+       coalesce(sum(d.try_minor), 0)::text AS total_try_minor,
+       coalesce(sum(d.try_minor) FILTER (WHERE d.payment_status = 'paid'), 0)::text
+         AS paid_try_minor,
+       count(d.*) FILTER (WHERE d.payment_status = 'paid')::bigint AS paid_count
+FROM shared_bills b
+LEFT JOIN shared_bill_debts d ON d.bill_id = b.bill_id
+WHERE b.created_by_user_id = $1
+GROUP BY b.bill_id, b.issued_at, b.expires_at, b.status, b.debt_count, b.created_at
+ORDER BY b.created_at DESC
+LIMIT $2
+`;
+
+type CreatedBillRow = {
+  bill_id: unknown;
+  issued_at: unknown;
+  expires_at: unknown;
+  status: unknown;
+  debt_count: unknown;
+  total_try_minor: unknown;
+  paid_try_minor: unknown;
+  paid_count: unknown;
+};
+
+/** Kanonik negatif olmayan tam sayı metni; başta sıfır ve ondalık kabul edilmez. */
+const CANONICAL_MINOR = /^(0|[1-9][0-9]{0,29})$/;
+
+function asCanonicalMinor(value: unknown): string | null {
+  const text =
+    typeof value === "string"
+      ? value
+      : typeof value === "bigint"
+        ? value.toString()
+        : null;
+  return text !== null && CANONICAL_MINOR.test(text) ? text : null;
+}
+
+function asBoundedCount(value: unknown, max: number): number | null {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= max
+    ? parsed
+    : null;
+}
+
+/**
+ * Satırı özete çevirir. Herhangi bir alan beklenen biçimde DEĞİLSE `null`
+ * döner ve çağıran tüm listeyi `unavailable` sayar: yanlış bir tutarı
+ * göstermektense hiçbir şey göstermemek yeğdir.
+ */
+function toCreatedBillSummary(row: CreatedBillRow): CreatedBillSummary | null {
+  const billId = asText(row.bill_id);
+  const status = asText(row.status);
+  const issuedAt = Number(row.issued_at);
+  const expiresAt = Number(row.expires_at);
+  const debtCount = asBoundedCount(row.debt_count, 50);
+  const paidCount = asBoundedCount(row.paid_count, 50);
+  const totalTryMinor = asCanonicalMinor(row.total_try_minor);
+  const paidTryMinor = asCanonicalMinor(row.paid_try_minor);
+
+  if (
+    billId === null ||
+    (status !== "open" && status !== "closed") ||
+    !Number.isSafeInteger(issuedAt) ||
+    !Number.isSafeInteger(expiresAt) ||
+    debtCount === null ||
+    paidCount === null ||
+    paidCount > debtCount ||
+    totalTryMinor === null ||
+    paidTryMinor === null
+  ) {
+    return null;
+  }
+
+  return Object.freeze({
+    billId,
+    issuedAt,
+    expiresAt,
+    status,
+    debtCount,
+    paidCount,
+    totalTryMinor,
+    paidTryMinor,
+  });
+}
 
 function asText(value: unknown): string | null {
   return typeof value === "string" ? value : null;
@@ -597,16 +706,20 @@ export async function createNeonSharedBillRepository(
   return Object.freeze({
     async createSharedBill(
       record: SharedBillRecord,
+      attribution: SharedBillAttribution,
     ): Promise<CreateSharedBillOutcome> {
       const { manifest, debts, signature } = record;
 
-      try {
-        /*
-         * Hesap ve TÜM borç satırları TEK bir Postgres işleminde yazılır.
-         * Satırlardan biri kısıtı ihlal ederse işlem tümüyle geri alınır ve
-         * kullanılabilir kısmi bir hesap kalmaz.
-         */
-        await sql.transaction((txn) => [
+      /*
+       * Hesap ve TÜM borç satırları TEK bir Postgres işleminde yazılır.
+       * Satırlardan biri kısıtı ihlal ederse işlem tümüyle geri alınır ve
+       * kullanılabilir kısmi bir hesap kalmaz.
+       *
+       * Atıf PARAMETRE olarak alınır: yabancı anahtar reddederse aynı yazım
+       * atıfsız yeniden denenebilsin.
+       */
+      const insert = (createdByUserId: string | null) =>
+        sql.transaction((txn) => [
           txn.query(INSERT_BILL, [
             manifest.billId,
             SHARED_BILL_SCHEMA_VERSION,
@@ -618,6 +731,11 @@ export async function createNeonSharedBillRepository(
             manifest.issuedAt,
             manifest.expiresAt,
             signature,
+            /*
+             * Atıf İMZALANMAZ ve manifestin parçası değildir; imzalanan
+             * baytlar bu sütundan etkilenmez.
+             */
+            createdByUserId,
           ]),
           txn.query(INSERT_DEBTS, [
             manifest.billId,
@@ -629,6 +747,9 @@ export async function createNeonSharedBillRepository(
             debts.map((_, index) => index),
           ]),
         ]);
+
+      try {
+        await insert(attribution.createdByUserId);
         return { ok: true, created: true };
       } catch (error) {
         const code = readErrorCode(error);
@@ -669,10 +790,65 @@ export async function createNeonSharedBillRepository(
           }
         }
 
+        /*
+         * ATIF UĞRUNA HESAP KAYBEDİLMEZ.
+         *
+         * Oturumun açılmasıyla yazım arasında kullanıcı satırı silinmişse
+         * yabancı anahtar reddeder. Hesap o zaman ATIFSIZ yazılır: borçlunun
+         * ödeyeceği hesabın hiç var olmaması, sahibinin bilinmemesinden çok
+         * daha kötüdür ve doğrulamanın hiçbir adımı bu değere bağlı değildir.
+         *
+         * Yeniden deneme GÜVENLİDİR: ilk işlem tümüyle geri alınmıştır, geride
+         * kısmi bir kayıt kalmaz. Atıf zaten `null` iken bu dal çalışmaz, bu
+         * yüzden ikinciden fazla deneme İMKÂNSIZDIR.
+         */
+        if (
+          code === FOREIGN_KEY_VIOLATION &&
+          readConstraintName(error) === OWNER_FOREIGN_KEY_CONSTRAINT &&
+          attribution.createdByUserId !== null
+        ) {
+          try {
+            await insert(null);
+            return { ok: true, created: true };
+          } catch {
+            return { ok: false, reason: "constraint" };
+          }
+        }
+
         if (code !== null && CONSTRAINT_CODES.has(code)) {
           return { ok: false, reason: "constraint" };
         }
         // Ağ, kimlik doğrulama veya bilinmeyen sürücü hatası. Ayrıntı sızmaz.
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async listBillsCreatedBy(input: {
+      createdByUserId: string;
+      limit: number;
+    }): Promise<ListCreatedBillsOutcome> {
+      try {
+        const rows = (await sql.query(SELECT_BILLS_CREATED_BY, [
+          input.createdByUserId,
+          input.limit,
+        ])) as CreatedBillRow[];
+
+        const bills: CreatedBillSummary[] = [];
+        for (const row of rows) {
+          const summary = toCreatedBillSummary(row);
+          if (summary === null) {
+            /*
+             * Tek bir satır bile beklenen biçimde değilse liste KISMEN
+             * gösterilmez. Eksik bir liste, kullanıcının "hesabım kaybolmuş"
+             * diye yanlış sonuç çıkarmasına yol açardı.
+             */
+            return { ok: false, reason: "unavailable" };
+          }
+          bills.push(summary);
+        }
+        return { ok: true, bills: Object.freeze(bills) };
+      } catch {
+        // Sürücü ayrıntısı dışarı sızmaz.
         return { ok: false, reason: "unavailable" };
       }
     },

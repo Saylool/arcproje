@@ -138,11 +138,15 @@ export async function seedPaidBill(input: {
     primaryType: typed.primaryType,
     message: typed.message,
   });
-  const stored = await repository.createSharedBill({
-    manifest: created.manifest,
-    debts: created.debts,
-    signature,
-  });
+  const stored = await repository.createSharedBill(
+    {
+      manifest: created.manifest,
+      debts: created.debts,
+      signature,
+    },
+    /* Borçlu akışı sahipliği HİÇ bilmez: atıfsız yazılır. */
+    { createdByUserId: null },
+  );
   if (!stored.ok) throw new Error("depoya yazilamadi");
 
   /*

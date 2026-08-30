@@ -46,7 +46,7 @@ const GATING_PATTERNS = [
 ] as const;
 
 describe("Google auth route siniri", () => {
-  it("yalnizca iki pahali creator POST route'u Google oturumu ister", () => {
+  it("yalnizca creator rotalari Google oturumu ister", () => {
     for (const file of [
       "src/app/api/receipts/analyze/route.ts",
       "src/app/api/shared-bills/route.ts",
@@ -151,5 +151,97 @@ describe("Google auth route siniri", () => {
     expect(source).toMatch(/bg-card/);
     expect(source).toMatch(/text-ink/);
     expect(source).not.toMatch(/bg-white|text-black|dark:/);
+  });
+});
+
+/**
+ * Ödeme yolundaki dosyalar. SAHİPLİĞİ hiç tanımamalıdırlar.
+ *
+ * Bir hesabı oluşturmuş olmak, o hesapta parayı hareket ettirme yetkisi
+ * VERMEZ. Bu dosyalardan biri sahiplik alanını okumaya başlarsa, "hesabın
+ * sahibiyim" iddiası sessizce bir ödeme yetkisine dönüşmüş olur.
+ */
+const OWNERSHIP_BLIND_PAYMENT_FILES = [
+  "src/app/api/shared-bills/[billId]/challenge/route.ts",
+  "src/app/api/shared-bills/[billId]/resolve/route.ts",
+  "src/app/api/shared-bills/[billId]/me/route.ts",
+  "src/app/api/shared-bills/[billId]/payment/claim/route.ts",
+  "src/app/api/shared-bills/[billId]/payment/finalize/route.ts",
+  "src/app/api/shared-bills/[billId]/payment/outcome/route.ts",
+  "src/app/api/shared-bills/[billId]/payment/prepare/route.ts",
+  "src/app/api/shared-bills/[billId]/payment/status/route.ts",
+  "src/lib/db/shared-bill-access-service.ts",
+  "src/lib/db/shared-bill-auth.ts",
+  "src/lib/db/shared-bill-claim-service.ts",
+  "src/lib/db/shared-bill-payment-service.ts",
+  "src/lib/db/shared-bill-settlement-service.ts",
+] as const;
+
+/** Sahipliğin ödeme yoluna sızdığını gösterecek her iz. */
+const OWNERSHIP_PATTERNS = [
+  /createdByUserId/,
+  /created_by_user_id/,
+  /listBillsCreatedBy/,
+  /SharedBillAttribution/,
+] as const;
+
+describe("hesap sahipligi ODEME YETKISI degildir", () => {
+  it("odeme yolundaki hicbir dosya sahiplik alanini okumaz", () => {
+    for (const file of OWNERSHIP_BLIND_PAYMENT_FILES) {
+      const source = readFileSync(file, "utf8");
+      for (const pattern of OWNERSHIP_PATTERNS) {
+        expect(source, `${file} / ${pattern}`).not.toMatch(pattern);
+      }
+    }
+  });
+
+  it("borclunun hesap sorgusu sahiplik sutununu SECMEZ", () => {
+    const source = readFileSync(
+      "src/lib/db/neon-shared-bill-repository.ts",
+      "utf8",
+    );
+    const start = source.indexOf("const SELECT_BILL_FOR_DEBTOR");
+    expect(start).toBeGreaterThan(-1);
+    const query = source.slice(start, source.indexOf("`;", start));
+    expect(query).not.toContain("created_by_user_id");
+  });
+
+  it("sahiplik listesi YALNIZCA okur: transfer veya imza baslatmaz", () => {
+    const source = readFileSync("src/components/MyBillsPanel.tsx", "utf8");
+    expect(source).not.toMatch(
+      /kit\.send|sendTransaction|signTypedData|writeContract|method: "POST"/,
+    );
+    // Yetki sınırı kullanıcıya da SÖYLENİR.
+    expect(source).toContain("myBills.authorityNotice");
+  });
+});
+
+describe("0003 sahiplik gecisi", () => {
+  const sql = readFileSync("migrations/0003_shared_bill_owner.sql", "utf8");
+
+  it("islem icinde calisir ve sutunu NULL SERBEST birakir", () => {
+    expect(sql).toMatch(/BEGIN;[\s\S]*COMMIT;/);
+    expect(sql).toContain("ADD COLUMN IF NOT EXISTS created_by_user_id uuid");
+    // NOT NULL olsaydi bu gecisten ONCEKI hesaplar yazilamaz hale gelirdi.
+    expect(sql).not.toMatch(/created_by_user_id\s+uuid\s+NOT NULL/i);
+  });
+
+  it("kullanici silinirse hesap SILINMEZ, yalnizca atif duser", () => {
+    expect(sql).toContain("REFERENCES app_users (user_id)");
+    expect(sql).toContain("ON DELETE SET NULL");
+    expect(sql).not.toMatch(/ON DELETE CASCADE/i);
+  });
+
+  it("imzali sutunlarin hicbirine dokunmaz", () => {
+    for (const signed of [
+      "debts_root",
+      "recipient_signature",
+      "recipient_address",
+      "bill_id",
+    ]) {
+      expect(sql, signed).not.toMatch(
+        new RegExp(`(ALTER|DROP)\\s+COLUMN\\s+${signed}`, "i"),
+      );
+    }
   });
 });

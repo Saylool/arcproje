@@ -88,6 +88,7 @@ describe("basarili atomik olusturma", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(result.ok).toBe(true);
@@ -110,6 +111,7 @@ describe("basarili atomik olusturma", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -154,6 +156,7 @@ describe("basarili atomik olusturma", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     for (const [name, spy] of Object.entries(spies)) {
@@ -174,6 +177,7 @@ describe("basarili atomik olusturma", () => {
       bodyText: reordered,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result.ok).toBe(true);
   });
@@ -188,11 +192,13 @@ describe("idempotent tekrar karari", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     const second = await createSharedBillFromSubmission({
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(first.ok && first.created).toBe(true);
@@ -211,6 +217,7 @@ describe("idempotent tekrar karari", () => {
       bodyText: first.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     // Ayni hesap kimligi, BASKA bir alici ve baska bir borc listesi.
@@ -221,6 +228,7 @@ describe("idempotent tekrar karari", () => {
       bodyText: second.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(result).toMatchObject({
@@ -241,12 +249,14 @@ describe("idempotent tekrar karari", () => {
       bodyText: first.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     const second = await prepare({ billId: BILL_ID });
     const result = await createSharedBillFromSubmission({
       bodyText: second.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(result.ok).toBe(false);
@@ -273,6 +283,7 @@ describe("depo hatalari kontrollu yansitilir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({
       ok: false,
@@ -291,6 +302,7 @@ describe("depo hatalari kontrollu yansitilir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({
       ok: false,
@@ -309,6 +321,7 @@ describe("depo hatalari kontrollu yansitilir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result.ok).toBe(false);
     // Hicbir kayit yazilmadi.
@@ -324,6 +337,7 @@ describe("depo hatalari kontrollu yansitilir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -356,6 +370,7 @@ describe("dogrulama depoya ULASMADAN once calisir", () => {
       }),
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(result).toMatchObject({
@@ -382,6 +397,7 @@ describe("dogrulama depoya ULASMADAN once calisir", () => {
       }),
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
 
     expect(result).toMatchObject({ ok: false, status: 400 });
@@ -400,6 +416,7 @@ describe("dogrulama depoya ULASMADAN once calisir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: later,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(repository.calls).toBe(0);
@@ -415,6 +432,7 @@ describe("dogrulama depoya ULASMADAN once calisir", () => {
       bodyText: prepared.body,
       repository,
       nowMs: earlier,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({ ok: false, status: 400 });
     expect(repository.calls).toBe(0);
@@ -429,6 +447,7 @@ describe("govde bicimi", () => {
         bodyText: bad,
         repository,
         nowMs: NOW,
+              createdByUserId: null,
       });
       expect(result, JSON.stringify(bad)).toMatchObject({
         ok: false,
@@ -453,6 +472,7 @@ describe("govde bicimi", () => {
       bodyText: duplicated,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({
       ok: false,
@@ -475,6 +495,7 @@ describe("govde bicimi", () => {
       bodyText: body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({ ok: false, code: "DUPLICATE_FIELD" });
   });
@@ -493,6 +514,7 @@ describe("govde bicimi", () => {
       bodyText: body,
       repository,
       nowMs: NOW,
+          createdByUserId: null,
     });
     expect(result).toMatchObject({ ok: false, code: "INVALID_SHARED_BILL" });
     expect(repository.calls).toBe(0);

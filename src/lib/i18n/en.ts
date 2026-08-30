@@ -330,6 +330,35 @@ export const en: Dictionary = {
     createFailed: "The shared bill could not be created. Please try again.",
   },
 
+  /* --------------------------------------------------------------------- */
+  /* Bills you created — ownership list                                      */
+  /* --------------------------------------------------------------------- */
+  myBills: {
+    title: "Bills you created",
+    subtitle:
+      "Shared payment links you created with this Google account only.",
+    authorityNotice:
+      "This list is a record, nothing more. Creating a bill grants NO payment authority: only the debtor moves money, by signing in their own wallet.",
+    refresh: "Refresh",
+    loading: "Loading your bills…",
+    empty: "You have not created a shared payment link with this account yet.",
+    truncated:
+      "Showing only your {count} most recent bills; older ones are not in this list.",
+    failed: "Your bill list cannot be read right now. Please try again shortly.",
+    copyLink: "Copy link",
+    copied: "Copied",
+    copyFailed:
+      "Your browser denied clipboard access. You can open the link and copy it from the address bar.",
+    openLink: "Open link",
+    issuedAt: "Issued: {date}",
+    expiresAt: "Expires: {date}",
+    statusOpen: "Open",
+    statusClosed: "Closed",
+    statusExpired: "Expired",
+    amountPaid: "{paid} / {total} paid",
+    listLabel: "List of the shared bills you created",
+  },
+
   sharedPay: {
     sectionLabel: "Shared bill",
     title: "Shared bill — what you owe",
@@ -983,6 +1012,10 @@ export const en: Dictionary = {
     allAssigned: {
       one: "Every item is assigned. You can continue with {count} or more participants.",
       other: "Every item is assigned. You can continue with {count} or more participants.",
+    },
+    billDebtorsPaid: {
+      one: "{paid} of {count} debtor paid",
+      other: "{paid} of {count} debtors paid",
     },
   },
 };
