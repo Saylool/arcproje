@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { AppHeader } from "@/components/AppHeader";
 import { SharedBillDebtorView } from "@/components/SharedBillDebtorView";
+import { readSafeAuthState } from "@/lib/auth/safe-auth-state";
 import { translate } from "@/lib/i18n/dictionary";
 import { resolveRequestLocale } from "@/lib/i18n/server";
 
@@ -11,6 +12,11 @@ import { resolveRequestLocale } from "@/lib/i18n/server";
  * Sayfa SUNUCUDA hicbir hesap verisi okumaz ve hesabin var olup olmadigini
  * ACIGA VURMAZ. Kimlik dogrulamasindan once gosterilecek bir sey yoktur;
  * borc yalnizca cuzdan imzasiyla ve `/me` uzerinden gelir.
+ *
+ * GOOGLE OTURUMU YALNIZCA BASLIKTA GOSTERILIR ve BIR KAPI DEGILDIR: bu
+ * baglantiyi acan kisinin oturumu olmayabilir, olmasi da gerekmez. Borcu
+ * gormek icin tek yeterli kanit CUZDAN IMZASIDIR; oturum durumu o karari
+ * hicbir bicimde etkilemez.
  *
  * Eski, borclu basina `/pay?request=...` baglantilari AYRI bir sayfadadir ve
  * bu degisiklikten etkilenmez.
@@ -35,7 +41,12 @@ export default async function SharedBillPage({
 }: {
   params: Promise<{ billId: string }>;
 }) {
-  const { billId } = await params;
+  /* Oturum okuma, hesap kimligini cozmeyi GECIKTIRMEZ; ikisi paraleldir. */
+  const [{ billId }, authState] = await Promise.all([
+    params,
+    readSafeAuthState(),
+  ]);
+
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-4 px-4 py-8">
       {/*
@@ -44,7 +55,7 @@ export default async function SharedBillPage({
         sey aciga vurmaz.
       */}
       <header>
-        <AppHeader titleKey="metadata.sharedBillTitle" />
+        <AppHeader titleKey="metadata.sharedBillTitle" authState={authState} />
       </header>
 
       <SharedBillDebtorView billId={billId} />
