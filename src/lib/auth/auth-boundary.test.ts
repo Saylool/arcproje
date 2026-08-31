@@ -286,8 +286,18 @@ describe("adres rehberi borclu tarafina SIZMAZ", () => {
       "src/app/api/contacts/[contactId]/route.ts",
     ]) {
       const source = readFileSync(file, "utf8");
-      expect(source, file).toContain("userId: gate.user.id");
-      expect(source, file).not.toMatch(/userId:\s*body\.|userId:\s*params\./);
+      /*
+       * "body.userId gecmesin" demek YETMEZ: bir cast ya da yardimci
+       * fonksiyon o kalibi atlatir. Bunun yerine HER `userId:` atamasinin
+       * TAM OLARAK oturumdan geldigi olculur.
+       */
+      const assignments = [...source.matchAll(/userId:([^,\n]*)/g)].map(
+        (match) => match[1]?.trim(),
+      );
+      expect(assignments.length, file).toBeGreaterThan(0);
+      for (const value of assignments) {
+        expect(value, `${file} -> userId: ${value}`).toBe("gate.user.id");
+      }
     }
   });
 
