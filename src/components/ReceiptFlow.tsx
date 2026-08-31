@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { PaymentRequestCreator } from "@/components/PaymentRequestCreator";
+import { dropStaleLinks } from "@/lib/split/linked-addresses";
 import { SharedBillCreator } from "@/components/SharedBillCreator";
 import { SHARED_BILL_FLOW_ENABLED } from "@/lib/arc/shared-bill-feature";
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
@@ -153,13 +154,42 @@ export function ReceiptFlow({
     [invalidateDebts],
   );
 
+  /**
+   * KİŞİ ADIMINDA bağlanan cüzdan adresleri: katılımcı kimliği → adres.
+   *
+   * Eşleştirme burada yapılır çünkü insanları İSİMLE tanırsın, adresle değil.
+   * Ödeme adımı bu eşleşmeyi hazır bulur; orada yeniden öneri gösterilmez.
+   */
+  const [linkedAddresses, setLinkedAddresses] = useState<
+    Record<string, string>
+  >({});
+
   const handleAssignmentChange = useCallback(
     (next: AssignmentState) => {
+      /*
+       * Bayat bağlar ÖNCE düşürülür: adı değişmiş ya da silinmiş bir kişinin
+       * cüzdan bağı ödeme adımına taşınmamalıdır.
+       */
+      setLinkedAddresses((links) =>
+        dropStaleLinks(links, assignment.participants, next.participants),
+      );
       setAssignment(next);
       invalidateDebts();
     },
-    [invalidateDebts],
+    [assignment.participants, invalidateDebts],
   );
+
+  const linkAddress = useCallback((participantId: string, address: string) => {
+    setLinkedAddresses((links) => ({ ...links, [participantId]: address }));
+  }, []);
+
+  const unlinkAddress = useCallback((participantId: string) => {
+    setLinkedAddresses((links) => {
+      const next = { ...links };
+      delete next[participantId];
+      return next;
+    });
+  }, []);
 
   const calculate = () => {
     if (receipt === null) {
@@ -390,6 +420,9 @@ export function ReceiptFlow({
           receipt={receipt}
           state={assignment}
           onChange={handleAssignmentChange}
+          linkedAddresses={linkedAddresses}
+          onLinkAddress={linkAddress}
+          onUnlinkAddress={unlinkAddress}
           onBack={() => setScreen("receipt")}
           onComplete={() => setScreen("summary")}
         />
@@ -429,6 +462,7 @@ export function ReceiptFlow({
             receipt={receipt}
             participants={assignment.participants}
             result={debtResult}
+            initialAddresses={linkedAddresses}
             onBack={() => setScreen("debts")}
           />
         ) : (

@@ -121,6 +121,7 @@ export function ContactSuggestions({
   asOfMs,
   participantName,
   value,
+  hintKey = "contacts.hint",
   onPick,
 }: {
   contacts: readonly Contact[];
@@ -128,6 +129,8 @@ export function ContactSuggestions({
   asOfMs: number;
   participantName: string;
   value: string;
+  /** Başlık metni: kişi adımında "bu kişiyi tanıyoruz" tonu kullanılır. */
+  hintKey?: "contacts.hint" | "contacts.knownPerson";
   onPick: (address: string) => void;
 }) {
   const { t, locale } = useTranslator();
@@ -139,7 +142,7 @@ export function ContactSuggestions({
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[11px] text-ink-faint">{t("contacts.hint")}</span>
+      <span className="text-[11px] text-ink-faint">{t(hintKey)}</span>
       <ul
         aria-label={t("contacts.suggestionsLabel")}
         className="flex flex-wrap gap-1.5"

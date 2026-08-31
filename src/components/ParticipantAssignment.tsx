@@ -2,6 +2,11 @@
 
 import { useId, useState } from "react";
 
+import {
+  ContactSuggestions,
+  useRecentContacts,
+} from "@/components/ContactSuggestions";
+import { shortenWalletAddress } from "@/lib/arc/address";
 import { useTranslator } from "@/lib/i18n/context";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
@@ -25,6 +30,10 @@ type ParticipantAssignmentProps = {
   receipt: Receipt;
   state: AssignmentState;
   onChange: (state: AssignmentState) => void;
+  /** Katılımcı kimliği → daha önce kullanılmış cüzdan adresi. */
+  linkedAddresses: Readonly<Record<string, string>>;
+  onLinkAddress: (participantId: string, address: string) => void;
+  onUnlinkAddress: (participantId: string) => void;
   onBack: () => void;
   onComplete: () => void;
 };
@@ -33,6 +42,9 @@ export function ParticipantAssignment({
   receipt,
   state,
   onChange,
+  linkedAddresses,
+  onLinkAddress,
+  onUnlinkAddress,
   onBack,
   onComplete,
 }: ParticipantAssignmentProps) {
@@ -40,6 +52,12 @@ export function ParticipantAssignment({
   const payerGroupName = useId();
   const newNameInputId = useId();
   const newNameErrorId = useId();
+
+  /*
+   * Rehber BURADA okunur. Eşleştirme ödeme adımında değil burada yapılır:
+   * insanları isimle tanırız, adresle değil.
+   */
+  const recentContacts = useRecentContacts();
 
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState<ParticipantNameError | null>(null);
@@ -156,6 +174,50 @@ export function ParticipantAssignment({
                     <p className="text-[11px] leading-snug text-danger-ink-soft">
                       {describeParticipantNameError(issue, locale)}
                     </p>
+                  )}
+
+                  {/*
+                    TANIDIK KİŞİ EŞLEŞTİRMESİ.
+
+                    Bir bağ SEÇİLDİYSE öneri yerine seçilen adres gösterilir;
+                    kullanıcı isterse kaldırır. Öneri ASLA kendiliğinden
+                    bağlanmaz — tıklamak gerekir.
+
+                    Kısaltılmış adres yalnızca "hangi bugra" sorusunu
+                    yanıtlar. TAM adres, imzadan hemen önce ödeme adımında
+                    ayrıca ve eksiksiz gösterilir.
+                  */}
+                  {linkedAddresses[participant.id] !== undefined ? (
+                    <div className="flex flex-wrap items-center gap-2 text-[11px]">
+                      <span className="text-ink-faint">
+                        {t("contacts.linkedWallet")}
+                      </span>
+                      <span className="font-mono text-ink-soft">
+                        {shortenWalletAddress(
+                          linkedAddresses[participant.id] ?? "",
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onUnlinkAddress(participant.id)}
+                        className="rounded-full px-2 py-0.5 font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      >
+                        {t("contacts.unlink")}
+                      </button>
+                    </div>
+                  ) : (
+                    participant.name.trim() !== "" && (
+                      <ContactSuggestions
+                        contacts={recentContacts.contacts}
+                        asOfMs={recentContacts.loadedAtMs}
+                        participantName={participant.name}
+                        value={participant.name}
+                        hintKey="contacts.knownPerson"
+                        onPick={(address) =>
+                          onLinkAddress(participant.id, address)
+                        }
+                      />
+                    )
                   )}
                 </li>
               );
