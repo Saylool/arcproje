@@ -8,6 +8,11 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  DeleteContactOutcome,
+  ListSavedContactsOutcome,
+  SaveContactOutcome,
+  SavedContact,
+  UpdateContactOutcome,
   CreatedBillSummary,
   CreateSharedBillOutcome,
   ListCreatedBillsOutcome,
@@ -272,6 +277,83 @@ FROM (
 ORDER BY last_used_at DESC
 LIMIT $2
 `;
+
+/*
+ * KAYITLI KİŞİLER — kullanıcının kendi adres defteri.
+ *
+ * HER SORGU `user_id` İLE SINIRLIDIR. `contact_id` tahmin edilse bile
+ * başkasının kaydına dokunulamaz; kısıt sorgunun içindedir.
+ */
+const SELECT_SAVED_CONTACTS = `
+SELECT contact_id, label, address
+FROM saved_contacts
+WHERE user_id = $1
+ORDER BY lower(label)
+LIMIT $2
+`;
+
+/*
+ * Ekleme, ÜST SINIRI da sorgunun içinde uygular: `WHERE` yalnızca sayım
+ * sınırın altındaysa satır üretir. Ayrı bir "önce say, sonra ekle" adımı
+ * eşzamanlı iki istekte sınırı aşabilirdi.
+ */
+const INSERT_SAVED_CONTACT = `
+INSERT INTO saved_contacts (contact_id, user_id, label, address)
+SELECT $1, $2, $3, $4
+WHERE (SELECT count(*) FROM saved_contacts WHERE user_id = $2) < $5
+RETURNING contact_id, label, address
+`;
+
+const UPDATE_SAVED_CONTACT = `
+UPDATE saved_contacts
+SET label = $3, address = $4, updated_at = now()
+WHERE user_id = $1 AND contact_id = $2
+RETURNING contact_id, label, address
+`;
+
+const DELETE_SAVED_CONTACT = `
+DELETE FROM saved_contacts WHERE user_id = $1 AND contact_id = $2
+`;
+
+const DELETE_ALL_SAVED_CONTACTS = `
+DELETE FROM saved_contacts WHERE user_id = $1
+`;
+
+type SavedContactRow = {
+  contact_id: unknown;
+  label: unknown;
+  address: unknown;
+};
+
+/** Satırı kayda çevirir; beklenen biçimde değilse `null`. */
+function toSavedContact(row: SavedContactRow): SavedContact | null {
+  const contactId = asText(row.contact_id);
+  const rawAddress = asText(row.address);
+  const address =
+    rawAddress === null ? null : normalizeWalletAddress(rawAddress);
+  const label = validateCanonicalLabel(row.label, MAX_LABEL_LENGTH);
+  if (contactId === null || address === null || !label.ok) {
+    return null;
+  }
+  return Object.freeze({ contactId, label: label.value, address });
+}
+
+/** Hangi benzersizlik indeksi ihlal edildi? */
+function duplicateReason(
+  error: unknown,
+): "duplicateAddress" | "duplicateLabel" | null {
+  if (readErrorCode(error) !== UNIQUE_VIOLATION) {
+    return null;
+  }
+  const constraint = readConstraintName(error);
+  if (constraint === "saved_contacts_one_address_per_user") {
+    return "duplicateAddress";
+  }
+  if (constraint === "saved_contacts_one_label_per_user") {
+    return "duplicateLabel";
+  }
+  return null;
+}
 
 type RecentDebtorRow = {
   address: unknown;
@@ -914,6 +996,114 @@ export async function createNeonSharedBillRepository(
         return { ok: true, bills: Object.freeze(bills) };
       } catch {
         // Sürücü ayrıntısı dışarı sızmaz.
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async listSavedContacts(input: {
+      userId: string;
+      limit: number;
+    }): Promise<ListSavedContactsOutcome> {
+      try {
+        const rows = (await sql.query(SELECT_SAVED_CONTACTS, [
+          input.userId,
+          input.limit,
+        ])) as SavedContactRow[];
+        const contacts: SavedContact[] = [];
+        for (const row of rows) {
+          const contact = toSavedContact(row);
+          if (contact !== null) {
+            contacts.push(contact);
+          }
+        }
+        return { ok: true, contacts: Object.freeze(contacts) };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async saveContact(input: {
+      userId: string;
+      contactId: string;
+      label: string;
+      address: string;
+      limit: number;
+    }): Promise<SaveContactOutcome> {
+      try {
+        const rows = (await sql.query(INSERT_SAVED_CONTACT, [
+          input.contactId,
+          input.userId,
+          input.label,
+          input.address,
+          input.limit,
+        ])) as SavedContactRow[];
+        const row = rows[0];
+        if (row === undefined) {
+          // `WHERE` sınırı tutmadı: defter dolu.
+          return { ok: false, reason: "limitReached" };
+        }
+        const contact = toSavedContact(row);
+        return contact === null
+          ? { ok: false, reason: "unavailable" }
+          : { ok: true, contact };
+      } catch (error) {
+        const duplicate = duplicateReason(error);
+        if (duplicate !== null) {
+          return { ok: false, reason: duplicate };
+        }
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async updateContact(input: {
+      userId: string;
+      contactId: string;
+      label: string;
+      address: string;
+    }): Promise<UpdateContactOutcome> {
+      try {
+        const rows = (await sql.query(UPDATE_SAVED_CONTACT, [
+          input.userId,
+          input.contactId,
+          input.label,
+          input.address,
+        ])) as SavedContactRow[];
+        const row = rows[0];
+        if (row === undefined) {
+          /*
+           * Satır yok YA DA başkasına ait. İkisi AYNI cevabı verir: bir
+           * kimliğin var olup olmadığı yanıttan öğrenilemez.
+           */
+          return { ok: false, reason: "notFound" };
+        }
+        const contact = toSavedContact(row);
+        return contact === null
+          ? { ok: false, reason: "unavailable" }
+          : { ok: true, contact };
+      } catch (error) {
+        const duplicate = duplicateReason(error);
+        if (duplicate !== null) {
+          return { ok: false, reason: duplicate };
+        }
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async deleteContacts(input: {
+      userId: string;
+      contactId?: string;
+    }): Promise<DeleteContactOutcome> {
+      try {
+        const result =
+          input.contactId === undefined
+            ? await sql.query(DELETE_ALL_SAVED_CONTACTS, [input.userId])
+            : await sql.query(DELETE_SAVED_CONTACT, [
+                input.userId,
+                input.contactId,
+              ]);
+        const deleted = Array.isArray(result) ? result.length : 0;
+        return { ok: true, deleted };
+      } catch {
         return { ok: false, reason: "unavailable" };
       }
     },

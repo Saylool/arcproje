@@ -1,6 +1,11 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  DeleteContactOutcome,
+  ListSavedContactsOutcome,
+  SaveContactOutcome,
+  SavedContact,
+  UpdateContactOutcome,
   CreatedBillSummary,
   CreateSharedBillOutcome,
   ListCreatedBillsOutcome,
@@ -108,6 +113,8 @@ export function createFakeSharedBillRepository(
   const attemptOrder: string[] = [];
   let calls = 0;
   let writeSequence = 0;
+  /* Kayıtlı kişiler: kullanıcı kimliği → kayıtlar. */
+  const savedContacts = new Map<string, SavedContact[]>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -136,6 +143,7 @@ export function createFakeSharedBillRepository(
     get calls() {
       return calls;
     },
+    savedContacts,
 
     async createSharedBill(
       record: SharedBillRecord,
@@ -269,6 +277,128 @@ export function createFakeSharedBillRepository(
         });
 
       return { ok: true, bills: Object.freeze(summaries) };
+    },
+
+    async listSavedContacts(input: {
+      userId: string;
+      limit: number;
+    }): Promise<ListSavedContactsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const own = savedContacts.get(input.userId) ?? [];
+      const sorted = [...own]
+        .sort((left, right) =>
+          left.label.toLowerCase() < right.label.toLowerCase() ? -1 : 1,
+        )
+        .slice(0, Math.max(0, input.limit));
+      return { ok: true, contacts: Object.freeze(sorted) };
+    },
+
+    async saveContact(input: {
+      userId: string;
+      contactId: string;
+      label: string;
+      address: string;
+      limit: number;
+    }): Promise<SaveContactOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const own = savedContacts.get(input.userId) ?? [];
+      if (
+        own.some(
+          (contact) =>
+            contact.address.toLowerCase() === input.address.toLowerCase(),
+        )
+      ) {
+        return { ok: false, reason: "duplicateAddress" };
+      }
+      if (
+        own.some(
+          (contact) =>
+            contact.label.toLowerCase() === input.label.toLowerCase(),
+        )
+      ) {
+        return { ok: false, reason: "duplicateLabel" };
+      }
+      if (own.length >= input.limit) {
+        return { ok: false, reason: "limitReached" };
+      }
+      const contact = Object.freeze({
+        contactId: input.contactId,
+        label: input.label,
+        address: input.address,
+      });
+      savedContacts.set(input.userId, [...own, contact]);
+      return { ok: true, contact };
+    },
+
+    async updateContact(input: {
+      userId: string;
+      contactId: string;
+      label: string;
+      address: string;
+    }): Promise<UpdateContactOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const own = savedContacts.get(input.userId) ?? [];
+      const index = own.findIndex(
+        (contact) => contact.contactId === input.contactId,
+      );
+      if (index === -1) {
+        // Yok ya da BASKASININ: ikisi de ayni cevabi verir.
+        return { ok: false, reason: "notFound" };
+      }
+      const clash = own.some(
+        (contact, position) =>
+          position !== index &&
+          contact.address.toLowerCase() === input.address.toLowerCase(),
+      );
+      if (clash) {
+        return { ok: false, reason: "duplicateAddress" };
+      }
+      const labelClash = own.some(
+        (contact, position) =>
+          position !== index &&
+          contact.label.toLowerCase() === input.label.toLowerCase(),
+      );
+      if (labelClash) {
+        return { ok: false, reason: "duplicateLabel" };
+      }
+      const contact = Object.freeze({
+        contactId: input.contactId,
+        label: input.label,
+        address: input.address,
+      });
+      const next = [...own];
+      next[index] = contact;
+      savedContacts.set(input.userId, next);
+      return { ok: true, contact };
+    },
+
+    async deleteContacts(input: {
+      userId: string;
+      contactId?: string;
+    }): Promise<DeleteContactOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const own = savedContacts.get(input.userId) ?? [];
+      if (input.contactId === undefined) {
+        savedContacts.set(input.userId, []);
+        return { ok: true, deleted: own.length };
+      }
+      const next = own.filter(
+        (contact) => contact.contactId !== input.contactId,
+      );
+      savedContacts.set(input.userId, next);
+      return { ok: true, deleted: own.length - next.length };
     },
 
     async listRecentDebtorsFor(input: {

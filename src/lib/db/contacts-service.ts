@@ -3,6 +3,7 @@ import type {
   SharedBillRepository,
 } from "./shared-bill-repository";
 import { isAppUserId } from "./shared-bill-listing-service";
+import { listSavedContacts } from "./saved-contacts-service";
 
 /**
  * ADRES REHBERİ — geçmişten türetilir, AYRI BİR DEPO DEĞİLDİR.
@@ -75,4 +76,91 @@ export async function listRecentContacts(input: {
     ),
   });
   return listed.ok ? { ok: true, contacts: listed.contacts } : UNAVAILABLE;
+}
+
+/* ------------------------------------------------------------------------ */
+/* BİRLEŞİK DEFTER — kayıtlılar ASIL, geçmiş YEDEK                          */
+/* ------------------------------------------------------------------------ */
+
+/**
+ * Öneri listesinin tek satırı.
+ *
+ * `saved`: kullanıcının bilerek kaydettiği kişi. ASIL kaynak budur.
+ * `history`: geçmiş hesaplardan türetilmiş, kaydedilmemiş adres. Yalnızca
+ * kayıtlılarda bulunamayan kişiler için görünür ve kaydedilebilir.
+ */
+export type ContactEntry = Readonly<{
+  source: "saved" | "history";
+  /** Yalnızca `saved` için; düzenleme ve silme bunun üzerinden yapılır. */
+  contactId: string | null;
+  label: string;
+  address: string;
+  /** Yalnızca `history` için; kayıtlı kişinin yaşı anlamsızdır. */
+  lastUsedAt: number | null;
+}>;
+
+export type ContactBookResult =
+  | { ok: true; contacts: readonly ContactEntry[] }
+  | { ok: false; status: number; code: string; message: string };
+
+/**
+ * Kayıtlı kişiler ve geçmiş önerilerini TEK listede birleştirir.
+ *
+ * KAYITLILAR ÖNCE gelir ve aynı adres geçmişte de görünüyorsa geçmiş satırı
+ * DÜŞER: kullanıcı o kişiyi zaten adlandırmıştır, kendi verdiği ad kazanır.
+ *
+ * Kayıtlılar okunamazsa istek BAŞARISIZ olur; geçmiş okunamazsa yalnızca
+ * yedek katman eksilir ve liste yine döner. Sebep: kayıtlı bir kişinin
+ * görünmemesi "sildim mi?" sorusunu doğurur, öneri eksikliği ise görünmez.
+ */
+export async function listContactBook(input: {
+  userId: string;
+  repository: SharedBillRepository;
+  nowMs?: number;
+}): Promise<ContactBookResult> {
+  const saved = await listSavedContacts({
+    userId: input.userId,
+    repository: input.repository,
+  });
+  if (!saved.ok) {
+    return saved;
+  }
+
+  const entries: ContactEntry[] = saved.contacts.map((contact) =>
+    Object.freeze({
+      source: "saved" as const,
+      contactId: contact.contactId,
+      label: contact.label,
+      address: contact.address,
+      lastUsedAt: null,
+    }),
+  );
+
+  const savedAddresses = new Set(
+    saved.contacts.map((contact) => contact.address.toLowerCase()),
+  );
+
+  const history = await listRecentContacts({
+    createdByUserId: input.userId,
+    repository: input.repository,
+    nowMs: input.nowMs,
+  });
+  if (history.ok) {
+    for (const contact of history.contacts) {
+      if (savedAddresses.has(contact.address.toLowerCase())) {
+        continue;
+      }
+      entries.push(
+        Object.freeze({
+          source: "history" as const,
+          contactId: null,
+          label: contact.label,
+          address: contact.address,
+          lastUsedAt: contact.lastUsedAt,
+        }),
+      );
+    }
+  }
+
+  return { ok: true, contacts: Object.freeze(entries) };
 }

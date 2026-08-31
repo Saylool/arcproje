@@ -79,6 +79,48 @@ export type RecentDebtorContact = Readonly<{
   lastUsedAt: number;
 }>;
 
+/**
+ * KAYITLI KİŞİ — kullanıcının kendi adres defterindeki kalıcı kayıt.
+ *
+ * Geçmişten türetilen öneriden farkı: bunu kullanıcı BİLEREK kaydetti,
+ * adlandırdı ve istediği zaman siler. Öneri katmanı yalnızca burada
+ * bulunamayan kişiler için devreye girer.
+ *
+ * ETİKET BİR YETKİ DEĞİLDİR. Adresin yerine geçmez; seçilen adres her zaman
+ * elle yazılmış gibi doğrulanır.
+ */
+export type SavedContact = Readonly<{
+  contactId: string;
+  label: string;
+  /** Checksum'lı adres. */
+  address: string;
+}>;
+
+export type ListSavedContactsOutcome =
+  | { ok: true; contacts: readonly SavedContact[] }
+  | { ok: false; reason: "unavailable" };
+
+export type SaveContactOutcome =
+  | { ok: true; contact: SavedContact }
+  /** Bu adres zaten kayıtlı. */
+  | { ok: false; reason: "duplicateAddress" }
+  /** Bu ad başka birine verilmiş. Belirsizlik burada yanlış adres demektir. */
+  | { ok: false; reason: "duplicateLabel" }
+  /** Defter üst sınıra ulaştı. */
+  | { ok: false; reason: "limitReached" }
+  | { ok: false; reason: "unavailable" };
+
+export type UpdateContactOutcome =
+  | { ok: true; contact: SavedContact }
+  | { ok: false; reason: "notFound" }
+  | { ok: false; reason: "duplicateAddress" }
+  | { ok: false; reason: "duplicateLabel" }
+  | { ok: false; reason: "unavailable" };
+
+export type DeleteContactOutcome =
+  | { ok: true; deleted: number }
+  | { ok: false; reason: "unavailable" };
+
 export type ListRecentDebtorsOutcome =
   | { ok: true; contacts: readonly RecentDebtorContact[] }
   /** Depo yapılandırılmamış veya erişilemiyor. Boş listeyle KARIŞTIRILMAZ. */
@@ -225,6 +267,46 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * Süresi dolmuş hesaplar da sayılır: kişi hâlâ aynı kişidir, hesabın
    * geçerliliği rehberi ilgilendirmez.
    */
+  /**
+   * Kullanıcının KAYITLI kişileri, ada göre sıralı.
+   *
+   * Her işlem `user_id` ile sınırlıdır: başkasının kişisine, kimliği bilinse
+   * bile dokunulamaz. Bu kısıt sorgunun İÇİNDEDİR, çağıranın nezaketine
+   * bırakılmaz.
+   */
+  listSavedContacts(input: {
+    userId: string;
+    limit: number;
+  }): Promise<ListSavedContactsOutcome>;
+
+  /** Yeni kişi ekler. Adres ve ad kullanıcı başına BENZERSİZ olmalıdır. */
+  saveContact(input: {
+    userId: string;
+    contactId: string;
+    label: string;
+    address: string;
+    limit: number;
+  }): Promise<SaveContactOutcome>;
+
+  /** Var olan kişinin adını ve/veya adresini değiştirir. */
+  updateContact(input: {
+    userId: string;
+    contactId: string;
+    label: string;
+    address: string;
+  }): Promise<UpdateContactOutcome>;
+
+  /**
+   * Kişi siler. `contactId` verilmezse kullanıcının TÜM defteri silinir.
+   *
+   * Toplu silme, bu tablonun açtığı gizlilik yüzeyinin karşılığıdır: kalıcı
+   * bir kayıt tutuyorsak kullanıcı onu tümüyle geri alabilmelidir.
+   */
+  deleteContacts(input: {
+    userId: string;
+    contactId?: string;
+  }): Promise<DeleteContactOutcome>;
+
   listRecentDebtorsFor(input: {
     createdByUserId: string;
     limit: number;
