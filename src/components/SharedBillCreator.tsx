@@ -8,10 +8,6 @@ import {
   shortenWalletAddress,
 } from "@/lib/arc/address";
 import {
-  ContactSuggestions,
-  useRecentContacts,
-} from "@/components/ContactSuggestions";
-import {
   ARC_TESTNET_DOCS_URL,
   ARC_TESTNET_FAUCET_URL,
   isArcTestnet,
@@ -79,6 +75,13 @@ type Props = {
   participants: readonly Participant[];
   result: DebtCalculationSuccess;
   onBack: () => void;
+  /**
+   * KİŞİ ADIMINDA bağlanan adresler: katılımcı kimliği → adres.
+   *
+   * Eşleştirme orada yapıldı; burada YENİDEN öneri gösterilmez. Bu adımda
+   * kullanıcı büyük ihtimalle tanımadığımız yeni bir adres girer.
+   */
+  initialAddresses?: Readonly<Record<string, string>>;
 };
 
 type GeneratedLink = {
@@ -99,14 +102,19 @@ export function SharedBillCreator({
   receipt,
   participants,
   result,
+  initialAddresses,
   onBack,
 }: Props) {
   const { t, locale } = useTranslator();
   const headingId = useId();
 
-  const [addresses, setAddresses] = useState<Record<string, string>>({});
-  /* Geçmişten adres önerileri. Başarısızlık sessizdir; akışı durdurmaz. */
-  const recentContacts = useRecentContacts();
+  /*
+   * Kişi adımında bağlanan adresler HAZIR gelir; kullanıcı burada yalnızca
+   * eksik kalanları doldurur. Alan yine düzenlenebilir.
+   */
+  const [addresses, setAddresses] = useState<Record<string, string>>(
+    () => ({ ...initialAddresses }),
+  );
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
@@ -480,30 +488,16 @@ export function SharedBillCreator({
                   {normalizeWalletAddress(row.address)}
                 </span>
               )}
-              {/*
-                Öneri ALANI DOLDURUR, doğrulamayı atlamaz: yazılan değer
-                aşağıdaki taslak doğrulamasından elle yazılmış gibi geçer.
-              */}
-              <ContactSuggestions
-                contacts={recentContacts.contacts}
-                asOfMs={recentContacts.loadedAtMs}
-                participantName={row.name}
-                value={row.address}
-                onPick={(address) =>
-                  setAddresses((previous) => ({
-                    ...previous,
-                    [row.participantId]: address,
-                  }))
-                }
-              />
             </label>
           );
         })}
-        {recentContacts.contacts.length > 0 && (
-          <p className="text-[11px] leading-relaxed text-ink-faint">
-            {t("contacts.verifyNotice")}
-          </p>
-        )}
+        {/*
+          Öneri YOKTUR ama uyarı KALIR: adres ister elle yazılmış ister kişi
+          adımında bağlanmış olsun, gönderilmeden önce doğrulanmalıdır.
+        */}
+        <p className="text-[11px] leading-relaxed text-ink-faint">
+          {t("contacts.verifyNotice")}
+        </p>
         {!draft.ok && rows.length > 0 && (
           <p role="alert" className="text-xs text-danger-ink">
             {describeSharedBillDraftProblem(draft.problem, locale)}

@@ -25,6 +25,11 @@ function expectShows(
 
 const panel = readFileSync("src/components/ContactSuggestions.tsx", "utf8");
 const creator = readFileSync("src/components/SharedBillCreator.tsx", "utf8");
+const participants = readFileSync(
+  "src/components/ParticipantAssignment.tsx",
+  "utf8",
+);
+const flow = readFileSync("src/components/ReceiptFlow.tsx", "utf8");
 
 const code = panel
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -133,35 +138,53 @@ describe("oneri ASLA kendiliginden doldurmaz", () => {
   });
 });
 
-describe("olusturucuya baglanma", () => {
-  it("oneri secilince yalnizca ADRES ALANI degisir", () => {
-    expect(creator).toContain("<ContactSuggestions");
-    expect(creator).toContain("[row.participantId]: address,");
+describe("eslestirme KISI adiminda yapilir", () => {
+  it("oneriler kisi adimindadir, odeme adiminda DEGIL", () => {
+    /*
+     * Insanlari isimle taniriz, adresle degil. Eslestirme isim alaninda
+     * yapilir; odeme adiminda kullanici buyuk ihtimalle YENI bir adres girer.
+     */
+    expect(participants).toContain("<ContactSuggestions");
+    expect(participants).toContain("useRecentContacts");
+    expect(creator).not.toContain("<ContactSuggestions");
+    expect(creator).not.toContain("useRecentContacts");
+  });
+
+  it("oneri yalnizca isim YAZILMISSA cikar", () => {
+    // Bos isimde butun rehberi dokmek gurultu olurdu.
+    expect(participants).toContain('participant.name.trim() !== ""');
+  });
+
+  it("secilen bag odeme adimina TASINIR", () => {
+    expect(participants).toContain("onLinkAddress(participant.id, address)");
+    expect(flow).toContain("initialAddresses={linkedAddresses}");
+    expect(creator).toContain("useState<Record<string, string>>(\n    () => ({ ...initialAddresses }),\n  )");
+  });
+
+  it("bag ASLA kendiliginden kurulmaz", () => {
+    // `onPick` yalnizca kullanicinin tikladigi dugmeden gelir.
+    expect(participants).not.toMatch(/useEffect\([^)]*onLinkAddress/);
+    expect(participants).toContain("onUnlinkAddress(participant.id)");
+  });
+
+  it("odeme adiminda dogrulama uyarisi KALIR", () => {
+    /*
+     * Oneri kaldirildi ama adres ister elle yazilmis ister bagli gelmis
+     * olsun, gonderilmeden once dogrulanmalidir.
+     */
+    expectShows(creator, "contacts.verifyNotice", "geri alınamaz");
   });
 
   it("dogrulama ATLANMAZ: taslak denetimi yerinde kalir", () => {
-    // Oneri, taslak dogrulamasini devre disi birakan bir yol ACMAZ.
     expect(creator).toContain("validateSharedBillDraft");
     expect(creator).not.toMatch(/skipValidation|trustedAddress|bypass/i);
   });
 
-  it("gecerli adres TAM haliyle, sarmalanarak ayrica basilir", () => {
-    /*
-     * Girdi kutusu dar ekranda adresin sonunu keser. Kullanici bir oneriyi
-     * ETIKETINE guvenerek sectigi icin, dogrulayabilecegi tek yerin kirpik
-     * olmasi kabul edilemez.
-     */
+  it("gecerli adres TAM haliyle, sarmalanarak basilir", () => {
     expect(creator).toContain("normalizeWalletAddress(row.address) !== null");
     expect(creator).toContain("break-all font-mono");
     expectShows(creator, "contacts.fullAddress", "Tam adres");
-    expect(translate("en", "contacts.fullAddress")).toBe("Full address");
-    // Kisaltilmis hali DEGIL, tam hali basilir.
     expect(creator).not.toMatch(/shortenWalletAddress\(row\.address\)/);
-  });
-
-  it("KULLANICIYA tam adresi dogrulamasi soylenir", () => {
-    expectShows(creator, "contacts.verifyNotice", "geri alınamaz");
-    expect(translate("en", "contacts.verifyNotice")).toContain("cannot be undone");
   });
 });
 
