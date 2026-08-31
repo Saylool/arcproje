@@ -18,6 +18,7 @@ import {
   formatTryMinor,
   formatUsdcAmount,
   localeSeparators,
+  formatRelativeAge,
 } from "./format";
 import { LOCALES } from "./locale";
 
@@ -196,5 +197,36 @@ describe("dosya boyutu", () => {
     expect(formatFileSize(2048, "tr")).toBe("2 KB");
     expect(formatFileSize(1024 * 1024 * 3.5, "tr")).toBe("3,5 MB");
     expect(formatFileSize(1024 * 1024 * 3.5, "en")).toBe("3.5 MB");
+  });
+});
+
+describe("formatRelativeAge", () => {
+  const DAY = 86_400_000;
+  const now = 1_800_000_000_000;
+  const secondsAgo = (days: number) => Math.floor((now - days * DAY) / 1000);
+
+  it("gun, ay ve yila yuvarlar", () => {
+    expect(formatRelativeAge(secondsAgo(0), now, "tr")).toBe("bugün");
+    expect(formatRelativeAge(secondsAgo(1), now, "tr")).toBe("dün");
+    expect(formatRelativeAge(secondsAgo(5), now, "tr")).toContain("5");
+    // 29 gun hala GUN; 30. gunde AY olur.
+    expect(formatRelativeAge(secondsAgo(29), now, "tr")).toContain("29");
+    expect(formatRelativeAge(secondsAgo(30), now, "tr")).toContain("ay");
+    expect(formatRelativeAge(secondsAgo(364), now, "tr")).toContain("ay");
+    expect(formatRelativeAge(secondsAgo(365), now, "tr")).toContain("yıl");
+  });
+
+  it("dile gore bicimlenir", () => {
+    expect(formatRelativeAge(secondsAgo(90), now, "en")).toMatch(/mo/);
+    expect(formatRelativeAge(secondsAgo(90), now, "tr")).toContain("ay");
+  });
+
+  it("gelecekteki bir an negatife DUSMEZ", () => {
+    // Saat kaymasi ya da bozuk veri "-2 gun sonra" gibi bir metin uretmemeli.
+    expect(formatRelativeAge(secondsAgo(-2), now, "tr")).toBe("bugün");
+  });
+
+  it("bozuk girdide sessizce bos doner", () => {
+    expect(formatRelativeAge(Number.NaN, now, "tr")).toBe("");
   });
 });

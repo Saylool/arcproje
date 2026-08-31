@@ -6,7 +6,11 @@ import {
   createSharedBill,
 } from "@/lib/arc/shared-bill";
 
-import { listRecentContacts, MAX_CONTACTS } from "./contacts-service";
+import {
+  listRecentContacts,
+  MAX_CONTACT_AGE_DAYS,
+  MAX_CONTACTS,
+} from "./contacts-service";
 import { createFakeSharedBillRepository } from "./shared-bill-repository.fixture";
 
 /**
@@ -68,6 +72,7 @@ describe("rehber YALNIZCA kendi gecmisini gosterir", () => {
     const result = await listRecentContacts({
       createdByUserId: OWNER_A,
       repository,
+      nowMs: NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -87,6 +92,7 @@ describe("rehber YALNIZCA kendi gecmisini gosterir", () => {
     const result = await listRecentContacts({
       createdByUserId: OWNER_A,
       repository,
+      nowMs: NOW,
     });
     expect(result.ok && result.contacts).toEqual([]);
   });
@@ -105,6 +111,7 @@ describe("adres basina TEK ve EN GUNCEL satir", () => {
     const result = await listRecentContacts({
       createdByUserId: OWNER_A,
       repository,
+      nowMs: NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -125,6 +132,7 @@ describe("adres basina TEK ve EN GUNCEL satir", () => {
     const result = await listRecentContacts({
       createdByUserId: OWNER_A,
       repository,
+      nowMs: NOW,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -140,6 +148,7 @@ describe("kapali tarafa dusme", () => {
     const result = await listRecentContacts({
       createdByUserId: OWNER_A,
       repository,
+      nowMs: NOW,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -153,6 +162,7 @@ describe("kapali tarafa dusme", () => {
     const result = await listRecentContacts({
       createdByUserId: "app-user",
       repository,
+      nowMs: NOW,
     });
     expect(result.ok).toBe(false);
     expect(repository.calls).toBe(before);
@@ -162,5 +172,73 @@ describe("kapali tarafa dusme", () => {
     expect(Number.isSafeInteger(MAX_CONTACTS)).toBe(true);
     expect(MAX_CONTACTS).toBeGreaterThan(0);
     expect(MAX_CONTACTS).toBeLessThanOrEqual(200);
+  });
+});
+
+describe("YAS SINIRI — bayat adres onerilmez", () => {
+  const DAY_MS = 86_400_000;
+
+  async function contactsAt(nowMs: number) {
+    const repository = createFakeSharedBillRepository();
+    await writeBill(repository, "5a", [
+      { debtor: ADA, debtorLabel: "Ada", debtKey: "a->p", tryMinor: "100" },
+    ], OWNER_A);
+    return listRecentContacts({
+      createdByUserId: OWNER_A,
+      repository,
+      nowMs,
+    });
+  }
+
+  it("sinirin ICINDEKI kullanim onerilir", async () => {
+    // Hesabin bir gun sonrasi: taptaze.
+    const result = await contactsAt(NOW + DAY_MS);
+    expect(result.ok && result.contacts).toHaveLength(1);
+  });
+
+  it("tam sinirin bir gun ONCESI hala onerilir", async () => {
+    const result = await contactsAt(NOW + (MAX_CONTACT_AGE_DAYS - 1) * DAY_MS);
+    expect(result.ok && result.contacts).toHaveLength(1);
+  });
+
+  it("sinirin OTESINDEKI kullanim DUSER", async () => {
+    const result = await contactsAt(NOW + (MAX_CONTACT_AGE_DAYS + 1) * DAY_MS);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contacts).toEqual([]);
+  });
+
+  it("cok eski kullanimlar hicbir kosulda gelmez", async () => {
+    const result = await contactsAt(NOW + 5 * 365 * DAY_MS);
+    expect(result.ok && result.contacts).toEqual([]);
+  });
+
+  it("sinir 12 aydir ve sonludur", () => {
+    expect(MAX_CONTACT_AGE_DAYS).toBe(365);
+    expect(Number.isSafeInteger(MAX_CONTACT_AGE_DAYS)).toBe(true);
+  });
+
+  it("servis depoya KESIM ANINI gecirir, depo kendi karar vermez", async () => {
+    const repository = createFakeSharedBillRepository();
+    let seen: number | null = null;
+    const spy = {
+      ...repository,
+      async listRecentDebtorsFor(input: {
+        createdByUserId: string;
+        limit: number;
+        notUsedBefore: number;
+      }) {
+        seen = input.notUsedBefore;
+        return { ok: true as const, contacts: [] };
+      },
+    };
+    await listRecentContacts({
+      createdByUserId: OWNER_A,
+      repository: spy,
+      nowMs: NOW,
+    });
+    expect(seen).toBe(
+      Math.floor((NOW - MAX_CONTACT_AGE_DAYS * DAY_MS) / 1000),
+    );
   });
 });

@@ -8,7 +8,7 @@ import {
   type Contact,
 } from "@/lib/arc/contacts-client";
 import { useTranslator } from "@/lib/i18n/context";
-import { formatDateTime } from "@/lib/i18n/format";
+import { formatDateTime, formatRelativeAge } from "@/lib/i18n/format";
 
 /**
  * GEÇMİŞTEN ADRES ÖNERİLERİ.
@@ -31,15 +31,27 @@ const MAX_VISIBLE = 3;
  * Başarısızlık SESSİZDİR: öneri isteğe bağlı bir kolaylıktır, akışı
  * durdurmamalıdır. Oturum yoksa sunucu 401 döner ve liste boş kalır.
  */
-export function useRecentContacts(): readonly Contact[] {
-  const [contacts, setContacts] = useState<readonly Contact[]>([]);
+export type RecentContacts = Readonly<{
+  contacts: readonly Contact[];
+  /**
+   * Listenin OKUNDUĞU an. Yaş, render sırasında `Date.now()` okunarak değil
+   * bu sabit ana göre hesaplanır; render saf kalır.
+   */
+  loadedAtMs: number;
+}>;
+
+export function useRecentContacts(): RecentContacts {
+  const [state, setState] = useState<RecentContacts>({
+    contacts: [],
+    loadedAtMs: 0,
+  });
 
   useEffect(() => {
     let active = true;
     void (async () => {
       const result = await listContactsFromServer();
       if (active && result.ok) {
-        setContacts(result.contacts);
+        setState({ contacts: result.contacts, loadedAtMs: Date.now() });
       }
     })();
     return () => {
@@ -47,7 +59,7 @@ export function useRecentContacts(): readonly Contact[] {
     };
   }, []);
 
-  return contacts;
+  return state;
 }
 
 /**
@@ -106,11 +118,14 @@ export function pickSuggestions(
 
 export function ContactSuggestions({
   contacts,
+  asOfMs,
   participantName,
   value,
   onPick,
 }: {
   contacts: readonly Contact[];
+  /** Listenin okunduğu an; yaş buna göre hesaplanır. */
+  asOfMs: number;
   participantName: string;
   value: string;
   onPick: (address: string) => void;
@@ -144,6 +159,14 @@ export function ContactSuggestions({
               <span className="font-medium">{contact.label}</span>
               <span className="font-mono text-ink-faint">
                 {shortenWalletAddress(contact.address)}
+              </span>
+              {/*
+                YAŞ EKRANDA DURUR, ipucunda değil: dokunmatik ekranda hover
+                yoktur ve "bu adres ne kadar eski" sorusu tam da kullanıcının
+                tıklamadan önce sorması gereken sorudur.
+              */}
+              <span className="text-ink-faint">
+                {formatRelativeAge(contact.lastUsedAt, asOfMs, locale)}
               </span>
             </button>
           </li>

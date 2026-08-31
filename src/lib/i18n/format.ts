@@ -110,6 +110,39 @@ export function formatDateTime(epochSeconds: number, locale: Locale): string {
   }
 }
 
+/**
+ * "Ne kadar önce" — göreli yaş.
+ *
+ * ŞİMDİ DIŞARIDAN VERİLİR (`asOfMs`). Render sırasında `Date.now()` okumak
+ * saf olmazdı: aynı veri farklı çıktı üretir ve React uyarır. Çağıran, verinin
+ * OKUNDUĞU anı geçirir.
+ *
+ * Birim, en büyük anlamlı ölçüye yuvarlanır: gün → ay → yıl. "3 ay önce"
+ * demek, "94 gün önce" demekten hem kısa hem okunaklıdır.
+ */
+export function formatRelativeAge(
+  epochSeconds: number,
+  asOfMs: number,
+  locale: Locale,
+): string {
+  try {
+    const elapsedDays = Math.floor((asOfMs - epochSeconds * 1000) / 86_400_000);
+    const [value, unit]: [number, Intl.RelativeTimeFormatUnit] =
+      elapsedDays >= 365
+        ? [Math.floor(elapsedDays / 365), "year"]
+        : elapsedDays >= 30
+          ? [Math.floor(elapsedDays / 30), "month"]
+          : [Math.max(0, elapsedDays), "day"];
+
+    return new Intl.RelativeTimeFormat(toIntlLocale(locale), {
+      numeric: "auto",
+      style: "narrow",
+    }).format(-value, unit);
+  } catch {
+    return "";
+  }
+}
+
 /** Yalnızca saat. */
 export function formatTime(epochSeconds: number, locale: Locale): string {
   try {

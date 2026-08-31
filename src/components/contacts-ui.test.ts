@@ -93,6 +93,24 @@ describe("oneri siralamasi", () => {
   });
 });
 
+describe("cipte YAS gosterilir", () => {
+  it("yas ekranda durur, yalnizca ipucunda degil", () => {
+    /*
+     * Dokunmatik ekranda hover yoktur; `title` gorunmez. "Bu adres ne kadar
+     * eski" sorusu tam da tiklamadan once sorulmasi gerekendir.
+     */
+    expect(code).toContain("formatRelativeAge(contact.lastUsedAt, asOfMs, locale)");
+  });
+
+  it("yas RENDER sirasinda degil, okuma anina gore hesaplanir", () => {
+    // `Date.now()` render icinde okunsaydi ayni veri farkli cikti uretirdi.
+    expect(code).toContain("asOfMs");
+    expect(code).not.toMatch(/formatRelativeAge\([^)]*Date\.now\(\)/);
+    // Okuma ani YALNIZCA veri geldiginde damgalanir.
+    expect(code).toContain("loadedAtMs: Date.now()");
+  });
+});
+
 describe("oneri ASLA kendiliginden doldurmaz", () => {
   it("onPick yalnizca kullanicinin tikladigi dugmeden cagrilir", () => {
     expect(code).toContain("onClick={() => onPick(contact.address)}");

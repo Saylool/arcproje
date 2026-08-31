@@ -228,6 +228,13 @@ export type SharedBillRepository = SharedBillPaymentRepository &
   listRecentDebtorsFor(input: {
     createdByUserId: string;
     limit: number;
+    /**
+     * Unix saniye: bu andan ESKİ kullanımlar hiç dönmez.
+     *
+     * Bayat adres yanlış transfer demektir ve transfer geri alınamaz. Bu
+     * yüzden sınır çağıranın tercihi değil, deponun sözleşmesinin parçasıdır.
+     */
+    notUsedBefore: number;
   }): Promise<ListRecentDebtorsOutcome>;
 
   /**

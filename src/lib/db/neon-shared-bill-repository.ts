@@ -266,6 +266,7 @@ FROM (
   FROM shared_bills b
   JOIN shared_bill_debts d ON d.bill_id = b.bill_id
   WHERE b.created_by_user_id = $1
+    AND b.created_at > to_timestamp($3)
   ORDER BY lower(d.debtor_address), b.created_at DESC
 ) recent
 ORDER BY last_used_at DESC
@@ -920,11 +921,13 @@ export async function createNeonSharedBillRepository(
     async listRecentDebtorsFor(input: {
       createdByUserId: string;
       limit: number;
+      notUsedBefore: number;
     }): Promise<ListRecentDebtorsOutcome> {
       try {
         const rows = (await sql.query(SELECT_RECENT_DEBTORS, [
           input.createdByUserId,
           input.limit,
+          input.notUsedBefore,
         ])) as RecentDebtorRow[];
 
         const contacts: RecentDebtorContact[] = [];

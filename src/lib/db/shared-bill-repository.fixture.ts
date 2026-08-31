@@ -274,6 +274,7 @@ export function createFakeSharedBillRepository(
     async listRecentDebtorsFor(input: {
       createdByUserId: string;
       limit: number;
+      notUsedBefore: number;
     }): Promise<ListRecentDebtorsOutcome> {
       calls += 1;
       if (repository.controls.failWithUnavailable === true) {
@@ -294,6 +295,10 @@ export function createFakeSharedBillRepository(
         .sort((left, right) => left.writeSequence - right.writeSequence);
 
       for (const bill of owned) {
+        // Sinirdan ESKI kullanimlar hic sayilmaz (gercek sorgunun karsiligi).
+        if (bill.manifest.issuedAt <= input.notUsedBefore) {
+          continue;
+        }
         for (const debt of bill.debts) {
           newestPerAddress.set(
             debt.debtor.toLowerCase(),

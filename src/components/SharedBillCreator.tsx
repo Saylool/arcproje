@@ -106,7 +106,7 @@ export function SharedBillCreator({
 
   const [addresses, setAddresses] = useState<Record<string, string>>({});
   /* Geçmişten adres önerileri. Başarısızlık sessizdir; akışı durdurmaz. */
-  const contacts = useRecentContacts();
+  const recentContacts = useRecentContacts();
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
@@ -485,7 +485,8 @@ export function SharedBillCreator({
                 aşağıdaki taslak doğrulamasından elle yazılmış gibi geçer.
               */}
               <ContactSuggestions
-                contacts={contacts}
+                contacts={recentContacts.contacts}
+                asOfMs={recentContacts.loadedAtMs}
                 participantName={row.name}
                 value={row.address}
                 onPick={(address) =>
@@ -498,7 +499,7 @@ export function SharedBillCreator({
             </label>
           );
         })}
-        {contacts.length > 0 && (
+        {recentContacts.contacts.length > 0 && (
           <p className="text-[11px] leading-relaxed text-ink-faint">
             {t("contacts.verifyNotice")}
           </p>
