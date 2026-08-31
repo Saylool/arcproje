@@ -180,3 +180,36 @@ describe("sahiplik SQL'i", () => {
     }
   });
 });
+
+describe("rehber SQL'i", () => {
+  it("YAS SINIRI sorgunun kendisindedir", () => {
+    /*
+     * Bu, sahte deponun gizleyebilecegi tek boslugtur: bellek ici depo yasi
+     * suzse bile SQL suzmezse uretim yillar oncesini onerir. Sinir SORGUDA
+     * olmalidir.
+     */
+    const start = neon.indexOf("const SELECT_RECENT_DEBTORS");
+    expect(start).toBeGreaterThan(-1);
+    const query = neon.slice(start, neon.indexOf("`;", start));
+    expect(query).toContain("b.created_at > to_timestamp($3)");
+    expect(query).toContain("WHERE b.created_by_user_id = $1");
+    expect(query).toContain("LIMIT $2");
+  });
+
+  it("kesim ani CAGIRANDAN gelir, sorguya gomulmez", () => {
+    // Sabit bir `interval` gomulseydi sinir tek yerden yonetilemezdi.
+    const start = neon.indexOf("const SELECT_RECENT_DEBTORS");
+    const query = neon.slice(start, neon.indexOf("`;", start));
+    expect(query).not.toMatch(/interval\s*'/i);
+
+    const call = neon.indexOf("SELECT_RECENT_DEBTORS, [");
+    expect(call).toBeGreaterThan(-1);
+    expect(neon.slice(call, call + 220)).toContain("input.notUsedBefore");
+  });
+
+  it("adres basina TEK satir birakilir", () => {
+    const start = neon.indexOf("const SELECT_RECENT_DEBTORS");
+    const query = neon.slice(start, neon.indexOf("`;", start));
+    expect(query).toContain("DISTINCT ON (lower(d.debtor_address))");
+  });
+});
