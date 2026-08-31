@@ -91,6 +91,34 @@ describe("suzme olcutu", () => {
     });
   });
 
+  it("FARKLI oturumlar FARKLI kimlik gecirir", async () => {
+    /*
+     * Tek oturumla olcmek yetmez: rota oturumu yok sayip sabit bir kimlik
+     * kullansa da o test gecerdi. Iki ayri oturum, kimligin GERCEKTEN
+     * oturumdan geldigini kanitlar.
+     */
+    const seen: string[] = [];
+    const listContacts = vi.fn(async (input: { createdByUserId: string }) => {
+      seen.push(input.createdByUserId);
+      return { ok: true as const, contacts: [] };
+    });
+
+    const other = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    for (const id of [SESSION_USER, other]) {
+      const GET = createContactsGet({
+        authenticate: async () => ({
+          status: "authenticated",
+          user: { id, name: null, image: null },
+        }),
+        createRepository: async () => ({}) as SharedBillRepository,
+        listContacts,
+      });
+      expect((await GET()).status).toBe(200);
+    }
+
+    expect(seen).toEqual([SESSION_USER, other]);
+  });
+
   it("islevin ARITESI sifirdir: istegi hic okuyamaz", () => {
     /*
      * Sorgu dizesinden bir kullanici kimligi kabul edilseydi, oturum acmis
