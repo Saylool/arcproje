@@ -38,9 +38,22 @@ const code = panel
 
 function contact(label: string, tail: string, lastUsedAt: number): Contact {
   return Object.freeze({
+    source: "history" as const,
+    contactId: null,
     address: `0x${tail.repeat(40).slice(0, 40)}`,
     label,
     lastUsedAt,
+  });
+}
+
+/** Kayitli kisi: kimligi vardir, yasi yoktur. */
+function saved(label: string, tail: string): Contact {
+  return Object.freeze({
+    source: "saved" as const,
+    contactId: "11111111-1111-4111-8111-111111111111",
+    address: `0x${tail.repeat(40).slice(0, 40)}`,
+    label,
+    lastUsedAt: null,
   });
 }
 
@@ -134,7 +147,31 @@ describe("oneri ASLA kendiliginden doldurmaz", () => {
   });
 
   it("tam adres ipucu olarak da verilir", () => {
-    expect(code).toContain("title={`${contact.address}");
+    // Kayitli kiside tarih yoktur; ipucu o zaman sadece adresi tasir.
+    expect(code).toContain("? contact.address");
+    expect(code).toContain("`${contact.address} —");
+  });
+
+  it("KAYDET yalnizca gecmisten gelen satirda cikar", () => {
+    /*
+     * Kayitli kisi zaten defterde; ona "kaydet" gostermek anlamsiz olurdu.
+     * Ayri bir dugmedir: biri adresi alana yazar, digeri deftere ekler.
+     */
+    expect(code).toContain('contact.source === "history" && onSave !== undefined');
+    expect(code).toContain("onSave(contact)");
+  });
+
+  it("KAYITLI kisi, gecmisten gelene TERCIH edilir", () => {
+    const withSaved = pickSuggestions(
+      [contact("Ada", "a", 999), saved("Ada", "b")],
+      "",
+      "ada",
+    );
+    expect(withSaved[0]?.source).toBe("saved");
+  });
+
+  it("kayitli kisinin YASI gosterilmez", () => {
+    expect(code).toContain("contact.lastUsedAt !== null && (");
   });
 });
 

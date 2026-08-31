@@ -369,6 +369,7 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   contacts: {
     hint: "Daha önce kullandığın adresler",
+    save: "Kaydet",
     knownPerson: "Bu kişiye daha önce gönderdin",
     linkedWallet: "Cüzdan bağlandı",
     unlink: "Kaldır",

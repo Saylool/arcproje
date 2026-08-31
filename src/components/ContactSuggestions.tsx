@@ -106,12 +106,21 @@ export function pickSuggestions(
 
   return [...matches]
     .sort((left, right) => {
+      // 1) Katılımcı adıyla birebir eşleşen önce.
       const leftName = foldForSearch(left.label.trim()) === name ? 0 : 1;
       const rightName = foldForSearch(right.label.trim()) === name ? 0 : 1;
       if (leftName !== rightName) {
         return leftName - rightName;
       }
-      return right.lastUsedAt - left.lastUsedAt;
+      // 2) KAYITLI kişi, geçmişten türetilene tercih edilir: kullanıcı onu
+      //    bilerek adlandırmıştır.
+      const leftSaved = left.source === "saved" ? 0 : 1;
+      const rightSaved = right.source === "saved" ? 0 : 1;
+      if (leftSaved !== rightSaved) {
+        return leftSaved - rightSaved;
+      }
+      // 3) Geçmiş içinde en son kullanılan önce.
+      return (right.lastUsedAt ?? 0) - (left.lastUsedAt ?? 0);
     })
     .slice(0, MAX_VISIBLE);
 }
@@ -123,6 +132,7 @@ export function ContactSuggestions({
   value,
   hintKey = "contacts.hint",
   onPick,
+  onSave,
 }: {
   contacts: readonly Contact[];
   /** Listenin okunduğu an; yaş buna göre hesaplanır. */
@@ -132,6 +142,8 @@ export function ContactSuggestions({
   /** Başlık metni: kişi adımında "bu kişiyi tanıyoruz" tonu kullanılır. */
   hintKey?: "contacts.hint" | "contacts.knownPerson";
   onPick: (address: string) => void;
+  /** Verilmezse "kaydet" eylemi hiç gösterilmez. */
+  onSave?: (contact: Contact) => void;
 }) {
   const { t, locale } = useTranslator();
   const suggestions = pickSuggestions(contacts, participantName, value);
@@ -152,10 +164,18 @@ export function ContactSuggestions({
             <button
               type="button"
               onClick={() => onPick(contact.address)}
-              /* Tam adres ipucu olarak da verilir; kısaltma yalnızca yer içindir. */
-              title={`${contact.address} — ${t("contacts.lastUsed", {
-                date: formatDateTime(contact.lastUsedAt, locale),
-              })}`}
+              /*
+                Tam adres ipucu olarak da verilir; kısaltma yalnızca yer
+                içindir. Kayıtlı kişide kullanım tarihi YOKTUR, o yüzden
+                ipucu sadece adresi taşır.
+              */
+              title={
+                contact.lastUsedAt === null
+                  ? contact.address
+                  : `${contact.address} — ${t("contacts.lastUsed", {
+                      date: formatDateTime(contact.lastUsedAt, locale),
+                    })}`
+              }
               aria-label={t("contacts.useAddress", { label: contact.label })}
               className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-card px-2.5 text-[11px] text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
@@ -167,11 +187,30 @@ export function ContactSuggestions({
                 YAŞ EKRANDA DURUR, ipucunda değil: dokunmatik ekranda hover
                 yoktur ve "bu adres ne kadar eski" sorusu tam da kullanıcının
                 tıklamadan önce sorması gereken sorudur.
+
+                KAYITLI kişide yaş GÖSTERİLMEZ: kullanıcı onu bilerek
+                kaydetmiştir, ne zaman kullandığı bir güven ölçüsü değildir.
               */}
-              <span className="text-ink-faint">
-                {formatRelativeAge(contact.lastUsedAt, asOfMs, locale)}
-              </span>
+              {contact.lastUsedAt !== null && (
+                <span className="text-ink-faint">
+                  {formatRelativeAge(contact.lastUsedAt, asOfMs, locale)}
+                </span>
+              )}
             </button>
+            {/*
+              KAYDET yalnızca geçmişten gelen satırda görünür: kayıtlı kişi
+              zaten defterde. Ayrı bir düğmedir, öneriye tıklamakla
+              karışmaz — biri adresi alana yazar, diğeri deftere ekler.
+            */}
+            {contact.source === "history" && onSave !== undefined && (
+              <button
+                type="button"
+                onClick={() => onSave(contact)}
+                className="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              >
+                {t("contacts.save")}
+              </button>
+            )}
           </li>
         ))}
       </ul>

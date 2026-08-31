@@ -337,6 +337,7 @@ export const en: Dictionary = {
   /* --------------------------------------------------------------------- */
   contacts: {
     hint: "Addresses you used before",
+    save: "Save",
     knownPerson: "You have sent to this person before",
     linkedWallet: "Wallet linked",
     unlink: "Remove",

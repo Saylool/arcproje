@@ -257,18 +257,38 @@ describe("adres rehberi borclu tarafina SIZMAZ", () => {
     }
   });
 
-  it("rehber uc noktasi YALNIZCA okur", () => {
-    const source = readFileSync("src/app/api/contacts/route.ts", "utf8");
-    // Yazma yontemi yoktur: yalnizca GET disa aktarilir.
-    expect(source).toContain("export const GET");
-    expect(source).not.toMatch(
-      /export const (POST|PUT|PATCH|DELETE)\b/,
-    );
-    // Kapi, govde okumadan ve depo yaratmadan ONCEDIR.
-    const gate = source.indexOf("authGate(await dependencies.authenticate())");
-    const repo = source.indexOf("dependencies.createRepository()");
-    expect(gate).toBeGreaterThan(-1);
-    expect(repo).toBeGreaterThan(gate);
+  it("rehber uclarinin HEPSI once oturum kapisindan gecer", () => {
+    /*
+     * Uc artik yaziyor da (kayitli kisiler), bu yuzden "yalnizca okur" diye
+     * bir kural kalmadi. Kalan kural daha onemlidir: her yontem, govde
+     * okumadan ve depo yaratmadan ONCE oturumu dogrular.
+     */
+    for (const file of [
+      "src/app/api/contacts/route.ts",
+      "src/app/api/contacts/[contactId]/route.ts",
+    ]) {
+      const source = readFileSync(file, "utf8");
+      const gate = source.indexOf("authGate(await dependencies.authenticate())");
+      const repo = source.indexOf("dependencies.createRepository()");
+      expect(gate, file).toBeGreaterThan(-1);
+      expect(repo, file).toBeGreaterThan(gate);
+    }
+  });
+
+  it("hicbir rehber ucu kullanici kimligini ISTEKTEN almaz", () => {
+    /*
+     * Kime ait bir deftere dokunuldugunu YALNIZCA oturum belirler. Govdeden
+     * ya da yoldan gelen bir kimlik kabul edilseydi, oturum acmis herkes
+     * baskasinin defterini duzenleyebilirdi.
+     */
+    for (const file of [
+      "src/app/api/contacts/route.ts",
+      "src/app/api/contacts/[contactId]/route.ts",
+    ]) {
+      const source = readFileSync(file, "utf8");
+      expect(source, file).toContain("userId: gate.user.id");
+      expect(source, file).not.toMatch(/userId:\s*body\.|userId:\s*params\./);
+    }
   });
 
   it("oneri, cuzdan sahiplik kanitinin yerine GECMEZ", () => {
