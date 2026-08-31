@@ -7,6 +7,10 @@ import {
   useRecentContacts,
 } from "@/components/ContactSuggestions";
 import { shortenWalletAddress } from "@/lib/arc/address";
+import {
+  saveContactOnServer,
+  type Contact,
+} from "@/lib/arc/contacts-client";
 import { useTranslator } from "@/lib/i18n/context";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
@@ -58,6 +62,21 @@ export function ParticipantAssignment({
    * insanları isimle tanırız, adresle değil.
    */
   const recentContacts = useRecentContacts();
+
+  /*
+   * Kaydetme SESSİZ başarısız olabilir: defter bir kolaylıktır, akışı
+   * durdurmamalıdır. Başarılıysa liste yenilenir ve satır artık "kayıtlı"
+   * olarak döner.
+   */
+  const saveToBook = async (contact: Contact) => {
+    const saved = await saveContactOnServer({
+      label: contact.label,
+      address: contact.address,
+    });
+    if (saved.ok) {
+      recentContacts.reload();
+    }
+  };
 
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState<ParticipantNameError | null>(null);
@@ -216,6 +235,7 @@ export function ParticipantAssignment({
                         onPick={(address) =>
                           onLinkAddress(participant.id, address)
                         }
+                        onSave={(contact) => void saveToBook(contact)}
                       />
                     )
                   )}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { shortenWalletAddress } from "@/lib/arc/address";
 import {
@@ -38,13 +38,16 @@ export type RecentContacts = Readonly<{
    * bu sabit ana göre hesaplanır; render saf kalır.
    */
   loadedAtMs: number;
+  /** Defter değiştiğinde (kaydetme, silme) yeniden okur. */
+  reload: () => void;
 }>;
 
 export function useRecentContacts(): RecentContacts {
-  const [state, setState] = useState<RecentContacts>({
-    contacts: [],
-    loadedAtMs: 0,
-  });
+  const [state, setState] = useState<{
+    contacts: readonly Contact[];
+    loadedAtMs: number;
+  }>({ contacts: [], loadedAtMs: 0 });
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -57,9 +60,13 @@ export function useRecentContacts(): RecentContacts {
     return () => {
       active = false;
     };
+  }, [reloadToken]);
+
+  const reload = useCallback(() => {
+    setReloadToken((token) => token + 1);
   }, []);
 
-  return state;
+  return { ...state, reload };
 }
 
 /**

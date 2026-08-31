@@ -338,6 +338,27 @@ export const en: Dictionary = {
   contacts: {
     hint: "Addresses you used before",
     save: "Save",
+    panelTitle: "Saved people",
+    panelSubtitle:
+      "Save the people you pay often; you will not type their address again.",
+    panelEmpty: "You have not saved anyone yet. Add someone below.",
+    nameField: "Name",
+    addressField: "Wallet address",
+    add: "Add",
+    edit: "Edit",
+    saveChanges: "Save",
+    cancel: "Cancel",
+    remove: "Delete",
+    removeAll: "Delete all",
+    confirmRemoveAll:
+      "Every saved person will be deleted. This cannot be undone.",
+    privacyNotice:
+      "Saved people live only in your account, are shared with nobody, and you can delete all of them whenever you want.",
+    errorLabelExists: "That name is already used by someone else.",
+    errorAddressExists: "That wallet address is already saved.",
+    errorInvalid: "The name or wallet address is not valid.",
+    errorLimit: "You have reached the saved-people limit.",
+    errorGeneric: "That did not go through. Please try again.",
     knownPerson: "You have sent to this person before",
     linkedWallet: "Wallet linked",
     unlink: "Remove",

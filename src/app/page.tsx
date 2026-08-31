@@ -1,6 +1,7 @@
 import { AppHeader } from "@/components/AppHeader";
 import { MyBillsPanel } from "@/components/MyBillsPanel";
 import { ReceiptFlow } from "@/components/ReceiptFlow";
+import { SavedContactsPanel } from "@/components/SavedContactsPanel";
 import { readSafeAuthState } from "@/lib/auth/safe-auth-state";
 
 export default async function Home() {
@@ -19,6 +20,7 @@ export default async function Home() {
         ziyaretçide bileşen hiç render edilmez, bu yüzden gereksiz bir istek de
         atılmaz ve oturum açılması gerektiği başlıktaki kontrolle zaten söylenir.
       */}
+      {authState.status === "authenticated" && <SavedContactsPanel />}
       {authState.status === "authenticated" && <MyBillsPanel />}
     </main>
   );
