@@ -4,6 +4,8 @@ import type {
   CreatedBillSummary,
   CreateSharedBillOutcome,
   ListCreatedBillsOutcome,
+  ListRecentDebtorsOutcome,
+  RecentDebtorContact,
   ResolveAccessInput,
   ResolveAccessOutcome,
   SessionLookupOutcome,
@@ -267,6 +269,47 @@ export function createFakeSharedBillRepository(
         });
 
       return { ok: true, bills: Object.freeze(summaries) };
+    },
+
+    async listRecentDebtorsFor(input: {
+      createdByUserId: string;
+      limit: number;
+    }): Promise<ListRecentDebtorsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      if (input.createdByUserId.length === 0) {
+        return { ok: true, contacts: Object.freeze([]) };
+      }
+
+      /*
+       * Gerçek sorgunun `DISTINCT ON` davranışı taklit edilir: adres başına
+       * TEK satır ve seçilen satır EN SON kullanımdır.
+       */
+      const newestPerAddress = new Map<string, RecentDebtorContact>();
+      const owned = [...bills.values()]
+        .filter((bill) => bill.createdByUserId === input.createdByUserId)
+        // En eskiden yeniye: sonra gelen, öncekini yerinden eder.
+        .sort((left, right) => left.writeSequence - right.writeSequence);
+
+      for (const bill of owned) {
+        for (const debt of bill.debts) {
+          newestPerAddress.set(
+            debt.debtor.toLowerCase(),
+            Object.freeze({
+              address: debt.debtor,
+              label: debt.debtorLabel,
+              lastUsedAt: bill.manifest.issuedAt,
+            }),
+          );
+        }
+      }
+
+      const contacts = [...newestPerAddress.values()]
+        .reverse()
+        .slice(0, Math.max(0, input.limit));
+      return { ok: true, contacts: Object.freeze(contacts) };
     },
 
     async resolveAccess(

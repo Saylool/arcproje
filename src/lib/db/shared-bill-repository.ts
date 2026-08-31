@@ -59,6 +59,31 @@ export type CreatedBillSummary = Readonly<{
   paidTryMinor: string;
 }>;
 
+/**
+ * Oluşturan kişinin GEÇMİŞTE kullandığı bir borçlu kaydı.
+ *
+ * Yeni bir tabloya gerek yoktur: bu bilgi zaten kişinin KENDİ oluşturduğu
+ * hesaplarda duruyor. Bu yüzden "rehber" ayrı bir veri deposu değil, mevcut
+ * verinin okunmuş hâlidir — yeni bir gizlilik yüzeyi açılmaz.
+ *
+ * ETİKET BİR YETKİ DEĞİLDİR. Adresin yerine ASLA geçmez; yalnızca kullanıcının
+ * kimi kastettiğini hatırlaması içindir. Öneri kabul edildiğinde adres, elle
+ * yazılmış gibi AYNI doğrulamadan geçer.
+ */
+export type RecentDebtorContact = Readonly<{
+  /** Checksum'lı adres. */
+  address: string;
+  /** Bu adres için EN SON kullanılan etiket. */
+  label: string;
+  /** Unix saniye: adresin en son kullanıldığı hesabın yazım anı. */
+  lastUsedAt: number;
+}>;
+
+export type ListRecentDebtorsOutcome =
+  | { ok: true; contacts: readonly RecentDebtorContact[] }
+  /** Depo yapılandırılmamış veya erişilemiyor. Boş listeyle KARIŞTIRILMAZ. */
+  | { ok: false; reason: "unavailable" };
+
 export type ListCreatedBillsOutcome =
   | { ok: true; bills: readonly CreatedBillSummary[] }
   /** Depo yapılandırılmamış veya erişilemiyor. Boş listeyle KARIŞTIRILMAZ. */
@@ -190,6 +215,20 @@ export type SharedBillRepository = SharedBillPaymentRepository &
     /** Üst sınır; çağıran her zaman sonlu bir değer verir. */
     limit: number;
   }): Promise<ListCreatedBillsOutcome>;
+
+  /**
+   * Kişinin KENDİ hesaplarında geçmişte kullandığı borçluları döndürür.
+   *
+   * Adres başına TEK satır; etiket ve zaman EN SON kullanımdan gelir. Süzme
+   * depo sorgusunun kendisinde yapılır ve kimliği istemci veremez.
+   *
+   * Süresi dolmuş hesaplar da sayılır: kişi hâlâ aynı kişidir, hesabın
+   * geçerliliği rehberi ilgilendirmez.
+   */
+  listRecentDebtorsFor(input: {
+    createdByUserId: string;
+    limit: number;
+  }): Promise<ListRecentDebtorsOutcome>;
 
   /**
    * Erişimi ATOMİK olarak çözer: nonce'u tüketir VE oturumu yaratır.

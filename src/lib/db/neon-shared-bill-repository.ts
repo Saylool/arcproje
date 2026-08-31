@@ -1,3 +1,6 @@
+import { normalizeWalletAddress } from "@/lib/arc/address";
+import { validateCanonicalLabel } from "@/lib/arc/labels";
+import { MAX_LABEL_LENGTH } from "@/lib/arc/payment-request";
 import {
   SHARED_BILL_SCHEMA_VERSION,
   validateSharedBillManifest,
@@ -8,6 +11,8 @@ import type {
   CreatedBillSummary,
   CreateSharedBillOutcome,
   ListCreatedBillsOutcome,
+  ListRecentDebtorsOutcome,
+  RecentDebtorContact,
   ResolveAccessInput,
   ResolveAccessOutcome,
   SessionLookupOutcome,
@@ -238,6 +243,65 @@ GROUP BY b.bill_id, b.issued_at, b.expires_at, b.status, b.debt_count, b.created
 ORDER BY b.created_at DESC
 LIMIT $2
 `;
+
+/*
+ * REHBER: kişinin KENDİ hesaplarında geçmişte kullandığı borçlular.
+ *
+ * Yeni bir tablo YOKTUR. Bu bilgi zaten kendi hesaplarında duruyor; sorgu onu
+ * yalnızca okur. Bu yüzden "rehber" ayrı bir gizlilik yüzeyi açmaz.
+ *
+ * `DISTINCT ON` adres başına TEK satır bırakır ve iç sıralama sayesinde
+ * seçilen satır EN SON kullanımdır. Dış sorgu sonucu yeniden sıralar, çünkü
+ * `DISTINCT ON` kendi sıralamasını dayatır.
+ *
+ * Süresi dolmuş veya kapanmış hesaplar da sayılır: kişi hâlâ aynı kişidir.
+ */
+const SELECT_RECENT_DEBTORS = `
+SELECT address, label, last_used_at
+FROM (
+  SELECT DISTINCT ON (lower(d.debtor_address))
+         d.debtor_address AS address,
+         d.debtor_label   AS label,
+         extract(epoch from b.created_at)::bigint AS last_used_at
+  FROM shared_bills b
+  JOIN shared_bill_debts d ON d.bill_id = b.bill_id
+  WHERE b.created_by_user_id = $1
+  ORDER BY lower(d.debtor_address), b.created_at DESC
+) recent
+ORDER BY last_used_at DESC
+LIMIT $2
+`;
+
+type RecentDebtorRow = {
+  address: unknown;
+  label: unknown;
+  last_used_at: unknown;
+};
+
+/**
+ * Satırı öneriye çevirir; beklenen biçimde değilse `null`.
+ *
+ * Burada tek bir bozuk satır TÜM listeyi düşürmez — hesap listesindekinin
+ * TERSİ. Sebep: eksik bir hesap "hesabım kayboldu" korkusu yaratır, eksik bir
+ * ÖNERİ ise görünmez ve zararsızdır; kullanıcı adresi elle yazar.
+ */
+function toRecentDebtor(row: RecentDebtorRow): RecentDebtorContact | null {
+  const rawAddress = asText(row.address);
+  const address =
+    rawAddress === null ? null : normalizeWalletAddress(rawAddress);
+  const label = validateCanonicalLabel(row.label, MAX_LABEL_LENGTH);
+  const lastUsedAt = Number(row.last_used_at);
+
+  if (
+    address === null ||
+    !label.ok ||
+    !Number.isSafeInteger(lastUsedAt) ||
+    lastUsedAt <= 0
+  ) {
+    return null;
+  }
+  return Object.freeze({ address, label: label.value, lastUsedAt });
+}
 
 type CreatedBillRow = {
   bill_id: unknown;
@@ -847,6 +911,30 @@ export async function createNeonSharedBillRepository(
           bills.push(summary);
         }
         return { ok: true, bills: Object.freeze(bills) };
+      } catch {
+        // Sürücü ayrıntısı dışarı sızmaz.
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async listRecentDebtorsFor(input: {
+      createdByUserId: string;
+      limit: number;
+    }): Promise<ListRecentDebtorsOutcome> {
+      try {
+        const rows = (await sql.query(SELECT_RECENT_DEBTORS, [
+          input.createdByUserId,
+          input.limit,
+        ])) as RecentDebtorRow[];
+
+        const contacts: RecentDebtorContact[] = [];
+        for (const row of rows) {
+          const contact = toRecentDebtor(row);
+          if (contact !== null) {
+            contacts.push(contact);
+          }
+        }
+        return { ok: true, contacts: Object.freeze(contacts) };
       } catch {
         // Sürücü ayrıntısı dışarı sızmaz.
         return { ok: false, reason: "unavailable" };
