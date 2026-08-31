@@ -333,6 +333,20 @@ export const en: Dictionary = {
   /* --------------------------------------------------------------------- */
   /* Bills you created — ownership list                                      */
   /* --------------------------------------------------------------------- */
+  /* Address book — derived from past bills                                  */
+  /* --------------------------------------------------------------------- */
+  contacts: {
+    hint: "Addresses you used before",
+    fullAddress: "Full address",
+    suggestionsLabel: "Address suggestions from your history",
+    useAddress: "Use the address for {label}",
+    lastUsed: "last: {date}",
+    failed: "Your saved people cannot be read right now.",
+    verifyNotice:
+      "A suggestion only fills the field. Verify the full address yourself before sending; a transfer to the wrong address cannot be undone.",
+  },
+
+  /* --------------------------------------------------------------------- */
   myBills: {
     title: "Bills you created",
     subtitle:

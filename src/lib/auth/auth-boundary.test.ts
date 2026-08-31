@@ -50,6 +50,7 @@ describe("Google auth route siniri", () => {
     for (const file of [
       "src/app/api/receipts/analyze/route.ts",
       "src/app/api/shared-bills/route.ts",
+      "src/app/api/contacts/route.ts",
     ]) {
       expect(readFileSync(file, "utf8"), file).toContain("authenticateRequest");
       expect(readFileSync(file, "utf8"), file).toContain("AUTH_REQUIRED");
@@ -243,5 +244,44 @@ describe("0003 sahiplik gecisi", () => {
         new RegExp(`(ALTER|DROP)\\s+COLUMN\\s+${signed}`, "i"),
       );
     }
+  });
+});
+
+describe("adres rehberi borclu tarafina SIZMAZ", () => {
+  it("borclu API'leri ve kur API'leri rehberi hic tanimaz", () => {
+    for (const file of WALLET_ONLY_API_FILES) {
+      const source = readFileSync(file, "utf8");
+      expect(source, file).not.toMatch(
+        /contacts-service|contacts-client|listRecentDebtorsFor|api\/contacts/,
+      );
+    }
+  });
+
+  it("rehber uc noktasi YALNIZCA okur", () => {
+    const source = readFileSync("src/app/api/contacts/route.ts", "utf8");
+    // Yazma yontemi yoktur: yalnizca GET disa aktarilir.
+    expect(source).toContain("export const GET");
+    expect(source).not.toMatch(
+      /export const (POST|PUT|PATCH|DELETE)\b/,
+    );
+    // Kapi, govde okumadan ve depo yaratmadan ONCEDIR.
+    const gate = source.indexOf("authGate(await dependencies.authenticate())");
+    const repo = source.indexOf("dependencies.createRepository()");
+    expect(gate).toBeGreaterThan(-1);
+    expect(repo).toBeGreaterThan(gate);
+  });
+
+  it("oneri, cuzdan sahiplik kanitinin yerine GECMEZ", () => {
+    /*
+     * Rehber yalnizca bir giris kolayligidir. Adresin sahibi oldugunu
+     * kanitlamaz; borclu yine kendi cuzdaniyla imzalar.
+     */
+    const suggestions = readFileSync(
+      "src/components/ContactSuggestions.tsx",
+      "utf8",
+    );
+    expect(suggestions).not.toMatch(
+      /signTypedData|kit\.send|sendTransaction|resolveSharedBillAccess/,
+    );
   });
 });

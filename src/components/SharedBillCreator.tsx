@@ -3,7 +3,14 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { renderSVG } from "uqr";
 
-import { shortenWalletAddress } from "@/lib/arc/address";
+import {
+  normalizeWalletAddress,
+  shortenWalletAddress,
+} from "@/lib/arc/address";
+import {
+  ContactSuggestions,
+  useRecentContacts,
+} from "@/components/ContactSuggestions";
 import {
   ARC_TESTNET_DOCS_URL,
   ARC_TESTNET_FAUCET_URL,
@@ -98,6 +105,8 @@ export function SharedBillCreator({
   const headingId = useId();
 
   const [addresses, setAddresses] = useState<Record<string, string>>({});
+  /* Geçmişten adres önerileri. Başarısızlık sessizdir; akışı durdurmaz. */
+  const recentContacts = useRecentContacts();
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
@@ -456,9 +465,45 @@ export function SharedBillCreator({
                   invalid ? "border-danger-line-strong bg-danger-surface" : "border-line"
                 }`}
               />
+              {/*
+                TAM ADRES OKUNABİLİR OLMALI.
+
+                Girdi kutusu dar ekranda adresin sonunu görsel olarak keser.
+                Kullanıcı bir öneriye tıkladığında ETİKETE güvenerek seçim
+                yapar; doğrulayabileceği tek yerin kırpık olması kabul
+                edilemez. Bu yüzden geçerli adres, checksum'lı hâliyle ve
+                satır kaydırılarak ayrıca basılır. Elle yazan da faydalanır.
+              */}
+              {normalizeWalletAddress(row.address) !== null && (
+                <span className="break-all font-mono text-[11px] text-ink-faint">
+                  <span className="font-sans">{t("contacts.fullAddress")}: </span>
+                  {normalizeWalletAddress(row.address)}
+                </span>
+              )}
+              {/*
+                Öneri ALANI DOLDURUR, doğrulamayı atlamaz: yazılan değer
+                aşağıdaki taslak doğrulamasından elle yazılmış gibi geçer.
+              */}
+              <ContactSuggestions
+                contacts={recentContacts.contacts}
+                asOfMs={recentContacts.loadedAtMs}
+                participantName={row.name}
+                value={row.address}
+                onPick={(address) =>
+                  setAddresses((previous) => ({
+                    ...previous,
+                    [row.participantId]: address,
+                  }))
+                }
+              />
             </label>
           );
         })}
+        {recentContacts.contacts.length > 0 && (
+          <p className="text-[11px] leading-relaxed text-ink-faint">
+            {t("contacts.verifyNotice")}
+          </p>
+        )}
         {!draft.ok && rows.length > 0 && (
           <p role="alert" className="text-xs text-danger-ink">
             {describeSharedBillDraftProblem(draft.problem, locale)}

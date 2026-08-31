@@ -365,6 +365,20 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   /* Oluşturduğun hesaplar — sahiplik listesi                                */
   /* --------------------------------------------------------------------- */
+  /* Adres rehberi — geçmiş hesaplardan türetilir                            */
+  /* --------------------------------------------------------------------- */
+  contacts: {
+    hint: "Daha önce kullandığın adresler",
+    fullAddress: "Tam adres",
+    suggestionsLabel: "Geçmişten adres önerileri",
+    useAddress: "{label} kişisinin adresini kullan",
+    lastUsed: "son: {date}",
+    failed: "Kayıtlı kişiler şu anda okunamıyor.",
+    verifyNotice:
+      "Öneri yalnızca alanı doldurur. Göndermeden önce tam adresi kendin doğrula; yanlış adrese giden transfer geri alınamaz.",
+  },
+
+  /* --------------------------------------------------------------------- */
   myBills: {
     title: "Oluşturduğun hesaplar",
     subtitle:
