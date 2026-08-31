@@ -127,6 +127,20 @@ describe("olusturucuya baglanma", () => {
     expect(creator).not.toMatch(/skipValidation|trustedAddress|bypass/i);
   });
 
+  it("gecerli adres TAM haliyle, sarmalanarak ayrica basilir", () => {
+    /*
+     * Girdi kutusu dar ekranda adresin sonunu keser. Kullanici bir oneriyi
+     * ETIKETINE guvenerek sectigi icin, dogrulayabilecegi tek yerin kirpik
+     * olmasi kabul edilemez.
+     */
+    expect(creator).toContain("normalizeWalletAddress(row.address) !== null");
+    expect(creator).toContain("break-all font-mono");
+    expectShows(creator, "contacts.fullAddress", "Tam adres");
+    expect(translate("en", "contacts.fullAddress")).toBe("Full address");
+    // Kisaltilmis hali DEGIL, tam hali basilir.
+    expect(creator).not.toMatch(/shortenWalletAddress\(row\.address\)/);
+  });
+
   it("KULLANICIYA tam adresi dogrulamasi soylenir", () => {
     expectShows(creator, "contacts.verifyNotice", "geri alınamaz");
     expect(translate("en", "contacts.verifyNotice")).toContain("cannot be undone");

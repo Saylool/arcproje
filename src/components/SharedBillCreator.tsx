@@ -3,7 +3,10 @@
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { renderSVG } from "uqr";
 
-import { shortenWalletAddress } from "@/lib/arc/address";
+import {
+  normalizeWalletAddress,
+  shortenWalletAddress,
+} from "@/lib/arc/address";
 import {
   ContactSuggestions,
   useRecentContacts,
@@ -462,6 +465,21 @@ export function SharedBillCreator({
                   invalid ? "border-danger-line-strong bg-danger-surface" : "border-line"
                 }`}
               />
+              {/*
+                TAM ADRES OKUNABİLİR OLMALI.
+
+                Girdi kutusu dar ekranda adresin sonunu görsel olarak keser.
+                Kullanıcı bir öneriye tıkladığında ETİKETE güvenerek seçim
+                yapar; doğrulayabileceği tek yerin kırpık olması kabul
+                edilemez. Bu yüzden geçerli adres, checksum'lı hâliyle ve
+                satır kaydırılarak ayrıca basılır. Elle yazan da faydalanır.
+              */}
+              {normalizeWalletAddress(row.address) !== null && (
+                <span className="break-all font-mono text-[11px] text-ink-faint">
+                  <span className="font-sans">{t("contacts.fullAddress")}: </span>
+                  {normalizeWalletAddress(row.address)}
+                </span>
+              )}
               {/*
                 Öneri ALANI DOLDURUR, doğrulamayı atlamaz: yazılan değer
                 aşağıdaki taslak doğrulamasından elle yazılmış gibi geçer.

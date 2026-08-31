@@ -337,6 +337,7 @@ export const en: Dictionary = {
   /* --------------------------------------------------------------------- */
   contacts: {
     hint: "Addresses you used before",
+    fullAddress: "Full address",
     suggestionsLabel: "Address suggestions from your history",
     useAddress: "Use the address for {label}",
     lastUsed: "last: {date}",
