@@ -141,7 +141,17 @@ describe("akis icinden acilan rehber", () => {
      * Yeni kaydedilen kisi hemen "kayitli" olarak gorunmelidir; aksi halde
      * kullanici ayni kisiyi ikinci kez kaydetmeye calisirdi.
      */
-    expect(participants).toContain("setBookOpen(false);");
-    expect(participants).toContain("recentContacts.reload();");
+    /*
+     * Olcum KAPANIS ISLEYICISINE ozgu olmali: `reload` dosyanin baska bir
+     * yerinde de geciyor, bu yuzden yalnizca "gecıyor mu" demek bosluk birakir.
+     */
+    const start = participants.indexOf("<SavedContactsDialog");
+    expect(start).toBeGreaterThan(-1);
+    const handler = participants.slice(
+      start,
+      participants.indexOf("/>", start),
+    );
+    expect(handler).toContain("setBookOpen(false);");
+    expect(handler).toContain("recentContacts.reload();");
   });
 });
