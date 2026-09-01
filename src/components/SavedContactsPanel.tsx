@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 
-import { normalizeWalletAddress } from "@/lib/arc/address";
 import { describeAddressShape } from "@/lib/arc/address-shape";
 import {
   deleteAllContactsOnServer,
@@ -133,8 +132,16 @@ export function SavedContactsPanel({
     return false;
   }
 
-  const draftValid =
-    draft.label.trim() !== "" && normalizeWalletAddress(draft.address) !== null;
+  /*
+   * Düğme, adres TAM GEÇERLİ olmadan da basılabilir olmalıdır.
+   *
+   * Aksi hâlde eksik karakter yazan kullanıcı düğmeye basamaz ve NEDEN
+   * basamadığını da öğrenemez — sessizce sıkışır. Basılınca `checkAddress`
+   * farkı sayıyla anlatır. Boş alanlarda hâlâ pasiftir: söyleyecek bir şey
+   * yoktur.
+   */
+  const draftReady =
+    draft.label.trim() !== "" && draft.address.trim() !== "";
 
   /** Kaydetmeden önce biçimi anlat; sunucuya gitmeye gerek yok. */
   function checkAddress(value: string): boolean {
@@ -393,7 +400,7 @@ export function SavedContactsPanel({
         />
         <button
           type="button"
-          disabled={busy || !draftValid}
+          disabled={busy || !draftReady}
           onClick={() => {
             if (!checkAddress(draft.address)) {
               return;

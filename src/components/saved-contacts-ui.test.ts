@@ -69,9 +69,14 @@ describe("adres gozden gecirilebilir", () => {
     expect(code).not.toMatch(/shortenWalletAddress/);
   });
 
-  it("ekleme, adres GECERLI olana kadar kapalidir", () => {
-    expect(code).toContain("normalizeWalletAddress(draft.address) !== null");
-    expect(code).toContain("disabled={busy || !draftValid}");
+  it("ekleme dugmesi BASILABILIR: eksik adreste sebep soylenir", () => {
+    /*
+     * Dugme tam gecerli adres beklerse, eksik karakter yazan kullanici
+     * basamaz ve NEDEN basamadigini ogrenemez — sessizce sikisir. Bos
+     * alanlarda hala pasiftir; soylenecek bir sey yoktur.
+     */
+    expect(code).toContain('draft.label.trim() !== "" && draft.address.trim() !== ""');
+    expect(code).toContain("disabled={busy || !draftReady}");
   });
 });
 
