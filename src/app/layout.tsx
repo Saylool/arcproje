@@ -1,12 +1,27 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { SURFACE_DARK, SURFACE_LIGHT } from "@/lib/brand/mark";
 import { LocaleProvider } from "@/lib/i18n/context";
 import { translate } from "@/lib/i18n/dictionary";
 import { resolveRequestLocale } from "@/lib/i18n/server";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
 
 import "./globals.css";
+
+/**
+ * Tarayıcı çubuğunun rengi SAYFA ZEMİNİYLE aynı olur.
+ *
+ * Yalnızca işletim sistemi tercihini izleyebilir: kullanıcının uygulama
+ * içinden seçtiği tema `localStorage`'ta yaşar ve statik bir meta etiketi onu
+ * göremez. Kurulu uygulamanın rengi ise manifestten gelir ve markadır.
+ */
+export const viewport: Viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: SURFACE_LIGHT },
+    { media: "(prefers-color-scheme: dark)", color: SURFACE_DARK },
+  ],
+};
 
 /**
  * Baslik ve aciklama da istegin diline gore uretilir.

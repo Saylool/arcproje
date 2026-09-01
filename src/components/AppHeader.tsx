@@ -7,6 +7,7 @@ import { LanguageSelect } from "@/components/LanguageSelect";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
+import { BrandMark } from "./BrandMark";
 
 /**
  * UYGULAMA BAŞLIĞI — marka, dil seçici ve tema anahtarı.
@@ -47,9 +48,9 @@ export function AppHeader({
       <div className="flex min-w-0 items-center gap-2">
         <span
           aria-hidden="true"
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-xs font-bold text-white"
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-white"
         >
-          ₺
+          <BrandMark className="h-4 w-4" />
         </span>
         <span className="truncate text-sm font-semibold tracking-tight text-ink">
           {t("app.name")}
