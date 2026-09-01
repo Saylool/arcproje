@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { translate } from "../i18n/dictionary";
+import {
+  ARC_TESTNET_CHAIN_ID_HEX,
+  buildAddArcTestnetParams,
+} from "./network";
 import { DEFAULT_LOCALE } from "../i18n/locale";
 import type { WalletInfo } from "./wallet";
 
@@ -356,5 +360,192 @@ describe("ayrılmış WalletConnect kaydı", () => {
     await expect(
       mod.withProvider(mod.WALLETCONNECT_UUID, async () => "ulaştı"),
     ).resolves.toEqual({ ok: false, code: "noProvider" });
+  });
+});
+
+/* --------------------------------------------------------------------- */
+/* AĞ DEĞİŞTİRME                                                           */
+/* --------------------------------------------------------------------- */
+
+/**
+ * `switchToArcTestnet`'in sözleşmesi.
+ *
+ * Mobil cüzdanların ağ değiştirmeye verdiği yanıt düzensiz olduğu için bu
+ * fonksiyon Faz 2'de değişecek. Değişmeyecek olan her şey ÖNCE burada
+ * kilitleniyor: hangi zincire geçilmek istendiği, ekleme denemesinin YALNIZCA
+ * tanınmayan zincirde yapılması, eklenen ağın resmî yapılandırması ve hata
+ * kodlarının eşlenmesi.
+ *
+ * Provider kayıt defterine WalletConnect dikişiyle konuyor; `switchToArcTestnet`
+ * provider'ın oraya nasıl geldiğine bakmaz, bu yüzden EIP-6963 duyurusunu
+ * taklit etmeye gerek yok.
+ */
+type Behaviour = {
+  onSwitch?: () => unknown;
+  onAdd?: () => unknown;
+  onChainId?: () => unknown;
+};
+
+function recordingProvider(behaviour: Behaviour = {}) {
+  const calls: { method: string; params?: unknown }[] = [];
+  const provider = {
+    request: async ({ method, params }: { method: string; params?: unknown }) => {
+      calls.push({ method, params });
+      if (method === "wallet_switchEthereumChain") {
+        return behaviour.onSwitch?.() ?? null;
+      }
+      if (method === "wallet_addEthereumChain") {
+        return behaviour.onAdd?.() ?? null;
+      }
+      if (method === "eth_chainId") {
+        return behaviour.onChainId?.() ?? "0x4cef52";
+      }
+      return null;
+    },
+  };
+  return {
+    provider,
+    calls,
+    methods: () => calls.map((c) => c.method),
+    paramsOf: (method: string) =>
+      calls.find((c) => c.method === method)?.params,
+  };
+}
+
+function providerError(code: number): Error & { code: number } {
+  return Object.assign(new Error("test"), { code });
+}
+
+async function withSwitchProvider(behaviour: Behaviour = {}) {
+  const mod = await freshWallet();
+  const rec = recordingProvider(behaviour);
+  mod.registerWalletConnectProvider(rec.provider);
+  return { mod, rec, uuid: mod.WALLETCONNECT_UUID };
+}
+
+describe("Arc Testnet'e geçiş", () => {
+  it("provider yoksa hiçbir istek yapılmaz", async () => {
+    const mod = await freshWallet();
+    await expect(mod.switchToArcTestnet("yok")).resolves.toEqual({
+      ok: false,
+      code: "noProvider",
+    });
+  });
+
+  it("geçiş DOĞRU zincir kimliğiyle istenir", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider();
+    await mod.switchToArcTestnet(uuid);
+
+    // Hex sabiti elle yazılsaydı yanlış ağa geçilebilirdi; ikisi de sabitlenir.
+    expect(rec.paramsOf("wallet_switchEthereumChain")).toEqual([
+      { chainId: "0x4cef52" },
+    ]);
+    expect(ARC_TESTNET_CHAIN_ID_HEX).toBe("0x4cef52");
+  });
+
+  it("geçiş kabul edilirse ağ EKLEME hiç denenmez", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider();
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(rec.methods()).not.toContain("wallet_addEthereumChain");
+  });
+
+  it("kullanıcı reddederse ekleme denenmez", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        throw providerError(4001);
+      },
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "rejected",
+    });
+    // Reddedilen bir isteğin ardından ağ eklemeye çalışmak kullanıcıyı zorlardı.
+    expect(rec.methods()).not.toContain("wallet_addEthereumChain");
+  });
+
+  it("beklenmedik hata requestFailed olur ve ekleme denenmez", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        throw new Error("kopuk");
+      },
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "requestFailed",
+    });
+    expect(rec.methods()).not.toContain("wallet_addEthereumChain");
+  });
+
+  it("TANINMAYAN zincirde (4902) ağ eklenir ve yeniden geçilir", async () => {
+    let attempts = 0;
+    const { mod, rec, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw providerError(4902);
+        }
+        return null;
+      },
+    });
+
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(rec.methods().filter((m) => m.startsWith("wallet_"))).toEqual([
+      "wallet_switchEthereumChain",
+      "wallet_addEthereumChain",
+      "wallet_switchEthereumChain",
+    ]);
+  });
+
+  it("eklenen ağın parametreleri RESMÎ yapılandırmadır", async () => {
+    let attempts = 0;
+    const { mod, rec, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        attempts += 1;
+        if (attempts === 1) throw providerError(4902);
+        return null;
+      },
+    });
+    await mod.switchToArcTestnet(uuid);
+
+    expect(rec.paramsOf("wallet_addEthereumChain")).toEqual([
+      buildAddArcTestnetParams(),
+    ]);
+    // Gas gösterimi 18 ondalıktır; transfer tutarının 6 ondalığıyla karışmaz.
+    expect(buildAddArcTestnetParams().nativeCurrency.decimals).toBe(18);
+    expect(buildAddArcTestnetParams().chainId).toBe("0x4cef52");
+  });
+
+  it("ağ ekleme reddedilirse ret olarak taşınır", async () => {
+    const { mod, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        throw providerError(4902);
+      },
+      onAdd: () => {
+        throw providerError(4001);
+      },
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "rejected",
+    });
+  });
+
+  it("ekleme sonrası ikinci geçiş düşerse hata YUTULMAZ", async () => {
+    let attempts = 0;
+    const { mod, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        attempts += 1;
+        if (attempts === 1) throw providerError(4902);
+        throw providerError(4001);
+      },
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "rejected",
+    });
   });
 });
