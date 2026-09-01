@@ -37,6 +37,7 @@ import {
 } from "@/lib/i18n/messages";
 
 import { SharedBillPaymentPanel } from "./SharedBillPaymentPanel";
+import { WalletConnectPanel } from "./WalletConnectPanel";
 
 /**
  * ORTAK BAĞLANTI — borçlu tarafı.
@@ -118,10 +119,9 @@ export function SharedBillDebtorView({ billId }: Props) {
     }
   };
 
-  const connect = async () => {
-    if (selectedWalletUuid === null) return;
+  const connectWith = async (uuid: string) => {
     setStage({ status: "idle" });
-    const accounts = await requestAccounts(selectedWalletUuid);
+    const accounts = await requestAccounts(uuid);
     if (!accounts.ok) {
       setStage({
         status: "error",
@@ -134,8 +134,27 @@ export function SharedBillDebtorView({ billId }: Props) {
       return;
     }
     setAccount(accounts.value[0] ?? null);
-    const chain = await getChainId(selectedWalletUuid);
+    const chain = await getChainId(uuid);
     setChainId(chain.ok ? chain.value : null);
+  };
+
+  const connect = async () => {
+    if (selectedWalletUuid === null) return;
+    await connectWith(selectedWalletUuid);
+  };
+
+  /**
+   * WalletConnect oturumu onaylandı: cüzdanı listeye ekle, seç ve AYNI
+   * bağlanma akışını sürdür. EIP-6963 yolu bundan hiç etkilenmez.
+   */
+  const adoptWalletConnect = async (info: WalletInfo) => {
+    setWallets((current) => [
+      ...current.filter((wallet) => wallet.uuid !== info.uuid),
+      info,
+    ]);
+    setWalletsScanned(true);
+    setSelectedWalletUuid(info.uuid);
+    await connectWith(info.uuid);
   };
 
   const switchNetwork = async () => {
@@ -307,6 +326,9 @@ export function SharedBillDebtorView({ billId }: Props) {
               {t("wallet.connectShort")}
             </button>
           </div>
+        )}
+        {account === null && (
+          <WalletConnectPanel onConnected={adoptWalletConnect} />
         )}
         {account !== null && (
           <p className="text-xs text-ink-soft">

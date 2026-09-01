@@ -43,6 +43,7 @@ const COMPONENT_FILES = [
   "src/components/SharedBillDebtorView.tsx",
   "src/components/SharedBillPaymentPanel.tsx",
   "src/components/ThemeToggle.tsx",
+  "src/components/WalletConnectPanel.tsx",
   "src/app/page.tsx",
   "src/app/pay/page.tsx",
   "src/app/pay/[billId]/page.tsx",

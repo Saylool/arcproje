@@ -122,6 +122,16 @@ export const en: Dictionary = {
     notArcWithChain: "Not Arc Testnet (chain {chainId})",
     recipientIs: "Recipient:",
     recipientIsYou: "Recipient (you):",
+
+    walletConnect: "Connect a mobile wallet",
+    walletConnectScan: "Scan this code with the wallet on your phone.",
+    walletConnectOpen: "Open in the wallet app",
+    walletConnectQrLabel: "WalletConnect pairing QR code",
+    walletConnectWaiting: "Waiting for approval in your wallet…",
+    walletConnectCancel: "Cancel",
+    walletConnectFailed: "Could not start the WalletConnect session.",
+    walletConnectArcNotice:
+      "If your wallet does not know Arc Testnet the connection still succeeds; you will then be asked to switch networks.",
   },
 
   progress: {

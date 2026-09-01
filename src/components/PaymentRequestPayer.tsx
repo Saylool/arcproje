@@ -58,6 +58,7 @@ import {
   switchToArcTestnet,
   type WalletInfo,
 } from "@/lib/arc/wallet";
+import { WalletConnectPanel } from "./WalletConnectPanel";
 
 /**
  * Ödeme talebi ödeme sayfası — BORÇLU (gönderen) tarafı.
@@ -323,10 +324,9 @@ function RequestSession({ encoded }: { encoded: string | null }) {
     }
   }, []);
 
-  const connect = async () => {
-    if (selectedWalletUuid === null) return;
+  const connectWith = async (uuid: string) => {
     setErrorMessage(null);
-    const accounts = await requestAccounts(selectedWalletUuid);
+    const accounts = await requestAccounts(uuid);
     if (!accounts.ok) {
       setErrorMessage(
         messageKey(
@@ -338,9 +338,28 @@ function RequestSession({ encoded }: { encoded: string | null }) {
       return;
     }
     setAccount(accounts.value[0] ?? null);
-    const chain = await getChainId(selectedWalletUuid);
+    const chain = await getChainId(uuid);
     setChainId(chain.ok ? chain.value : null);
     setStatus("idle");
+  };
+
+  const connect = async () => {
+    if (selectedWalletUuid === null) return;
+    await connectWith(selectedWalletUuid);
+  };
+
+  /**
+   * WalletConnect oturumu onaylandı: cüzdanı listeye ekle, seç ve AYNI
+   * bağlanma akışını sürdür. EIP-6963 yolu bundan hiç etkilenmez.
+   */
+  const adoptWalletConnect = async (info: WalletInfo) => {
+    setWallets((current) => [
+      ...current.filter((wallet) => wallet.uuid !== info.uuid),
+      info,
+    ]);
+    setWalletsScanned(true);
+    setSelectedWalletUuid(info.uuid);
+    await connectWith(info.uuid);
   };
 
   const switchNetwork = async () => {
@@ -858,6 +877,9 @@ function RequestSession({ encoded }: { encoded: string | null }) {
               </p>
             )}
           </div>
+        )}
+        {account === null && (
+          <WalletConnectPanel onConnected={adoptWalletConnect} />
         )}
       </div>
 

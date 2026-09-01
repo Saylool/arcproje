@@ -50,6 +50,7 @@ import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
 import type { Participant } from "@/lib/split/participants";
+import { WalletConnectPanel } from "./WalletConnectPanel";
 
 /**
  * TEK BAGLANTILI paylasilan hesap olusturucu — fisi odeyen (ALICI) tarafi.
@@ -209,10 +210,9 @@ export function SharedBillCreator({
     });
   }, [selectedWalletUuid]);
 
-  const connect = async () => {
-    if (selectedWalletUuid === null) return;
+  const connectWith = async (uuid: string) => {
     setErrorMessage(null);
-    const accounts = await requestAccounts(selectedWalletUuid);
+    const accounts = await requestAccounts(uuid);
     if (!accounts.ok) {
       setErrorMessage(
         messageKey(
@@ -224,8 +224,27 @@ export function SharedBillCreator({
       return;
     }
     setAccount(accounts.value[0] ?? null);
-    const chain = await getChainId(selectedWalletUuid);
+    const chain = await getChainId(uuid);
     setChainId(chain.ok ? chain.value : null);
+  };
+
+  const connect = async () => {
+    if (selectedWalletUuid === null) return;
+    await connectWith(selectedWalletUuid);
+  };
+
+  /**
+   * WalletConnect oturumu onaylandı: cüzdanı listeye ekle, seç ve AYNI
+   * bağlanma akışını sürdür. EIP-6963 yolu bundan hiç etkilenmez.
+   */
+  const adoptWalletConnect = async (info: WalletInfo) => {
+    setWallets((current) => [
+      ...current.filter((wallet) => wallet.uuid !== info.uuid),
+      info,
+    ]);
+    setWalletsScanned(true);
+    setSelectedWalletUuid(info.uuid);
+    await connectWith(info.uuid);
   };
 
   const switchNetwork = async () => {
@@ -418,6 +437,9 @@ export function SharedBillCreator({
               {t("wallet.connectShort")}
             </button>
           </div>
+        )}
+        {account === null && (
+          <WalletConnectPanel onConnected={adoptWalletConnect} />
         )}
         {account !== null && (
           <p className="text-xs text-ink-soft">
