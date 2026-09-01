@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 
 import { PaymentRequestCreator } from "@/components/PaymentRequestCreator";
 import { dropStaleLinks } from "@/lib/split/linked-addresses";
@@ -79,8 +79,16 @@ function readReceiptField(payload: unknown): unknown {
 
 export function ReceiptFlow({
   authStatus,
+  contactsPanel,
 }: {
   authStatus: "authenticated" | "signedOut" | "unavailable";
+  /**
+   * Kayıtlı kişiler paneli. YALNIZCA ilk ekranda gösterilir: kişi ve
+   * ödeme adımlarında aynı kutuyu tekrar basmak, o adımın işini
+   * bölmekten başka bir şey yapmaz. Akışın içinde rehbere kişi
+   * adımındaki düğmeden ulaşılır.
+   */
+  contactsPanel?: ReactNode;
 }) {
   const { t, locale } = useTranslator();
   const [file, setFile] = useState<File | null>(null);
@@ -414,6 +422,13 @@ export function ReceiptFlow({
           )}
         </div>
       )}
+
+      {/*
+        Rehber paneli YALNIZCA ilk ekranda. Sonraki adımlarda aynı kutuyu
+        tekrar basmak o adımın işini bölerdi; oralarda rehbere kişi
+        adımındaki düğmeden ulaşılır.
+      */}
+      {screen === "receipt" && contactsPanel}
 
       {screen === "participants" && receipt !== null && (
         <ParticipantAssignment

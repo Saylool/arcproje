@@ -213,3 +213,36 @@ describe("rehber SQL'i", () => {
     expect(query).toContain("DISTINCT ON (lower(d.debtor_address))");
   });
 });
+
+describe("kayitli kisi SQL'i", () => {
+  it("SILME sorgulari RETURNING tasir", () => {
+    /*
+     * URETIMDE GOZLENDI: `RETURNING` olmadan surucu bos dizi dondurur, silinen
+     * satir sayisi 0 sanilir ve tek kisi silme "bulunamadi" (404) diye
+     * KULLANICIYA HATA gosterir — satir gercekte silinmis oldugu halde.
+     * Bellek ici sahte depo dogru sayiyi verdigi icin davranis testleri bunu
+     * goremez; kural SORGUDA olculur.
+     */
+    for (const name of ["DELETE_SAVED_CONTACT", "DELETE_ALL_SAVED_CONTACTS"]) {
+      const start = neon.indexOf(`const ${name}`);
+      expect(start, name).toBeGreaterThan(-1);
+      const query = neon.slice(start, neon.indexOf("`;", start));
+      expect(query, name).toContain("RETURNING contact_id");
+    }
+  });
+
+  it("her kayitli kisi sorgusu user_id ile sinirlidir", () => {
+    for (const name of [
+      "SELECT_SAVED_CONTACTS",
+      "INSERT_SAVED_CONTACT",
+      "UPDATE_SAVED_CONTACT",
+      "DELETE_SAVED_CONTACT",
+      "DELETE_ALL_SAVED_CONTACTS",
+    ]) {
+      const start = neon.indexOf(`const ${name}`);
+      expect(start, name).toBeGreaterThan(-1);
+      const query = neon.slice(start, neon.indexOf("`;", start));
+      expect(query, name).toMatch(/user_id/);
+    }
+  });
+});

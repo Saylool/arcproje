@@ -361,6 +361,8 @@ export const en: Dictionary = {
     errorLabelExists: "That name is already used by someone else.",
     errorAddressExists: "That wallet address is already saved.",
     errorInvalid: "The name or wallet address is not valid.",
+    errorAddressShort: "The wallet address is short: {missing} more characters are needed after 0x.",
+    errorAddressLong: "The wallet address is long: {extra} characters too many.",
     errorLimit: "You have reached the saved-people limit.",
     errorGeneric: "That did not go through. Please try again.",
     knownPerson: "You have sent to this person before",

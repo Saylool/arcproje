@@ -311,12 +311,25 @@ WHERE user_id = $1 AND contact_id = $2
 RETURNING contact_id, label, address
 `;
 
+/*
+ * `RETURNING` ZORUNLUDUR.
+ *
+ * Onsuz sürücü boş bir dizi döndürür ve silinen satır sayısı 0 sanılır. Tek
+ * kişi silme bunu "bulunamadı" (404) diye yorumlayıp KULLANICIYA HATA
+ * gösterirdi — satır gerçekte silinmiş olduğu hâlde. Bellek içi sahte depo
+ * doğru sayıyı verdiği için testler bunu göremezdi; eşleşme testi artık
+ * `RETURNING`i sorgunun kendisinde arıyor.
+ */
 const DELETE_SAVED_CONTACT = `
-DELETE FROM saved_contacts WHERE user_id = $1 AND contact_id = $2
+DELETE FROM saved_contacts
+WHERE user_id = $1 AND contact_id = $2
+RETURNING contact_id
 `;
 
 const DELETE_ALL_SAVED_CONTACTS = `
-DELETE FROM saved_contacts WHERE user_id = $1
+DELETE FROM saved_contacts
+WHERE user_id = $1
+RETURNING contact_id
 `;
 
 type SavedContactRow = {

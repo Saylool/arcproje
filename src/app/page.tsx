@@ -13,14 +13,18 @@ export default async function Home() {
         <AppHeader titleKey="metadata.homeTitle" authState={authState} />
       </header>
 
-      <ReceiptFlow authStatus={authState.status} />
+      <ReceiptFlow
+        authStatus={authState.status}
+        contactsPanel={
+          authState.status === "authenticated" ? <SavedContactsPanel /> : null
+        }
+      />
 
       {/*
         Sahiplik listesi YALNIZCA oturum açıkken oluşturulur. Oturumsuz bir
         ziyaretçide bileşen hiç render edilmez, bu yüzden gereksiz bir istek de
         atılmaz ve oturum açılması gerektiği başlıktaki kontrolle zaten söylenir.
       */}
-      {authState.status === "authenticated" && <SavedContactsPanel />}
       {authState.status === "authenticated" && <MyBillsPanel />}
     </main>
   );

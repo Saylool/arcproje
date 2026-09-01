@@ -393,6 +393,8 @@ export const tr = {
     errorLabelExists: "Bu ad başka bir kişide kullanılıyor.",
     errorAddressExists: "Bu cüzdan adresi zaten kayıtlı.",
     errorInvalid: "Ad veya cüzdan adresi geçersiz.",
+    errorAddressShort: "Cüzdan adresi eksik: 0x'ten sonra {missing} karakter daha gerekiyor.",
+    errorAddressLong: "Cüzdan adresi uzun: {extra} karakter fazla.",
     errorLimit: "Kayıtlı kişi sınırına ulaştın.",
     errorGeneric: "İşlem tamamlanamadı. Lütfen tekrar dene.",
     knownPerson: "Bu kişiye daha önce gönderdin",

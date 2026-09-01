@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { SavedContactsPanel } from "@/components/SavedContactsPanel";
+import type { Contact } from "@/lib/arc/contacts-client";
 import { useTranslator } from "@/lib/i18n/context";
 
 /**
@@ -19,6 +20,7 @@ import { useTranslator } from "@/lib/i18n/context";
 export function SavedContactsDialog({
   openToken,
   onClosed,
+  onPick,
 }: {
   /**
    * Her ARTIŞ bir "aç" isteğidir.
@@ -34,6 +36,8 @@ export function SavedContactsDialog({
   openToken: number;
   /** Kapanış YAKALANABİLİRSE bildirilir; doğruluk buna BAĞLI DEĞİLDİR. */
   onClosed: () => void;
+  /** Kayıtlı bir kişi seçildiğinde çağrılır; diyalog kapanır. */
+  onPick: (contact: Contact) => void;
 }) {
   const { t } = useTranslator();
   const ref = useRef<HTMLDialogElement>(null);
@@ -82,10 +86,19 @@ export function SavedContactsDialog({
           close();
         }
       }}
-      className="w-full max-w-xl rounded-2xl bg-surface p-0 text-ink backdrop:bg-black/50"
+      /*
+       * `m-auto` OLMADAN yerli `<dialog>` sola yaslanır. Genişlik sınırı
+       * ekranı taşırmasın diye `max-w` ile birlikte verilir.
+       */
+      className="m-auto w-[calc(100%-2rem)] max-w-xl rounded-2xl bg-surface p-0 text-ink backdrop:bg-black/50"
     >
       <div className="flex flex-col gap-3 p-4">
-        <SavedContactsPanel />
+        <SavedContactsPanel
+          onPick={(contact) => {
+            onPick(contact);
+            close();
+          }}
+        />
         <button
           type="button"
           onClick={close}
