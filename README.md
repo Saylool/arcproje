@@ -36,9 +36,17 @@ cp .env.example .env.local
 | `AUTH_SECRET` | Google girişinde evet | Auth.js JWT/cookie şifreleme sırrı: tam 32 rastgele baytı temsil eden **tam 64 küçük hexadecimal karakter** (`^[0-9a-f]{64}$`). **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_ID` | Google girişinde evet | Google OAuth Web client ID. **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_SECRET` | Google girişinde evet | Google OAuth Web client secret. **Yalnızca sunucuda okunur.** |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | hayır | WalletConnect Cloud proje kimliği. Tanımlı değilse mobil cüzdan seçeneği hiç gösterilmez; masaüstündeki EIP-6963 akışı etkilenmez. **Sır değildir**, aşağıya bakın. |
 
-Bu değişkenlerin hiçbiri `NEXT_PUBLIC_` önekiyle tanımlanmaz ve hiçbiri istemci
-paketine girmez.
+Yukarıdaki **sunucu** değişkenlerinin hiçbiri `NEXT_PUBLIC_` önekiyle
+tanımlanmaz ve hiçbiri istemci paketine girmez.
+
+Tek istisna `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`'dir ve istisna olması
+kasıtlıdır: WalletConnect projectId'si tanımı gereği tarayıcı paketinde
+bulunur, çünkü eşleşme isteğini röleye gönderen taraf istemcidir. Bir sır
+değildir, tek başına hiçbir şeye yetki vermez ve hiçbir sunucu sırrının yerine
+geçmez. Sunucu sırlarının `NEXT_PUBLIC_` ile tanımlanmaması kuralı
+değişmemiştir.
 
 `AUTH_SECRET` kriptografik rastgelelikle üretilmelidir. macOS'ta değeri terminal
 çıktısına yazmadan doğrudan panoya almak için:
@@ -451,6 +459,8 @@ Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
 - `DATABASE_URL` (paylaşılan ortak hesap deposu; Part 2'de zorunlu olacak)
 
 Hepsi `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
+Mobil cüzdan bağlantısı isteniyorsa ayrıca `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
+tanımlanır; bu tek değişken bilinçli olarak istemci paketine girer.
 Neon veritabanı **bu bölümde sağlanmadı**; Marketplace kurulumu, geçişin
 uygulanması ve `DATABASE_URL`'in tanımlanması ayrı bir adımdır.
 

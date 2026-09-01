@@ -131,6 +131,17 @@ export const tr = {
     notArcWithChain: "Arc Testnet değil (zincir {chainId})",
     recipientIs: "Alici:",
     recipientIsYou: "Alıcı (sen):",
+
+    /* WalletConnect — tarayıcıya cüzdan enjekte edilmeyen telefonlar için. */
+    walletConnect: "Mobil cüzdanla bağlan",
+    walletConnectScan: "Telefonundaki cüzdanla bu karekodu okut.",
+    walletConnectOpen: "Cüzdan uygulamasında aç",
+    walletConnectQrLabel: "WalletConnect eşleşme karekodu",
+    walletConnectWaiting: "Cüzdandan onay bekleniyor…",
+    walletConnectCancel: "Vazgeç",
+    walletConnectFailed: "WalletConnect oturumu kurulamadı.",
+    walletConnectArcNotice:
+      "Cüzdanın Arc Testnet'i tanımıyorsa bağlantı yine kurulur; ardından ağı değiştirmen istenir.",
   },
 
   /* --------------------------------------------------------------------- */
