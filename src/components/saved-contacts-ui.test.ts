@@ -22,6 +22,11 @@ function expectShows(
 
 const panel = readFileSync("src/components/SavedContactsPanel.tsx", "utf8");
 const home = readFileSync("src/app/page.tsx", "utf8");
+const dialog = readFileSync("src/components/SavedContactsDialog.tsx", "utf8");
+const participants = readFileSync(
+  "src/components/ParticipantAssignment.tsx",
+  "utf8",
+);
 
 const code = panel
   .replace(/\/\*[\s\S]*?\*\//g, "")
@@ -66,9 +71,22 @@ describe("adres gozden gecirilebilir", () => {
 });
 
 describe("panel kapsami", () => {
-  it("YALNIZCA kayitli kisileri yonetir", () => {
-    // Gecmisten turetilen oneriler burada duzenlenemez; kimlikleri yoktur.
+  it("kayitlilari YONETIR, gecmisi EKLEMEYE HAZIR gosterir", () => {
+    /*
+     * Asil kolaylik bu: daha once odeme yaptigin birini tek dokunusla
+     * deftere alirsin. Gecmis satirinda duzenle/sil YOKTUR — kimligi yoktur.
+     */
     expect(code).toContain('row.source === "saved"');
+    expect(code).toContain('row.source === "history"');
+    expectShows(panel, "contacts.historyHeading", "Daha önce ödeme");
+    expect(code).toContain("saveContactOnServer({");
+  });
+
+  it("gecmis satirinda da TAM adres gosterilir", () => {
+    // Kaydetmeden once ne kaydettigini gormelidir.
+    const historyBlock = code.slice(code.indexOf("history.map"));
+    expect(historyBlock).toContain("{contact.address}");
+    expect(historyBlock).toContain("break-all font-mono");
   });
 
   it("yalnizca oturum acikken olusturulur", () => {
@@ -94,5 +112,36 @@ describe("tema ve metin", () => {
 
   it("hicbir kullanici metni kaynakta gomulu degildir", () => {
     expect(code).not.toMatch(/"[^"]*[çğıöşüÇĞİÖŞÜ][^"]*"/);
+  });
+});
+
+describe("akis icinden acilan rehber", () => {
+  it("diyalog ANA SAYFADAKI panelin aynisini gosterir", () => {
+    // Tek bilesen, iki giris noktasi: ikisi birbirinden ayrisamaz.
+    expect(dialog).toContain("<SavedContactsPanel />");
+  });
+
+  it("yerli <dialog> kullanilir: Escape ve odak tuzagi bedavaya gelir", () => {
+    expect(dialog).toContain("showModal()");
+    expect(dialog).toContain("onClose={onClose}");
+    // Elle yazilmis bir modal bu ucunu de kolayca eksik birakir.
+    expect(dialog).not.toMatch(/role="dialog"/);
+  });
+
+  it("dugme KISILER blogunda, isimlerin yaninda durur", () => {
+    const button = participants.indexOf('t("contacts.openBook")');
+    const payer = participants.indexOf('t("participants.payerLegend")');
+    expect(button).toBeGreaterThan(-1);
+    // "Fisi kim odedi?" bolumunden ONCE gelir.
+    expect(button).toBeLessThan(payer);
+  });
+
+  it("rehber kapaninca oneriler YENILENIR", () => {
+    /*
+     * Yeni kaydedilen kisi hemen "kayitli" olarak gorunmelidir; aksi halde
+     * kullanici ayni kisiyi ikinci kez kaydetmeye calisirdi.
+     */
+    expect(participants).toContain("setBookOpen(false);");
+    expect(participants).toContain("recentContacts.reload();");
   });
 });

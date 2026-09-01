@@ -6,6 +6,7 @@ import {
   ContactSuggestions,
   useRecentContacts,
 } from "@/components/ContactSuggestions";
+import { SavedContactsDialog } from "@/components/SavedContactsDialog";
 import { shortenWalletAddress } from "@/lib/arc/address";
 import {
   saveContactOnServer,
@@ -78,6 +79,7 @@ export function ParticipantAssignment({
     }
   };
 
+  const [bookOpen, setBookOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState<ParticipantNameError | null>(null);
 
@@ -288,8 +290,32 @@ export function ParticipantAssignment({
               {describeParticipantNameError(addError, locale)}
             </p>
           )}
+
+          {/*
+            REHBER, İSİMLERİN YANINDA AÇILIR.
+
+            "Bu kişiyi kalıcı kaydedeyim" ihtiyacı tam burada doğar. Diyalog
+            ana sayfadaki panelin AYNISINI gösterir; kapanınca öneriler
+            yenilenir, böylece yeni kaydedilen kişi hemen kayıtlı olarak
+            görünür.
+          */}
+          <button
+            type="button"
+            onClick={() => setBookOpen(true)}
+            className="self-start rounded-full px-2 py-1 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            {t("contacts.openBook")}
+          </button>
         </div>
       </div>
+
+      <SavedContactsDialog
+        open={bookOpen}
+        onClose={() => {
+          setBookOpen(false);
+          recentContacts.reload();
+        }}
+      />
 
       {/* --- Ödeyen --- */}
       {state.participants.length > 0 && (

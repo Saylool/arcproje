@@ -13,6 +13,7 @@ import {
 } from "@/lib/arc/contacts-client";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
+import { formatRelativeAge } from "@/lib/i18n/format";
 
 /**
  * KAYITLI KİŞİLER PANELİ.
@@ -42,8 +43,10 @@ function errorKeyFor(code: string | null): TranslationKey {
 }
 
 export function SavedContactsPanel() {
-  const { t } = useTranslator();
+  const { t, locale } = useTranslator();
   const [contacts, setContacts] = useState<readonly Contact[]>([]);
+  const [history, setHistory] = useState<readonly Contact[]>([]);
+  const [loadedAtMs, setLoadedAtMs] = useState(0);
   const [reloadToken, setReloadToken] = useState(0);
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [editing, setEditing] = useState<string | null>(null);
@@ -56,8 +59,14 @@ export function SavedContactsPanel() {
     void (async () => {
       const result = await listContactsFromServer();
       if (active && result.ok) {
-        /* Panel YALNIZCA kayıtlıları yönetir; geçmiş önerileri buraya girmez. */
+        /*
+         * Panel iki listeyi de gösterir: KAYITLILAR yönetilir, GEÇMİŞ ise
+         * "eklemeye hazır" olarak durur. Asıl kolaylık budur — daha önce
+         * ödeme yaptığın birini tek dokunuşla deftere alırsın.
+         */
         setContacts(result.contacts.filter((row) => row.source === "saved"));
+        setHistory(result.contacts.filter((row) => row.source === "history"));
+        setLoadedAtMs(Date.now());
       }
     })();
     return () => {
@@ -227,6 +236,57 @@ export function SavedContactsPanel() {
             </li>
           ))}
         </ul>
+      )}
+
+      {history.length > 0 && (
+        <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              {t("contacts.historyHeading")}
+            </h3>
+            <p className="mt-0.5 text-[11px] text-ink-faint">
+              {t("contacts.historyHint")}
+            </p>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {history.map((contact) => (
+              <li
+                key={contact.address}
+                className="flex flex-col gap-1 rounded-xl border border-line bg-card p-3"
+              >
+                <div className="flex flex-wrap items-baseline gap-2">
+                  <span className="text-sm font-semibold text-ink">
+                    {contact.label}
+                  </span>
+                  {contact.lastUsedAt !== null && (
+                    <span className="text-[11px] text-ink-faint">
+                      {formatRelativeAge(contact.lastUsedAt, loadedAtMs, locale)}
+                    </span>
+                  )}
+                </div>
+                {/* Burada da TAM adres: kaydetmeden önce görülmelidir. */}
+                <span className="break-all font-mono text-[11px] text-ink-faint">
+                  {contact.address}
+                </span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() =>
+                      saveContactOnServer({
+                        label: contact.label,
+                        address: contact.address,
+                      }),
+                    )
+                  }
+                  className="self-start rounded-full border border-line px-3 py-1 text-xs font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60"
+                >
+                  {t("contacts.save")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       <div className="flex flex-col gap-2 border-t border-line-soft pt-3">

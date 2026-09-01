@@ -342,6 +342,10 @@ export const en: Dictionary = {
     panelSubtitle:
       "Save the people you pay often; you will not type their address again.",
     panelEmpty: "You have not saved anyone yet. Add someone below.",
+    historyHeading: "People you have paid before",
+    historyHint: "Save any of them here permanently.",
+    openBook: "Saved people",
+    closeBook: "Close",
     nameField: "Name",
     addressField: "Wallet address",
     add: "Add",

@@ -374,6 +374,10 @@ export const tr = {
     panelSubtitle:
       "Sık ödeme yaptığın kişileri buraya kaydet; adresi bir daha yazmazsın.",
     panelEmpty: "Henüz kayıtlı kişin yok. Aşağıdan ekleyebilirsin.",
+    historyHeading: "Daha önce ödeme yaptıkların",
+    historyHint: "Buradan kalıcı olarak kaydedebilirsin.",
+    openBook: "Kayıtlı kişiler",
+    closeBook: "Kapat",
     nameField: "Ad",
     addressField: "Cüzdan adresi",
     add: "Ekle",
