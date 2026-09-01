@@ -276,3 +276,85 @@ describe("süre", () => {
     ).resolves.toEqual({ ok: false, code: "noProvider" });
   });
 });
+
+/**
+ * İKİNCİ KAYNAĞIN SINIRI.
+ *
+ * WalletConnect aynı kayıt defterine yazar. Buradaki testler o yuvanın
+ * duyurulan bir provider tarafından ELE GEÇİRİLEMEYECEĞİNİ ve kaydın dört
+ * çağrı yerinin hepsinde yalnızca uuid ile çözüldüğünü sabitler.
+ */
+describe("ayrılmış WalletConnect kaydı", () => {
+  const UUIDV4 =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+  it("ayrılmış uuid UUIDv4 DEĞİLDİR: gerçek bir cüzdanla çakışamaz", async () => {
+    const mod = await freshWallet();
+    expect(mod.WALLETCONNECT_UUID).not.toMatch(UUIDV4);
+    expect(ALPHA.uuid).toMatch(UUIDV4);
+  });
+
+  it("duyurulan bir provider ayrılmış yuvayı ELE GEÇİREMEZ", async () => {
+    const win = installWindow();
+    const mod = await freshWallet();
+    mod.registerWalletConnectProvider(fakeProvider("gerçek oturum"));
+
+    respondWith(win, [
+      walletDetail(
+        { ...ALPHA, uuid: mod.WALLETCONNECT_UUID, name: "Sahte WalletConnect" },
+        fakeProvider("saldırgan"),
+      ),
+    ]);
+    const wallets = await mod.discoverWallets(5);
+
+    // Ne listeye girer...
+    expect(wallets).toEqual([]);
+    // ...ne de kurulu oturumu ezer.
+    await expect(
+      mod.withProvider(mod.WALLETCONNECT_UUID, (p) =>
+        p.request({ method: "eth_chainId" }),
+      ),
+    ).resolves.toEqual({ ok: true, value: "gerçek oturum" });
+  });
+
+  it("ayrılmış uuid'li duyuru SAĞLAM cüzdanları düşürmez", async () => {
+    const win = installWindow();
+    const mod = await freshWallet();
+    respondWith(win, [
+      walletDetail({ ...ALPHA, uuid: mod.WALLETCONNECT_UUID }),
+      walletDetail(BETA),
+    ]);
+    expect((await mod.discoverWallets(5)).map((w) => w.uuid)).toEqual([
+      BETA.uuid,
+    ]);
+  });
+
+  it("kaydedilen provider'a çağrı yerleri yalnızca uuid ile ulaşır", async () => {
+    const mod = await freshWallet();
+    mod.registerWalletConnectProvider({
+      request: async ({ method }) =>
+        method === "eth_requestAccounts"
+          ? ["0x1111111111111111111111111111111111111111"]
+          : "0x4cef52",
+    });
+
+    await expect(mod.requestAccounts(mod.WALLETCONNECT_UUID)).resolves.toEqual({
+      ok: true,
+      value: ["0x1111111111111111111111111111111111111111"],
+    });
+    await expect(mod.getChainId(mod.WALLETCONNECT_UUID)).resolves.toEqual({
+      ok: true,
+      value: 5042002,
+    });
+  });
+
+  it("oturum kapanınca kayıt SİLİNİR", async () => {
+    const mod = await freshWallet();
+    mod.registerWalletConnectProvider(fakeProvider("oturum"));
+    mod.forgetWalletConnectProvider();
+
+    await expect(
+      mod.withProvider(mod.WALLETCONNECT_UUID, async () => "ulaştı"),
+    ).resolves.toEqual({ ok: false, code: "noProvider" });
+  });
+});

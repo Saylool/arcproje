@@ -39,6 +39,17 @@ type Eip6963ProviderDetail = {
 
 const providerRegistry = new Map<string, Eip1193Provider>();
 
+/**
+ * WalletConnect oturumunun AYRILMIŞ kaydı.
+ *
+ * EIP-6963 uuid'leri UUIDv4'tür; bu değer kasten o biçime uymaz, dolayısıyla
+ * spec'e uyan hiçbir cüzdanla çakışamaz. Ayrılmış olmasının nedeni biçim değil
+ * GÜVENLİK: sayfaya enjekte edilen bir provider bu uuid'yi duyurup kurulu
+ * WalletConnect kaydını ezebilseydi, sonraki transfer isteği onun cüzdanına
+ * giderdi. Duyuru bu yüzden aşağıda açıkça reddedilir.
+ */
+export const WALLETCONNECT_UUID = "walletconnect:eip155";
+
 function safeIcon(icon: unknown): string | null {
   return typeof icon === "string" && icon.startsWith("data:image/") ? icon : null;
 }
@@ -61,7 +72,8 @@ export function discoverWallets(timeoutMs = 350): Promise<WalletInfo[]> {
         detail === undefined ||
         detail === null ||
         typeof detail.info?.uuid !== "string" ||
-        typeof detail.provider?.request !== "function"
+        typeof detail.provider?.request !== "function" ||
+        detail.info.uuid === WALLETCONNECT_UUID
       ) {
         return;
       }
@@ -90,6 +102,23 @@ export function discoverWallets(timeoutMs = 350): Promise<WalletInfo[]> {
 /** Yalnızca bu modül içinden kullanılır; provider dışarı sızdırılmaz. */
 function getProvider(uuid: string): Eip1193Provider | null {
   return providerRegistry.get(uuid) ?? null;
+}
+
+/**
+ * İKİNCİ KAYNAK: WalletConnect.
+ *
+ * Provider yine bu modülün dışına çıkmaz — WalletConnect adaptörü nesneyi
+ * burada bırakır, çağıran taraf onu yalnızca uuid ile kullanır. Bu yüzden
+ * `requestAccounts`, `getChainId`, `switchToArcTestnet`, `subscribeToWallet`
+ * ve `withProvider` (dolayısıyla `send.ts`) tek satır bile değişmez.
+ */
+export function registerWalletConnectProvider(provider: Eip1193Provider): void {
+  providerRegistry.set(WALLETCONNECT_UUID, provider);
+}
+
+/** Oturum kapanınca kayıt silinir; uuid artık hiçbir provider'a çözülmez. */
+export function forgetWalletConnectProvider(): void {
+  providerRegistry.delete(WALLETCONNECT_UUID);
 }
 
 export type WalletErrorCode =
