@@ -125,7 +125,20 @@ export const tr = {
     switchToArc: "Arc Testnet'e geç",
     switchRejected: "Ağ değişikliği reddedildi.",
     switchFailed: "Arc Testnet'e geçilemedi.",
-    switchFailedPickManually: "Ağ değiştirilemedi. Cüzdandan Arc Testnet'i seç.",
+    /* Cüzdan "tamam" deyip ağı değiştirmedi — reddetmekten AYRI bir durum. */
+    switchIgnored: "Cüzdanın isteği kabul etti ama ağı değiştirmedi.",
+    switchUnsupported: "Cüzdanın Arc Testnet'i tanımıyor.",
+
+    /* Ağı elle ekleme. Değerler veridir ve çevrilmez; yalnızca etiketler burada. */
+    addManuallyTitle: "Ağı cüzdanına elle ekle",
+    addManuallyIntro:
+      "Yeniden denemek bunu çözmez. Aşağıdaki ağı cüzdanına ekle, sonra tekrar dene.",
+    networkName: "Ağ adı",
+    chainId: "Zincir kimliği",
+    rpcUrl: "RPC adresi",
+    symbol: "Sembol",
+    explorer: "Blok gezgini",
+    copyNetwork: "Ağ bilgilerini kopyala",
     connectedAccount: "Bağlı hesap:",
     connectedWallet: "Bağlı cüzdan:",
     notArcWithChain: "Arc Testnet değil (zincir {chainId})",

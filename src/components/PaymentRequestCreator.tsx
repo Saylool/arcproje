@@ -52,6 +52,11 @@ import type { DebtCalculationSuccess } from "@/lib/split/debts";
 import type { Participant } from "@/lib/split/participants";
 import { toDativeName } from "@/lib/split/turkish";
 import { WalletConnectPanel } from "./WalletConnectPanel";
+import {
+  needsManualNetwork,
+  switchFailureMessage,
+} from "@/lib/arc/wallet-messages";
+import { ArcNetworkParameters } from "./ArcNetworkParameters";
 
 /**
  * Ödeme talebi oluşturucu — fişi ödeyen (ALICI) tarafı.
@@ -108,6 +113,7 @@ export function PaymentRequestCreator({
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
+  const [manualNetwork, setManualNetwork] = useState(false);
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
 
@@ -307,15 +313,11 @@ export function PaymentRequestCreator({
   const switchNetwork = async () => {
     if (selectedWalletUuid === null) return;
     setErrorMessage(null);
+    setManualNetwork(false);
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
-      setErrorMessage(
-        messageKey(
-          switched.code === "rejected"
-            ? "wallet.switchRejected"
-            : "wallet.switchFailed",
-        ),
-      );
+      setManualNetwork(needsManualNetwork(switched.code));
+      setErrorMessage(messageKey(switchFailureMessage(switched.code)));
       return;
     }
     const chain = await getChainId(selectedWalletUuid);
@@ -569,6 +571,7 @@ export function PaymentRequestCreator({
                     </button>
                   )}
                 </div>
+                {manualNetwork && <ArcNetworkParameters />}
                 {recipientAddress !== null && (
                   <p className="text-[11px] text-ink-faint">
                     {t("wallet.recipientIsYou")}{" "}
