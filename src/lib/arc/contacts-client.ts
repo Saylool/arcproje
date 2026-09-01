@@ -21,12 +21,19 @@ import { MAX_LABEL_LENGTH } from "./payment-request";
 export const CONTACTS_ENDPOINT = "/api/contacts";
 
 export type Contact = Readonly<{
+  /** `saved`: kullanicinin kaydettigi kisi. `history`: gecmisten turetilmis. */
+  source: "saved" | "history";
+  /** Yalnizca `saved` icin; duzenleme ve silme bunun uzerinden yapilir. */
+  contactId: string | null;
+  label: string;
   /** Checksum'li adres. */
   address: string;
-  label: string;
-  /** Unix saniye. */
-  lastUsedAt: number;
+  /** Yalnizca `history` icin; kayitli kisinin yasi anlamsizdir. */
+  lastUsedAt: number | null;
 }>;
+
+const CONTACT_ID =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type ListContactsResponse =
   | { ok: true; contacts: readonly Contact[] }
@@ -41,18 +48,49 @@ function toContact(value: unknown): Contact | null {
   const address =
     typeof rawAddress === "string" ? normalizeWalletAddress(rawAddress) : null;
   const label = validateCanonicalLabel(row.label, MAX_LABEL_LENGTH);
-  const lastUsedAt = row.lastUsedAt;
+  const { source, contactId, lastUsedAt } = row;
 
-  if (
-    address === null ||
-    !label.ok ||
-    typeof lastUsedAt !== "number" ||
-    !Number.isSafeInteger(lastUsedAt) ||
-    lastUsedAt <= 0
-  ) {
+  if (address === null || !label.ok) {
     return null;
   }
-  return Object.freeze({ address, label: label.value, lastUsedAt });
+
+  /*
+   * KAYNAK, SEKLI BELIRLER. Kayitli bir kisinin kimligi olmali ve yasi
+   * olmamalidir; gecmisten gelenin tersi. Karisik bir satir kabul edilseydi
+   * arayuz "kaydet" dugmesini kayitli bir kisiye de gosterebilirdi.
+   */
+  if (source === "saved") {
+    if (typeof contactId !== "string" || !CONTACT_ID.test(contactId)) {
+      return null;
+    }
+    return Object.freeze({
+      source: "saved" as const,
+      contactId,
+      label: label.value,
+      address,
+      lastUsedAt: null,
+    });
+  }
+
+  if (source === "history") {
+    if (
+      contactId !== null ||
+      typeof lastUsedAt !== "number" ||
+      !Number.isSafeInteger(lastUsedAt) ||
+      lastUsedAt <= 0
+    ) {
+      return null;
+    }
+    return Object.freeze({
+      source: "history" as const,
+      contactId: null,
+      label: label.value,
+      address,
+      lastUsedAt,
+    });
+  }
+
+  return null;
 }
 
 export async function listContactsFromServer(
@@ -104,4 +142,90 @@ export async function listContactsFromServer(
     }
   }
   return { ok: true, contacts: Object.freeze(contacts) };
+}
+
+/* ------------------------------------------------------------------------ */
+/* KAYITLI KISI YAZMA ISLEMLERI                                             */
+/* ------------------------------------------------------------------------ */
+
+export type ContactWriteResponse =
+  | { ok: true }
+  | { ok: false; code: string | null };
+
+async function writeContact(
+  url: string,
+  method: "POST" | "PATCH" | "DELETE",
+  body: unknown,
+  fetchImpl: typeof fetch,
+): Promise<ContactWriteResponse> {
+  try {
+    const response = await fetchImpl(url, {
+      method,
+      cache: "no-store",
+      ...(body === undefined
+        ? {}
+        : {
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+          }),
+    });
+    if (response.ok) {
+      return { ok: true };
+    }
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+    return { ok: false, code: readApiErrorCode(payload) };
+  } catch {
+    return { ok: false, code: null };
+  }
+}
+
+export function saveContactOnServer(
+  contact: { label: string; address: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<ContactWriteResponse> {
+  return writeContact(CONTACTS_ENDPOINT, "POST", contact, fetchImpl);
+}
+
+export function updateContactOnServer(
+  contactId: string,
+  contact: { label: string; address: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<ContactWriteResponse> {
+  /* Kimlik YOLA girer; bicimi once burada dogrulanir. */
+  if (!CONTACT_ID.test(contactId)) {
+    return Promise.resolve({ ok: false, code: "CONTACT_NOT_FOUND" });
+  }
+  return writeContact(
+    `${CONTACTS_ENDPOINT}/${contactId}`,
+    "PATCH",
+    contact,
+    fetchImpl,
+  );
+}
+
+export function deleteContactOnServer(
+  contactId: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<ContactWriteResponse> {
+  if (!CONTACT_ID.test(contactId)) {
+    return Promise.resolve({ ok: false, code: "CONTACT_NOT_FOUND" });
+  }
+  return writeContact(
+    `${CONTACTS_ENDPOINT}/${contactId}`,
+    "DELETE",
+    undefined,
+    fetchImpl,
+  );
+}
+
+/** TUM defteri siler. Hangi defter oldugunu sunucu oturumdan bilir. */
+export function deleteAllContactsOnServer(
+  fetchImpl: typeof fetch = fetch,
+): Promise<ContactWriteResponse> {
+  return writeContact(CONTACTS_ENDPOINT, "DELETE", undefined, fetchImpl);
 }

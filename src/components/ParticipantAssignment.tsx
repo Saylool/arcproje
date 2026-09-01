@@ -6,7 +6,12 @@ import {
   ContactSuggestions,
   useRecentContacts,
 } from "@/components/ContactSuggestions";
+import { SavedContactsDialog } from "@/components/SavedContactsDialog";
 import { shortenWalletAddress } from "@/lib/arc/address";
+import {
+  saveContactOnServer,
+  type Contact,
+} from "@/lib/arc/contacts-client";
 import { useTranslator } from "@/lib/i18n/context";
 import { formatMinorForDisplay } from "@/lib/receipt/money";
 import type { Receipt } from "@/lib/receipt/schema";
@@ -59,6 +64,23 @@ export function ParticipantAssignment({
    */
   const recentContacts = useRecentContacts();
 
+  /*
+   * Kaydetme SESSİZ başarısız olabilir: defter bir kolaylıktır, akışı
+   * durdurmamalıdır. Başarılıysa liste yenilenir ve satır artık "kayıtlı"
+   * olarak döner.
+   */
+  const saveToBook = async (contact: Contact) => {
+    const saved = await saveContactOnServer({
+      label: contact.label,
+      address: contact.address,
+    });
+    if (saved.ok) {
+      recentContacts.reload();
+    }
+  };
+
+  /* Her artış bir 'aç' isteğidir; boolean bir bayrak takılı kalabilirdi. */
+  const [bookToken, setBookToken] = useState(0);
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState<ParticipantNameError | null>(null);
 
@@ -216,6 +238,7 @@ export function ParticipantAssignment({
                         onPick={(address) =>
                           onLinkAddress(participant.id, address)
                         }
+                        onSave={(contact) => void saveToBook(contact)}
                       />
                     )
                   )}
@@ -268,8 +291,29 @@ export function ParticipantAssignment({
               {describeParticipantNameError(addError, locale)}
             </p>
           )}
+
+          {/*
+            REHBER, İSİMLERİN YANINDA AÇILIR.
+
+            "Bu kişiyi kalıcı kaydedeyim" ihtiyacı tam burada doğar. Diyalog
+            ana sayfadaki panelin AYNISINI gösterir; kapanınca öneriler
+            yenilenir, böylece yeni kaydedilen kişi hemen kayıtlı olarak
+            görünür.
+          */}
+          <button
+            type="button"
+            onClick={() => setBookToken((token) => token + 1)}
+            className="self-start rounded-full px-2 py-1 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          >
+            {t("contacts.openBook")}
+          </button>
         </div>
       </div>
+
+      <SavedContactsDialog
+        openToken={bookToken}
+        onClosed={() => recentContacts.reload()}
+      />
 
       {/* --- Ödeyen --- */}
       {state.participants.length > 0 && (

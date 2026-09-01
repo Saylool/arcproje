@@ -369,6 +369,32 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   contacts: {
     hint: "Daha önce kullandığın adresler",
+    save: "Kaydet",
+    panelTitle: "Kayıtlı kişiler",
+    panelSubtitle:
+      "Sık ödeme yaptığın kişileri buraya kaydet; adresi bir daha yazmazsın.",
+    panelEmpty: "Henüz kayıtlı kişin yok. Aşağıdan ekleyebilirsin.",
+    historyHeading: "Daha önce ödeme yaptıkların",
+    historyHint: "Buradan kalıcı olarak kaydedebilirsin.",
+    openBook: "Kayıtlı kişiler",
+    closeBook: "Kapat",
+    nameField: "Ad",
+    addressField: "Cüzdan adresi",
+    add: "Ekle",
+    edit: "Düzenle",
+    saveChanges: "Kaydet",
+    cancel: "Vazgeç",
+    remove: "Sil",
+    removeAll: "Tümünü sil",
+    confirmRemoveAll:
+      "Kayıtlı kişilerin tamamı silinecek. Bu işlem geri alınamaz.",
+    privacyNotice:
+      "Kayıtlı kişiler yalnızca senin hesabında tutulur, kimseyle paylaşılmaz ve istediğin an tümünü silebilirsin.",
+    errorLabelExists: "Bu ad başka bir kişide kullanılıyor.",
+    errorAddressExists: "Bu cüzdan adresi zaten kayıtlı.",
+    errorInvalid: "Ad veya cüzdan adresi geçersiz.",
+    errorLimit: "Kayıtlı kişi sınırına ulaştın.",
+    errorGeneric: "İşlem tamamlanamadı. Lütfen tekrar dene.",
     knownPerson: "Bu kişiye daha önce gönderdin",
     linkedWallet: "Cüzdan bağlandı",
     unlink: "Kaldır",

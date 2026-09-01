@@ -13,7 +13,27 @@ import { listContactsFromServer } from "./contacts-client";
 const CHECKSUMMED = "0x742d35Cc6634C0532925a3b844Bc454e4438f44e";
 
 function validRow(over: Record<string, unknown> = {}) {
-  return { address: CHECKSUMMED, label: "Ada", lastUsedAt: 1_700_000_000, ...over };
+  return {
+    source: "history",
+    contactId: null,
+    address: CHECKSUMMED,
+    label: "Ada",
+    lastUsedAt: 1_700_000_000,
+    ...over,
+  };
+}
+
+const SAVED_ID = "11111111-1111-4111-8111-111111111111";
+
+function savedRow(over: Record<string, unknown> = {}) {
+  return {
+    source: "saved",
+    contactId: SAVED_ID,
+    address: CHECKSUMMED,
+    label: "Ada",
+    lastUsedAt: null,
+    ...over,
+  };
 }
 
 function respondWith(payload: unknown, status = 200) {
@@ -125,5 +145,41 @@ describe("hata yollari", () => {
     if (result.ok) return;
     expect(result.code).toBe("AUTH_REQUIRED");
     expect(result.message).not.toContain("sunucu metni");
+  });
+});
+
+describe("KAYNAK, seklini belirler", () => {
+  it("kayitli kisi kimligiyle kabul edilir", async () => {
+    const result = await listContactsFromServer(
+      respondWith({ contacts: [savedRow()] }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.contacts[0]?.source).toBe("saved");
+    expect(result.contacts[0]?.contactId).toBe(SAVED_ID);
+    expect(result.contacts[0]?.lastUsedAt).toBeNull();
+  });
+
+  it("KARISIK satir reddedilir", async () => {
+    /*
+     * Kayitli gorunup yasi olan ya da gecmis gorunup kimligi olan bir satir
+     * kabul edilseydi, arayuz "kaydet" dugmesini yanlis yerde gosterebilirdi.
+     */
+    const bad = [
+      savedRow({ contactId: null }),
+      savedRow({ contactId: "kotucul" }),
+      validRow({ contactId: SAVED_ID }),
+      validRow({ lastUsedAt: null }),
+      validRow({ source: "baska" }),
+      validRow({ source: null }),
+    ];
+    for (const row of bad) {
+      const result = await listContactsFromServer(
+        respondWith({ contacts: [row] }),
+      );
+      expect(result.ok, JSON.stringify(row)).toBe(true);
+      if (!result.ok) continue;
+      expect(result.contacts, JSON.stringify(row)).toHaveLength(0);
+    }
   });
 });

@@ -86,7 +86,7 @@ describe("suzme olcutu", () => {
     const response = await GET();
     expect(response.status).toBe(200);
     expect(listContacts).toHaveBeenCalledWith({
-      createdByUserId: SESSION_USER,
+      userId: SESSION_USER,
       repository,
     });
   });
@@ -98,8 +98,8 @@ describe("suzme olcutu", () => {
      * oturumdan geldigini kanitlar.
      */
     const seen: string[] = [];
-    const listContacts = vi.fn(async (input: { createdByUserId: string }) => {
-      seen.push(input.createdByUserId);
+    const listContacts = vi.fn(async (input: { userId: string }) => {
+      seen.push(input.userId);
       return { ok: true as const, contacts: [] };
     });
 
@@ -130,6 +130,8 @@ describe("suzme olcutu", () => {
 
 describe("yanit", () => {
   const contact = {
+    source: "history" as const,
+    contactId: null,
     address: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
     label: "Ada",
     lastUsedAt: 1_700_000_000,
