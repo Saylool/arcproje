@@ -28,6 +28,11 @@ const participants = readFileSync(
   "utf8",
 );
 
+/** YORUMSUZ diyalog kaynagi: aciklamada gecen bir sinif adi kanit sayilmaz. */
+const dialogCode = dialog
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+
 const code = panel
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "")
@@ -64,9 +69,14 @@ describe("adres gozden gecirilebilir", () => {
     expect(code).not.toMatch(/shortenWalletAddress/);
   });
 
-  it("ekleme, adres GECERLI olana kadar kapalidir", () => {
-    expect(code).toContain("normalizeWalletAddress(draft.address) !== null");
-    expect(code).toContain("disabled={busy || !draftValid}");
+  it("ekleme dugmesi BASILABILIR: eksik adreste sebep soylenir", () => {
+    /*
+     * Dugme tam gecerli adres beklerse, eksik karakter yazan kullanici
+     * basamaz ve NEDEN basamadigini ogrenemez — sessizce sikisir. Bos
+     * alanlarda hala pasiftir; soylenecek bir sey yoktur.
+     */
+    expect(code).toContain('draft.label.trim() !== "" && draft.address.trim() !== ""');
+    expect(code).toContain("disabled={busy || !draftReady}");
   });
 });
 
@@ -90,9 +100,14 @@ describe("panel kapsami", () => {
   });
 
   it("yalnizca oturum acikken olusturulur", () => {
+    /*
+     * Panel artik akisa SLOT olarak gecer, ama oturum kapisi hala sayfada:
+     * oturumsuz ziyaretcide bilesen hic olusturulmaz, gereksiz istek atilmaz.
+     */
     expect(home).toContain("SavedContactsPanel");
-    const guard = home.indexOf('authState.status === "authenticated" && <SavedContactsPanel');
-    expect(guard).toBeGreaterThan(-1);
+    expect(home).toContain(
+      'authState.status === "authenticated" ? <SavedContactsPanel /> : null',
+    );
   });
 
   it("sunucu KODU tasinir, sunucunun METNI degil", () => {
@@ -118,7 +133,29 @@ describe("tema ve metin", () => {
 describe("akis icinden acilan rehber", () => {
   it("diyalog ANA SAYFADAKI panelin aynisini gosterir", () => {
     // Tek bilesen, iki giris noktasi: ikisi birbirinden ayrisamaz.
-    expect(dialog).toContain("<SavedContactsPanel />");
+    expect(dialog).toContain("<SavedContactsPanel");
+  });
+
+  it("diyalog SECIM kipindedir: yonetim yapilmaz", () => {
+    /*
+     * Akisin ortasinda yanlislikla silmek, aramaya geldigi kisiyi kaybetmek
+     * demektir. Diyalogda ekleme, duzenleme, silme ve gecmis YOKTUR.
+     */
+    expect(dialog).toContain("onPick={(contact) => {");
+    expect(code).toContain("const picking = onPick !== undefined;");
+    expect(code).toContain("!picking &&");
+  });
+
+  it("secim TEK adimda kisiyi ekler ve cuzdanini baglar", () => {
+    expect(participants).toContain("addParticipant(state, contact.label)");
+    expect(participants).toContain("onLinkAddress(created.id, contact.address)");
+    // Ayni ad zaten varsa yeni kisi eklenmez, VAR OLANA baglanir.
+    expect(participants).toContain("onLinkAddress(existing.id, contact.address)");
+  });
+
+  it("diyalog ORTALANIR", () => {
+    // `m-auto` olmadan yerli <dialog> sola yaslanir. Aciklama degil, SINIF.
+    expect(dialogCode).toContain("m-auto");
   });
 
   it("yerli <dialog> kullanilir: Escape ve odak tuzagi bedavaya gelir", () => {
@@ -164,5 +201,33 @@ describe("akis icinden acilan rehber", () => {
     expect(start).toBeGreaterThan(-1);
     const element = participants.slice(start, participants.indexOf("/>", start));
     expect(element).toContain("onClosed={() => recentContacts.reload()}");
+  });
+});
+
+describe("panel YALNIZCA ilk ekranda", () => {
+  const flow = readFileSync("src/components/ReceiptFlow.tsx", "utf8");
+
+  it("kisi ve odeme adimlarinda kutu TEKRAR basilmaz", () => {
+    /*
+     * Ayni kutuyu her adimda gostermek, o adimin isini bolmekten baska bir
+     * sey yapmaz. Akisin icinde rehbere kisi adimindaki DUGMEDEN ulasilir.
+     */
+    expect(flow).toContain('{screen === "receipt" && contactsPanel}');
+    expect(home).toContain("contactsPanel={");
+    // Sayfa artik paneli dogrudan basmaz.
+    expect(home).not.toMatch(/authenticated" && <SavedContactsPanel/);
+  });
+});
+
+describe("adres uzunlugu KULLANICIYA anlatilir", () => {
+  it("eksik ve fazla karakter ayri ayri soylenir", () => {
+    expectShows(panel, "contacts.errorAddressShort", "karakter daha gerekiyor");
+    expectShows(panel, "contacts.errorAddressLong", "karakter fazla");
+    expect(code).toContain("describeAddressShape");
+  });
+
+  it("kaydetmeden ONCE olculur, sunucuya gidilmez", () => {
+    expect(code).toContain("if (!checkAddress(draft.address))");
+    expect(code).toContain("if (!checkAddress(editDraft.address))");
   });
 });

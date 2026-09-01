@@ -313,6 +313,43 @@ export function ParticipantAssignment({
       <SavedContactsDialog
         openToken={bookToken}
         onClosed={() => recentContacts.reload()}
+        onPick={(contact) => {
+          /*
+           * Kayıtlı kişi seçmek TEK adımda hem kişiyi ekler hem cüzdanını
+           * bağlar: kullanıcı zaten "bu kişiyi hesaba kat" demek için açtı.
+           *
+           * Aynı ad zaten varsa `addParticipant` reddeder; o durumda kişi
+           * eklenmez ama VAR OLAN satıra cüzdan bağlanır — istenen sonuç
+           * yine elde edilir.
+           */
+          const existing = state.participants.find(
+            (person) =>
+              person.name.trim().toLowerCase() ===
+              contact.label.trim().toLowerCase(),
+          );
+          if (existing !== undefined) {
+            onLinkAddress(existing.id, contact.address);
+            return;
+          }
+          const added = addParticipant(state, contact.label);
+          if (!added.ok) {
+            setAddError(added.error);
+            return;
+          }
+          /*
+           * `addParticipant` yeni kişiyi ayrıca döndürmez; kimliği ÖNCEKİ
+           * listede olmayan tek satırdan bulunur. İsimle aramak yanıltıcı
+           * olurdu — adlar benzersiz olmak zorunda değil.
+           */
+          const known = new Set(state.participants.map((person) => person.id));
+          const created = added.state.participants.find(
+            (person) => !known.has(person.id),
+          );
+          onChange(added.state);
+          if (created !== undefined) {
+            onLinkAddress(created.id, contact.address);
+          }
+        }}
       />
 
       {/* --- Ödeyen --- */}

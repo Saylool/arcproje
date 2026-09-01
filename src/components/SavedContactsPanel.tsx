@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-import { normalizeWalletAddress } from "@/lib/arc/address";
+import { describeAddressShape } from "@/lib/arc/address-shape";
 import {
   deleteAllContactsOnServer,
   deleteContactOnServer,
@@ -31,6 +31,34 @@ type Draft = { label: string; address: string };
 
 const EMPTY: Draft = { label: "", address: "" };
 
+/**
+ * Adres biçimini KULLANICIYA anlatır.
+ *
+ * "Geçersiz" demek ne yapacağını söylemez; en sık hata karakter sayısını
+ * tutturamamaktır, o yüzden fark SAYIYLA anlatılır.
+ */
+function addressProblem(
+  value: string,
+): { key: TranslationKey; params: Record<string, string> } | null {
+  const shape = describeAddressShape(value);
+  if (shape.kind === "short") {
+    return {
+      key: "contacts.errorAddressShort",
+      params: { missing: String(shape.missing) },
+    };
+  }
+  if (shape.kind === "long") {
+    return {
+      key: "contacts.errorAddressLong",
+      params: { extra: String(shape.extra) },
+    };
+  }
+  if (shape.kind === "malformed") {
+    return { key: "contacts.errorInvalid", params: {} };
+  }
+  return null;
+}
+
 /** Sunucu kodunu gösterilecek cümleye çevirir. */
 function errorKeyFor(code: string | null): TranslationKey {
   if (code === "CONTACT_LABEL_EXISTS") return "contacts.errorLabelExists";
@@ -42,8 +70,21 @@ function errorKeyFor(code: string | null): TranslationKey {
   return "contacts.errorGeneric";
 }
 
-export function SavedContactsPanel() {
+export function SavedContactsPanel({
+  onPick,
+}: {
+  /**
+   * Verilirse panel SEÇİM kipine geçer: yalnızca kayıtlı kişiler listelenir
+   * ve tıklanınca çağırana geçilir. Ekleme, düzenleme, silme ve geçmiş
+   * bölümü GÖSTERİLMEZ.
+   *
+   * Neden: akışın içinden açılan rehberin işi tek bir soruyu yanıtlamaktır —
+   * "bu kişiyi ekle". Yönetim ana sayfadaki panelde yapılır.
+   */
+  onPick?: (contact: Contact) => void;
+} = {}) {
   const { t, locale } = useTranslator();
+  const picking = onPick !== undefined;
   const [contacts, setContacts] = useState<readonly Contact[]>([]);
   const [history, setHistory] = useState<readonly Contact[]>([]);
   const [loadedAtMs, setLoadedAtMs] = useState(0);
@@ -52,6 +93,7 @@ export function SavedContactsPanel() {
   const [editing, setEditing] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Draft>(EMPTY);
   const [errorKey, setErrorKey] = useState<TranslationKey | null>(null);
+  const [errorParams, setErrorParams] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -79,6 +121,7 @@ export function SavedContactsPanel() {
   async function run(action: () => Promise<{ ok: boolean; code?: string | null }>) {
     setBusy(true);
     setErrorKey(null);
+    setErrorParams({});
     const result = await action();
     setBusy(false);
     if (result.ok) {
@@ -89,8 +132,27 @@ export function SavedContactsPanel() {
     return false;
   }
 
-  const draftValid =
-    draft.label.trim() !== "" && normalizeWalletAddress(draft.address) !== null;
+  /*
+   * Düğme, adres TAM GEÇERLİ olmadan da basılabilir olmalıdır.
+   *
+   * Aksi hâlde eksik karakter yazan kullanıcı düğmeye basamaz ve NEDEN
+   * basamadığını da öğrenemez — sessizce sıkışır. Basılınca `checkAddress`
+   * farkı sayıyla anlatır. Boş alanlarda hâlâ pasiftir: söyleyecek bir şey
+   * yoktur.
+   */
+  const draftReady =
+    draft.label.trim() !== "" && draft.address.trim() !== "";
+
+  /** Kaydetmeden önce biçimi anlat; sunucuya gitmeye gerek yok. */
+  function checkAddress(value: string): boolean {
+    const problem = addressProblem(value);
+    if (problem === null) {
+      return true;
+    }
+    setErrorParams(problem.params);
+    setErrorKey(problem.key);
+    return false;
+  }
 
   return (
     <section
@@ -109,7 +171,7 @@ export function SavedContactsPanel() {
             {t("contacts.panelSubtitle")}
           </p>
         </div>
-        {contacts.length > 0 && (
+        {contacts.length > 0 && !picking && (
           <button
             type="button"
             disabled={busy}
@@ -169,6 +231,9 @@ export function SavedContactsPanel() {
                       type="button"
                       disabled={busy}
                       onClick={() => {
+                        if (!checkAddress(editDraft.address)) {
+                          return;
+                        }
                         void run(() =>
                           updateContactOnServer(
                             contact.contactId ?? "",
@@ -194,6 +259,24 @@ export function SavedContactsPanel() {
                     </button>
                   </div>
                 </>
+              ) : picking ? (
+                /*
+                 * SEÇİM KİPİ: satırın tamamı tek bir eylemdir. Düzenle ve sil
+                 * burada YOKTUR — akışın ortasında yanlışlıkla silmek, aramaya
+                 * geldiği kişiyi kaybetmek demektir.
+                 */
+                <button
+                  type="button"
+                  onClick={() => onPick?.(contact)}
+                  className="flex flex-col gap-1 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                >
+                  <span className="text-sm font-semibold text-ink">
+                    {contact.label}
+                  </span>
+                  <span className="break-all font-mono text-[11px] text-ink-faint">
+                    {contact.address}
+                  </span>
+                </button>
               ) : (
                 <>
                   <span className="text-sm font-semibold text-ink">
@@ -238,7 +321,7 @@ export function SavedContactsPanel() {
         </ul>
       )}
 
-      {history.length > 0 && (
+      {history.length > 0 && !picking && (
         <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
           <div>
             <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-faint">
@@ -289,6 +372,7 @@ export function SavedContactsPanel() {
         </div>
       )}
 
+      {!picking && (
       <div className="flex flex-col gap-2 border-t border-line-soft pt-3">
         <input
           type="text"
@@ -316,8 +400,11 @@ export function SavedContactsPanel() {
         />
         <button
           type="button"
-          disabled={busy || !draftValid}
+          disabled={busy || !draftReady}
           onClick={() => {
+            if (!checkAddress(draft.address)) {
+              return;
+            }
             void run(() => saveContactOnServer(draft)).then((ok) => {
               if (ok) setDraft(EMPTY);
             });
@@ -327,10 +414,11 @@ export function SavedContactsPanel() {
           {t("contacts.add")}
         </button>
       </div>
+      )}
 
       {errorKey !== null && (
         <p role="status" className="text-xs text-danger-ink">
-          {t(errorKey)}
+          {t(errorKey, errorParams)}
         </p>
       )}
 
