@@ -123,9 +123,19 @@ describe("akis icinden acilan rehber", () => {
 
   it("yerli <dialog> kullanilir: Escape ve odak tuzagi bedavaya gelir", () => {
     expect(dialog).toContain("showModal()");
-    expect(dialog).toContain("onClose={onClose}");
     // Elle yazilmis bir modal bu ucunu de kolayca eksik birakir.
     expect(dialog).not.toMatch(/role="dialog"/);
+  });
+
+  it("close olayi DOGRUDAN dinlenir, React prop'u ile DEGIL", () => {
+    /*
+     * `close` KABARMAZ; React'in `onClose` prop'u onu yakalamaz. Yakalanmazsa
+     * Escape'ten sonra React hala "acik" sanir, dugmeye basmak durumu
+     * degistirmez ve diyalog BIR DAHA ACILMAZ. Tarayicida gozlendi.
+     */
+    expect(dialog).toContain('addEventListener("close", handleClose)');
+    expect(dialog).toContain('removeEventListener("close", handleClose)');
+    expect(dialog).not.toMatch(/onClose=\{onClose\}/);
   });
 
   it("dugme KISILER blogunda, isimlerin yaninda durur", () => {
@@ -136,22 +146,23 @@ describe("akis icinden acilan rehber", () => {
     expect(button).toBeLessThan(payer);
   });
 
-  it("rehber kapaninca oneriler YENILENIR", () => {
+  it("acilma, close olayina BAGLI DEGILDIR", () => {
     /*
-     * Yeni kaydedilen kisi hemen "kayitli" olarak gorunmelidir; aksi halde
-     * kullanici ayni kisiyi ikinci kez kaydetmeye calisirdi.
+     * Tarayicida olculdu: bu ortamda programatik `close()` cagrisi `close`
+     * olayini HIC tetiklemiyor. Boolean bir `open` bayragi kullanilsaydi
+     * React "acik" sanip kalir, dugme olur ve diyalog bir daha acilmazdi.
+     * Sayac her tiklamada yeni bir deger uretir; efekt her seferinde calisir.
      */
-    /*
-     * Olcum KAPANIS ISLEYICISINE ozgu olmali: `reload` dosyanin baska bir
-     * yerinde de geciyor, bu yuzden yalnizca "gecıyor mu" demek bosluk birakir.
-     */
+    expect(dialog).toContain("openToken");
+    expect(dialog).toContain("openToken === 0");
+    expect(dialog).not.toMatch(/open:\s*boolean/);
+    expect(participants).toContain("setBookToken((token) => token + 1)");
+  });
+
+  it("kapanis YAKALANABILIRSE oneriler yenilenir", () => {
     const start = participants.indexOf("<SavedContactsDialog");
     expect(start).toBeGreaterThan(-1);
-    const handler = participants.slice(
-      start,
-      participants.indexOf("/>", start),
-    );
-    expect(handler).toContain("setBookOpen(false);");
-    expect(handler).toContain("recentContacts.reload();");
+    const element = participants.slice(start, participants.indexOf("/>", start));
+    expect(element).toContain("onClosed={() => recentContacts.reload()}");
   });
 });

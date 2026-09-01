@@ -79,7 +79,8 @@ export function ParticipantAssignment({
     }
   };
 
-  const [bookOpen, setBookOpen] = useState(false);
+  /* Her artış bir 'aç' isteğidir; boolean bir bayrak takılı kalabilirdi. */
+  const [bookToken, setBookToken] = useState(0);
   const [newName, setNewName] = useState("");
   const [addError, setAddError] = useState<ParticipantNameError | null>(null);
 
@@ -301,7 +302,7 @@ export function ParticipantAssignment({
           */}
           <button
             type="button"
-            onClick={() => setBookOpen(true)}
+            onClick={() => setBookToken((token) => token + 1)}
             className="self-start rounded-full px-2 py-1 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             {t("contacts.openBook")}
@@ -310,11 +311,8 @@ export function ParticipantAssignment({
       </div>
 
       <SavedContactsDialog
-        open={bookOpen}
-        onClose={() => {
-          setBookOpen(false);
-          recentContacts.reload();
-        }}
+        openToken={bookToken}
+        onClosed={() => recentContacts.reload()}
       />
 
       {/* --- Ödeyen --- */}
