@@ -43,11 +43,13 @@ const COMPONENT_FILES = [
   "src/components/SharedBillDebtorView.tsx",
   "src/components/SharedBillPaymentPanel.tsx",
   "src/components/ThemeToggle.tsx",
+  "src/components/SiteFooter.tsx",
   "src/components/WalletConnectPanel.tsx",
   "src/app/page.tsx",
   "src/app/pay/page.tsx",
   "src/app/pay/[billId]/page.tsx",
   "src/app/layout.tsx",
+  "src/app/privacy/page.tsx",
 ];
 
 /** Yorumları ve JSX ifadelerini çıkarır; geriye SABİT metin kalır. */

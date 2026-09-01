@@ -80,6 +80,60 @@ npm run dev
 
 Uygulama `http://localhost:3000` adresinde açılır.
 
+## Gizlilik politikası ve Play Console veri güvenliği
+
+Politika `/privacy` adresindedir, tek adres iki dil (uygulamanın geri kalanı
+gibi dil yol ön eki yoktur). Play Console'a verilecek adres budur. Metnin
+kendisi `src/lib/legal/privacy.ts` içindedir; sayfa yalnızca onu çizer.
+
+Metin **kaynak kodun denetiminden** çıkarılmıştır. Süreler koddaki sabitlerden
+türetilir ve `privacy.test.ts` şunları zorlar: kaynakta geçen her dış alan
+adı politikada bildirilmiş olmalıdır, süreler sabitlerin karşılığı olmalıdır,
+ve iki dil aynı belgeyi anlatmalıdır. Yeni bir servise bağlanan kod,
+politikayı güncellemeden testlerden geçemez.
+
+### Denetimin iki dürüst sonucu
+
+- **Süresi dolan ortak hesap kayıtları SİLİNMEZ.** Süre dolunca hesap açılamaz
+  ve ödenemez, ama satır veritabanında kalır — kodda `shared_bills` için
+  hiçbir silme yolu yoktur. Nonce'lar, oturumlar, teklifler ve denemeler ise
+  süresi dolunca gerçekten silinir. Sürenin kendisi koddaki sabitten türetilir
+  ve politikada yazar; burada tekrarlanmaz.
+- **Zincire yazılan hiçbir şey geri alınamaz.** Silme hakkı oraya ulaşmaz;
+  politika bunu yumuşatmadan söyler.
+
+### Veri güvenliği formu eşlemesi
+
+Faz 5'te Play Console formu doldurulurken kullanılacak karşılıklar. "Paylaşım"
+Play'in tanımıdır: veri cihazdan çıkıp üçüncü bir tarafa ulaşıyorsa paylaşım
+sayılır.
+
+| Play veri türü | Toplanır | Paylaşılır | Geçici mi | Zorunlu mu | Amaç |
+| --- | --- | --- | --- | --- | --- |
+| Kişisel bilgi → E-posta adresi | Evet | Hayır | Hayır | Google girişi seçilirse | Hesap yönetimi |
+| Kişisel bilgi → Ad | Evet | Hayır | Hayır | Google girişi seçilirse | Hesap yönetimi |
+| Fotoğraf ve video → Fotoğraflar | Evet | **Evet (OpenAI)** | **Evet** | Fiş yüklenirse | Uygulama işlevi |
+| Finansal bilgi → Diğer finansal bilgi (cüzdan adresi, borç tutarı) | Evet | **Evet (herkese açık blok zinciri)** | Hayır | Evet | Uygulama işlevi |
+| Uygulama etkinliği | Hayır | — | — | — | İzleme yoktur |
+| Cihaz veya diğer kimlikler | Hayır | — | — | — | Reklam kimliği kullanılmaz |
+| Kilitlenme kayıtları / tanılama | Hayır | — | — | — | Toplanmaz |
+
+En sık yanlış işaretlenen iki satır kalın olanlardır: **fiş fotoğrafı OpenAI'ye
+gider**, yani "paylaşılır"; ve **cüzdan adresleriyle işlemler herkese açık bir
+zincire yazılır**, yani orası da bir paylaşımdır.
+
+Güvenlik uygulamaları bölümü:
+
+| Soru | Cevap |
+| --- | --- |
+| Veri aktarım sırasında şifreleniyor mu | Evet (HTTPS/TLS) |
+| Kullanıcı silme talep edebiliyor mu | Evet, politikadaki adrese yazarak |
+| Bağımsız güvenlik incelemesinden geçti mi | Hayır |
+
+Google girişi yalnızca hesap **oluşturan** akış için gerekir. Bağlantıyla gelen
+borçlu, Google hesabı olmadan yalnızca cüzdan imzasıyla kendi borcunu görür ve
+öder; o akışta e-posta ve ad hiç toplanmaz.
+
 ## Google kimlik doğrulama temeli
 
 Ana creator arayüzü oturum açmadan görüntülenebilir. Aşağıdaki pahalı/yazıcı
