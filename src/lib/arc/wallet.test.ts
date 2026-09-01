@@ -549,3 +549,83 @@ describe("Arc Testnet'e geçiş", () => {
     });
   });
 });
+
+/**
+ * SESSİZ BAŞARISIZLIK.
+ *
+ * Faz 2'nin bütün konusu bu: cüzdan "tamam" deyip ağı değiştirmiyor. Eskiden
+ * bu durum başarı sayılıyordu, kullanıcı hiçbir mesaj görmeden aynı düğmeye
+ * basıp duruyordu. Artık ayrı bir kodla raporlanır.
+ */
+describe("cüzdan kabul edip ağı DEĞİŞTİRMEZSE", () => {
+  it("başarı sayılmaz, ayrı bir kodla bildirilir", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider({
+      // İstek çözülüyor ama zincir olduğu yerde kalıyor.
+      onChainId: () => "0x1",
+    });
+
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "switchIgnored",
+    });
+    // Cüzdan hata atmadığı için ağ EKLEME yolu tetiklenmez.
+    expect(rec.methods()).not.toContain("wallet_addEthereumChain");
+  });
+
+  it("ağ eklendikten SONRA da yakalanır", async () => {
+    let attempts = 0;
+    const { mod, rec, uuid } = await withSwitchProvider({
+      onSwitch: () => {
+        attempts += 1;
+        if (attempts === 1) throw providerError(4902);
+        return null;
+      },
+      onChainId: () => "0x1",
+    });
+
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "switchIgnored",
+    });
+    expect(rec.methods()).toContain("wallet_addEthereumChain");
+  });
+
+  it("zincir OKUNAMAZSA geçildi denmez", async () => {
+    // Doğrulanamayan bir geçiş, başarısı varsayılan bir geçişten iyidir.
+    const { mod, uuid } = await withSwitchProvider({
+      onChainId: () => {
+        throw new Error("kopuk");
+      },
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "requestFailed",
+    });
+  });
+
+  it("zincir ANLAMSIZ dönerse de geçildi denmez", async () => {
+    const { mod, uuid } = await withSwitchProvider({
+      onChainId: () => "0x4cef52junk",
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: false,
+      code: "requestFailed",
+    });
+  });
+
+  it("zincir ondalık dizeyle dönse bile doğru okunur", async () => {
+    const { mod, uuid } = await withSwitchProvider({
+      onChainId: () => "5042002",
+    });
+    await expect(mod.switchToArcTestnet(uuid)).resolves.toEqual({
+      ok: true,
+      value: true,
+    });
+  });
+
+  it("doğrulama zinciri HER ZAMAN yeniden okur", async () => {
+    const { mod, rec, uuid } = await withSwitchProvider();
+    await mod.switchToArcTestnet(uuid);
+    expect(rec.methods()).toContain("eth_chainId");
+  });
+});
