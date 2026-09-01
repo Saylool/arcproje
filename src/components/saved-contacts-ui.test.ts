@@ -28,6 +28,11 @@ const participants = readFileSync(
   "utf8",
 );
 
+/** YORUMSUZ diyalog kaynagi: aciklamada gecen bir sinif adi kanit sayilmaz. */
+const dialogCode = dialog
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+
 const code = panel
   .replace(/\/\*[\s\S]*?\*\//g, "")
   .replace(/^\s*\/\/.*$/gm, "")
@@ -144,8 +149,8 @@ describe("akis icinden acilan rehber", () => {
   });
 
   it("diyalog ORTALANIR", () => {
-    // `m-auto` olmadan yerli <dialog> sola yaslanir.
-    expect(dialog).toContain("m-auto");
+    // `m-auto` olmadan yerli <dialog> sola yaslanir. Aciklama degil, SINIF.
+    expect(dialogCode).toContain("m-auto");
   });
 
   it("yerli <dialog> kullanilir: Escape ve odak tuzagi bedavaya gelir", () => {

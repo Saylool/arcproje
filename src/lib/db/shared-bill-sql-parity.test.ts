@@ -224,9 +224,16 @@ describe("kayitli kisi SQL'i", () => {
      * goremez; kural SORGUDA olculur.
      */
     for (const name of ["DELETE_SAVED_CONTACT", "DELETE_ALL_SAVED_CONTACTS"]) {
-      const start = neon.indexOf(`const ${name}`);
+      /*
+       * SORGU METNI ayrilir: `const` ile ilk backtick arasindaki her sey ve
+       * ustundeki aciklama DISARIDA kalir. Yoksa "RETURNING" kelimesi yorumda
+       * gectigi icin test, sorgudan silinse bile YESIL kalirdi.
+       */
+      const declaration = `const ${name} = \``;
+      const start = neon.indexOf(declaration);
       expect(start, name).toBeGreaterThan(-1);
-      const query = neon.slice(start, neon.indexOf("`;", start));
+      const bodyStart = start + declaration.length;
+      const query = neon.slice(bodyStart, neon.indexOf("`;", bodyStart));
       expect(query, name).toContain("RETURNING contact_id");
     }
   });
@@ -239,9 +246,11 @@ describe("kayitli kisi SQL'i", () => {
       "DELETE_SAVED_CONTACT",
       "DELETE_ALL_SAVED_CONTACTS",
     ]) {
-      const start = neon.indexOf(`const ${name}`);
+      const declaration = `const ${name} = \``;
+      const start = neon.indexOf(declaration);
       expect(start, name).toBeGreaterThan(-1);
-      const query = neon.slice(start, neon.indexOf("`;", start));
+      const bodyStart = start + declaration.length;
+      const query = neon.slice(bodyStart, neon.indexOf("`;", bodyStart));
       expect(query, name).toMatch(/user_id/);
     }
   });
