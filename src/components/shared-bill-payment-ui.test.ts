@@ -102,7 +102,7 @@ describe("ÖDENDİ etiketi yalnızca SUNUCU onayından sonra", () => {
   it("'paid' YALNIZCA mutabakat 'confirmed' dediğinde yazılır", () => {
     const loop = panel.slice(panel.indexOf("const reconcile = useCallback"));
     const confirmed = loop.indexOf('report.state === "confirmed"');
-    const paid = loop.indexOf('status: "paid"');
+    const paid = loop.indexOf("markPaid(");
     expect(confirmed).toBeGreaterThan(-1);
     expect(paid).toBeGreaterThan(confirmed);
     /*
@@ -212,5 +212,60 @@ describe("özellik bayrağı", () => {
      * yol da derlenir ve test edilir.
      */
     expect(SHARED_BILL_FLOW_ENABLED).toBe(true);
+  });
+});
+
+/* --------------------------------------------------------------------- */
+/* AÇILIŞTA KURTARMA                                                       */
+/* --------------------------------------------------------------------- */
+
+/**
+ * Ödeme iki parçadır: transfer zincire yazılır, sonra sunucuya haber verilir.
+ * İkincisi TARAYICIDA çalışır ve mobilde cüzdana geçilince sayfa bellekten
+ * atılabilir — para gitmiş ama kayıt düşmemiş olur.
+ *
+ * Buradaki testler açılış kurtarmasının yerinde durduğunu sabitler. Kaynak
+ * düzeyinde ölçülür çünkü depoda bileşen testi altyapısı yoktur.
+ */
+describe("sayfa yeniden yüklenince ödeme kaydı KURTARILIR", () => {
+  const panel = readFileSync("src/components/SharedBillPaymentPanel.tsx", "utf8");
+
+  it("açılışta sunucudaki durum okunur", () => {
+    expect(panel).toContain("readPaymentStatus(billId)");
+    expect(panel).toContain("readPaymentStatusReport(response.value)");
+    expect(panel).toContain("decidePaymentResume(status)");
+  });
+
+  it("karar bileşende değil, ORTAK ve saf işlevde verilir", () => {
+    // Aksi hâlde React'e bağlı, ölçülemeyen bir dal olurdu.
+    expect(panel).not.toMatch(/debtStatus\s*===\s*["']paid["']/);
+  });
+
+  it("zincire yazılmış deneme için mutabakat SÜRDÜRÜLÜR", () => {
+    expect(panel).toContain("await reconcile(resume.attemptId, resume.txHash)");
+  });
+
+  it("ÖDENDİ tek kapıdan geçer ve o kapı SUNUCU kararına bağlıdır", () => {
+    /*
+     * İki yol da `markPaid` üzerinden geçer: mutabakat makbuzu doğruladığında
+     * ve sunucu açılışta zaten ödendiğini bildirdiğinde. İstemci kendi başına
+     * "ödendi" diyemez.
+     */
+    expect(panel).toContain("const markPaid = useCallback(");
+    expect(panel).toContain('if (resume.kind === "paid") {');
+    expect(panel).toContain("markPaid(resume.txHash, resume.explorerUrl)");
+  });
+
+  it("SÜREN bir ödemenin üstüne yazılmaz", () => {
+    /*
+     * Kullanıcı bu sırada yeni bir ödemeye başladıysa onun akışı bozulmamalı;
+     * kurtarma yalnızca boştayken devreye girer.
+     */
+    expect(panel).toContain('idle = current.status === "idle"');
+    expect(panel).toContain("if (!idle) {");
+  });
+
+  it("bileşen sökülmüşse durum yazılmaz", () => {
+    expect(panel).toContain("if (cancelled || !alive.current || !response.ok)");
   });
 });

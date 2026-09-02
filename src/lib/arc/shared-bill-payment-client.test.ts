@@ -4,7 +4,9 @@ import { convertTryMinorBigIntToMicroUsdc } from "./conversion";
 import { ACTIVE_NETWORK_PROFILE } from "./profile";
 import type { ArcPaymentSnapshot, ArcSendErrorCode } from "./send";
 import {
+  decidePaymentResume,
   outcomeForSendFailure,
+  readPaymentStatusReport,
   verifyClaimedSnapshot,
   verifyPaymentOffer,
   type VerifiedOffer,
@@ -348,5 +350,127 @@ describe("gönderim sonucu KATI sonuca çevrilir", () => {
     ] as ArcSendErrorCode[]) {
       expect(outcomeForSendFailure(code, null).outcome).toBe("preflightFailed");
     }
+  });
+});
+
+/* --------------------------------------------------------------------- */
+/* AÇILIŞTA KURTARMA                                                       */
+/* --------------------------------------------------------------------- */
+
+/**
+ * Transfer zincire yazıldıktan sonra sunucuya haber verme işi tarayıcıda
+ * çalışıyor. Mobilde cüzdana geçilince Android sayfayı bellekten atabiliyor;
+ * dönüşte sayfa sıfırdan yükleniyor ve haber verme hiç tamamlanmıyor —
+ * PARA GİTMİŞ ama KAYIT DÜŞMEMİŞ oluyor.
+ *
+ * Buradaki testler, açılışta sunucudan okunan duruma bakıp doğru kararın
+ * verildiğini sabitler.
+ */
+const TX = `0x${"ab".repeat(32)}`;
+
+function statusPayload(over: Record<string, unknown> = {}) {
+  return {
+    billId: `0x${"cd".repeat(32)}`,
+    debtor: "0x1111111111111111111111111111111111111111",
+    debtStatus: "unpaid",
+    attemptId: "attempt-1",
+    attemptStatus: "broadcast",
+    txHash: TX,
+    explorerUrl: `https://testnet.arcscan.app/tx/${TX}`,
+    requiredConfirmations: 1,
+    ...over,
+  };
+}
+
+describe("sunucu durumunun okunması", () => {
+  it("geçerli yanıt okunur", () => {
+    const view = readPaymentStatusReport(statusPayload());
+    expect(view).not.toBeNull();
+    expect(view!.debtStatus).toBe("unpaid");
+    expect(view!.attemptId).toBe("attempt-1");
+    expect(view!.txHash).toBe(TX);
+  });
+
+  it("borç durumu YOKSA yanıt kullanılmaz", () => {
+    // Bu alan olmadan hiçbir karar verilemez; tahmin edilmez.
+    const rest: Record<string, unknown> = statusPayload();
+    delete rest.debtStatus;
+    expect(readPaymentStatusReport(rest)).toBeNull();
+  });
+
+  it("nesne olmayan yanıtlar reddedilir", () => {
+    for (const bad of [null, undefined, 42, "paid", []]) {
+      expect(readPaymentStatusReport(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("BOŞ dizeler yok sayılır: yanlışlıkla kimlik sanılmaz", () => {
+    const view = readPaymentStatusReport(
+      statusPayload({ attemptId: "", txHash: "" }),
+    );
+    expect(view!.attemptId).toBeNull();
+    expect(view!.txHash).toBeNull();
+  });
+
+  it("string olmayan alanlar null olur", () => {
+    const view = readPaymentStatusReport(
+      statusPayload({ attemptId: 7, explorerUrl: { evil: true } }),
+    );
+    expect(view!.attemptId).toBeNull();
+    expect(view!.explorerUrl).toBeNull();
+  });
+});
+
+describe("açılışta ne yapılacağı", () => {
+  const view = (over: Record<string, unknown> = {}) =>
+    readPaymentStatusReport(statusPayload(over))!;
+
+  it("sunucu ÖDENDİ diyorsa mutabakat başlatılmaz", () => {
+    // Tamamlanmış bir ödeme için yeniden yoklama yapmak gereksiz yük olurdu.
+    const decision = decidePaymentResume(view({ debtStatus: "paid" }));
+    expect(decision).toEqual({
+      kind: "paid",
+      txHash: TX,
+      explorerUrl: `https://testnet.arcscan.app/tx/${TX}`,
+    });
+  });
+
+  it("ÖDENDİ bilgisi bekleyen denemeyi BASTIRIR", () => {
+    const decision = decidePaymentResume(
+      view({ debtStatus: "paid", attemptStatus: "broadcast" }),
+    );
+    expect(decision.kind).toBe("paid");
+  });
+
+  it("zincire yazılmış ama doğrulanmamışsa mutabakat SÜRDÜRÜLÜR", () => {
+    // Kaybolan tam olarak bu durum: para gitmiş, kayıt düşmemiş.
+    expect(decidePaymentResume(view())).toEqual({
+      kind: "reconcile",
+      attemptId: "attempt-1",
+      txHash: TX,
+    });
+  });
+
+  it("rezerve edilmiş borçta da sürdürülür", () => {
+    expect(decidePaymentResume(view({ debtStatus: "reserved" })).kind).toBe(
+      "reconcile",
+    );
+  });
+
+  it("işlem hash'i YOKSA hiçbir şey yapılmaz", () => {
+    // Hash yoksa zincire yazılan bir şey yoktur; yoklanacak işlem de yoktur.
+    expect(decidePaymentResume(view({ txHash: null })).kind).toBe("none");
+  });
+
+  it("deneme kimliği YOKSA hiçbir şey yapılmaz", () => {
+    expect(decidePaymentResume(view({ attemptId: null })).kind).toBe("none");
+  });
+
+  it("hiç deneme yoksa hiçbir şey yapılmaz", () => {
+    expect(
+      decidePaymentResume(
+        view({ attemptId: null, attemptStatus: null, txHash: null }),
+      ).kind,
+    ).toBe("none");
   });
 });
