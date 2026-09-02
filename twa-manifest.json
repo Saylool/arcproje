@@ -1,6 +1,6 @@
 {
-  "packageId": "invalid.example.twa",
-  "host": "example.invalid",
+  "packageId": "app.hesabibol.twa",
+  "host": "arcproje-seven.vercel.app",
   "name": "Hesabı Böl",
   "launcherName": "Hesabı Böl",
   "display": "standalone",
@@ -14,10 +14,10 @@
   "backgroundColor": "#ffffff",
   "enableNotifications": false,
   "startUrl": "/",
-  "iconUrl": "https://example.invalid/icon-512.png",
-  "maskableIconUrl": "https://example.invalid/icon-512.png",
-  "webManifestUrl": "https://example.invalid/manifest.webmanifest",
-  "fullScopeUrl": "https://example.invalid/",
+  "iconUrl": "https://arcproje-seven.vercel.app/icon-512.png",
+  "maskableIconUrl": "https://arcproje-seven.vercel.app/icon-512.png",
+  "webManifestUrl": "https://arcproje-seven.vercel.app/manifest.webmanifest",
+  "fullScopeUrl": "https://arcproje-seven.vercel.app/",
   "splashScreenFadeOutDuration": 300,
   "signingKey": {
     "path": "./android.keystore",
