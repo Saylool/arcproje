@@ -53,7 +53,9 @@ function sessionNamed(metadata: Record<string, unknown> | undefined) {
   } as WalletConnectSession;
 }
 
-function fakeProvider(options: { emitUri?: boolean } = {}) {
+function fakeProvider(
+  options: { emitUri?: boolean; storedSession?: WalletConnectSession } = {},
+) {
   const listeners = new Map<string, Listener[]>();
   let settle: {
     resolve: (value: WalletConnectSession | undefined) => void;
@@ -104,6 +106,7 @@ function fakeProvider(options: { emitUri?: boolean } = {}) {
     setDefaultChain(chain) {
       state.defaultChain = chain;
     },
+    session: options.storedSession,
     on(event, listener) {
       listeners.set(event, [...(listeners.get(event) ?? []), listener]);
     },
@@ -591,5 +594,114 @@ describe("bağlanma akışı", () => {
       ok: false,
       code: "requestFailed",
     });
+  });
+});
+
+
+/* --------------------------------------------------------------------- */
+/* SAKLI OTURUMUN GERİ YÜKLENMESİ                                          */
+/* --------------------------------------------------------------------- */
+
+/**
+ * WalletConnect oturumları kalıcıdır. Geri yüklemezsek kullanıcı uygulamayı
+ * her açtığında yeniden bağlanmak zorunda kalır: karekod, cüzdana gidiş,
+ * geri dönüş. Oysa cüzdan zaten bağlıdır.
+ */
+describe("saklı oturum", () => {
+  it("projectId yoksa geri yükleme DENENMEZ", async () => {
+    const { wc } = await freshModules(undefined);
+    await expect(wc.restoreWalletConnect()).resolves.toBeNull();
+  });
+
+  it("saklı oturum yoksa null döner: bu bir HATA değildir", async () => {
+    const { wc } = await freshModules("proje-1");
+    const fake = fakeProvider();
+    await expect(
+      wc.restoreWalletConnect({ createProvider: async () => fake.provider }),
+    ).resolves.toBeNull();
+  });
+
+  it("saklı oturum CÜZDANA GİTMEDEN geri yüklenir", async () => {
+    const { wc, wallet } = await freshModules("proje-1");
+    const fake = fakeProvider({ storedSession: session([ARC_ACCOUNT]) });
+
+    const restored = await wc.restoreWalletConnect({
+      createProvider: async () => fake.provider,
+    });
+
+    expect(restored).toEqual({
+      ok: true,
+      value: {
+        uuid: wallet.WALLETCONNECT_UUID,
+        name: "Test Cüzdanı",
+        rdns: "",
+        icon: null,
+      },
+    });
+    // ASIL MESELE: yeni eşleşme kurulmaz, karekod çıkmaz, cüzdan açılmaz.
+    expect(fake.state.connectParams).toBeNull();
+  });
+
+  it("geri yüklenen oturum kayıt defterine yazılır", async () => {
+    const { wc, wallet } = await freshModules("proje-1");
+    const fake = fakeProvider({ storedSession: session([ARC_ACCOUNT]) });
+    fake.state.result = "0x4cef52";
+
+    await wc.restoreWalletConnect({ createProvider: async () => fake.provider });
+
+    await expect(wallet.getChainId(wallet.WALLETCONNECT_UUID)).resolves.toEqual({
+      ok: true,
+      value: ARC_TESTNET_CHAIN_ID,
+    });
+  });
+
+  it("Arc onaylıysa varsayılan zincir Arc yapılır", async () => {
+    const { wc } = await freshModules("proje-1");
+    const fake = fakeProvider({
+      storedSession: session([MAINNET_ACCOUNT, ARC_ACCOUNT]),
+    });
+    await wc.restoreWalletConnect({ createProvider: async () => fake.provider });
+    expect(fake.state.defaultChain).toBe(ARC_CAIP_CHAIN);
+  });
+
+  it("HESAPSIZ oturum geri yüklenmez", async () => {
+    /*
+     * Kullanıcı cüzdan tarafında bağlantıyı kesmiş olabilir. Bağlıymış gibi
+     * göstermek, ilk imzada anlaşılmaz bir hataya dönüşürdü.
+     */
+    const { wc, wallet } = await freshModules("proje-1");
+    const fake = fakeProvider({ storedSession: session([]) });
+
+    await expect(
+      wc.restoreWalletConnect({ createProvider: async () => fake.provider }),
+    ).resolves.toBeNull();
+    await expect(
+      wallet.withProvider(wallet.WALLETCONNECT_UUID, async () => "ulaştı"),
+    ).resolves.toEqual({ ok: false, code: "noProvider" });
+  });
+
+  it("provider hiç kurulamazsa sessizce vazgeçilir", async () => {
+    // Geri yükleme bir kolaylıktır; başarısızlığı kullanıcıya hata olarak
+    // gösterilmez, normal bağlanma düğmesi zaten duruyor.
+    const { wc } = await freshModules("proje-1");
+    await expect(
+      wc.restoreWalletConnect({
+        createProvider: async () => {
+          throw new Error("röleye ulaşılamadı");
+        },
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("geri yüklenen oturum kopunca kayıt SİLİNİR", async () => {
+    const { wc, wallet } = await freshModules("proje-1");
+    const fake = fakeProvider({ storedSession: session([ARC_ACCOUNT]) });
+    await wc.restoreWalletConnect({ createProvider: async () => fake.provider });
+
+    fake.emit("session_delete", {});
+
+    await expect(
+      wallet.withProvider(wallet.WALLETCONNECT_UUID, async () => "ulaştı"),
+    ).resolves.toEqual({ ok: false, code: "noProvider" });
   });
 });

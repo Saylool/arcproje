@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { renderSVG } from "uqr";
 
 import type { WalletInfo } from "@/lib/arc/wallet";
@@ -8,6 +8,7 @@ import {
   beginWalletConnect,
   buildWalletDeepLink,
   isWalletConnectConfigured,
+  restoreWalletConnect,
   type WalletConnectHandle,
 } from "@/lib/arc/walletconnect";
 import { useLocale, useTranslator } from "@/lib/i18n/context";
@@ -42,6 +43,42 @@ export function WalletConnectPanel({
   const [stage, setStage] = useState<Stage>({ status: "idle" });
   /** Vazgeçilen bir girişimin geç gelen sonucu ekrana YAZILMAZ. */
   const activeHandle = useRef<WalletConnectHandle | null>(null);
+
+  /*
+   * Efekt YALNIZCA bir kez çalışsın diye en güncel değerler ref'te tutulur.
+   * `onConnected` her çizimde yeniden yaratıldığı için bağımlılık listesine
+   * konsaydı efekt sonsuza kadar tekrar çalışırdı.
+   */
+  const latest = useRef({ onConnected, locale });
+  useEffect(() => {
+    latest.current = { onConnected, locale };
+  });
+
+  /*
+   * SAKLI OTURUMU GERİ YÜKLE.
+   *
+   * WalletConnect oturumları kalıcıdır. Bunu kullanmazsak kullanıcı uygulamayı
+   * her açtığında yeniden bağlanmak zorunda kalır — karekod, cüzdana gidiş,
+   * geri dönüş. Oysa cüzdan zaten bağlı; sadece hatırlanması yeterli.
+   *
+   * Geri yüklenecek bir şey yoksa hiçbir şey olmaz ve kullanıcı normal
+   * bağlanma düğmesini görür.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const restored = await restoreWalletConnect({
+        locale: latest.current.locale,
+      });
+      if (cancelled || restored === null || !restored.ok) {
+        return;
+      }
+      await latest.current.onConnected(restored.value);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const qrSvg = useMemo(
     () => (stage.status === "pairing" ? renderSVG(stage.handle.uri) : null),

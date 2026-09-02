@@ -344,6 +344,75 @@ export type WalletConnectHandle = {
 
 let activeProvider: WalletConnectProvider | null = null;
 
+/**
+ * Kurulmuş bir oturumu UYGULAMAYA BAĞLAR.
+ *
+ * İki yol buraya çıkar: cüzdan yeni bir oturumu onayladığında ve sayfa
+ * yeniden yüklenip SAKLI oturum geri yüklendiğinde. Tek yerde durması,
+ * geri yüklenen bir oturumun yeni onaylanmış olandan farklı davranmasını
+ * imkânsız kılar.
+ */
+function adoptSession(
+  provider: WalletConnectProvider,
+  session: WalletConnectSession | undefined,
+  locale: Locale,
+): WalletResult<WalletInfo> {
+  const defaultChain = pickDefaultChainId(session);
+  if (defaultChain === null) {
+    return { ok: false, code: "noAccount" };
+  }
+  provider.setDefaultChain(`eip155:${defaultChain}`);
+
+  registerWalletConnectProvider(createSessionAdapter(provider, session));
+  activeProvider = provider;
+  // Oturum kopunca uuid hiçbir provider'a çözülmemeli.
+  provider.on("disconnect", forgetWalletConnectProvider);
+  provider.on("session_delete", forgetWalletConnectProvider);
+
+  return { ok: true, value: sessionWalletInfo(session, locale) };
+}
+
+/**
+ * SAKLI oturumu geri yükler — karekod göstermeden, cüzdana gitmeden.
+ *
+ * WalletConnect oturumları kalıcıdır: bir kez onaylandıktan sonra kütüphane
+ * onu saklar ve sonraki açılışlarda geri getirir. Bunu kullanmazsak kullanıcı
+ * uygulamayı her açtığında yeniden bağlanmak zorunda kalır ve gereksiz bir kez
+ * daha cüzdana gidip gelir.
+ *
+ * Geri yüklenecek bir şey yoksa `null` döner — bu bir HATA DEĞİLDİR, sadece
+ * "önceki oturum yok" demektir; çağıran taraf normal bağlanma akışını sunar.
+ */
+export async function restoreWalletConnect(deps?: {
+  createProvider?: WalletConnectFactory;
+  locale?: Locale;
+}): Promise<WalletResult<WalletInfo> | null> {
+  const projectId = normalizeProjectId(CONFIGURED_PROJECT_ID);
+  if (projectId === null) {
+    return null;
+  }
+
+  let provider: WalletConnectProvider;
+  try {
+    provider = await (deps?.createProvider ?? defaultProviderFactory)(projectId);
+  } catch {
+    return null;
+  }
+
+  /*
+   * Tek denetim iki durumu birden kapsar: hiç saklı oturum olmaması ve
+   * hesabı kalmamış bir oturum olması. İkincisi kullanıcının cüzdan tarafında
+   * bağlantıyı kesmesiyle olur; bağlıymış gibi göstermek onu ilk imzada
+   * anlaşılmaz bir hataya götürürdü.
+   */
+  const session = provider.session;
+  if (pickDefaultChainId(session) === null) {
+    return null;
+  }
+
+  return adoptSession(provider, session, deps?.locale ?? DEFAULT_LOCALE);
+}
+
 /** Gerçek kütüphane YALNIZCA burada yüklenir. */
 const defaultProviderFactory: WalletConnectFactory = async (projectId) => {
   const { UniversalProvider } = await import("@walletconnect/universal-provider");
@@ -395,20 +464,7 @@ export async function beginWalletConnect(deps?: {
     .connect({ optionalNamespaces: buildOptionalNamespaces() })
     .then((session) => {
       provider.removeListener("display_uri", onDisplayUri);
-      const settled = session ?? provider.session;
-      const defaultChain = pickDefaultChainId(settled);
-      if (defaultChain === null) {
-        return { ok: false as const, code: "noAccount" as const };
-      }
-      provider.setDefaultChain(`eip155:${defaultChain}`);
-
-      registerWalletConnectProvider(createSessionAdapter(provider, settled));
-      activeProvider = provider;
-      // Oturum kopunca uuid hiçbir provider'a çözülmemeli.
-      provider.on("disconnect", forgetWalletConnectProvider);
-      provider.on("session_delete", forgetWalletConnectProvider);
-
-      return { ok: true as const, value: sessionWalletInfo(settled, locale) };
+      return adoptSession(provider, session ?? provider.session, locale);
     })
     .catch((error: unknown) => {
       provider.removeListener("display_uri", onDisplayUri);

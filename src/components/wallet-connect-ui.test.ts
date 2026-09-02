@@ -138,3 +138,38 @@ describe("kütüphane sınırı", () => {
     expect(send).toContain("withProvider(walletUuid,");
   });
 });
+
+/**
+ * SAKLI OTURUM.
+ *
+ * Cüzdan bir kez bağlandıktan sonra uygulama her açıldığında yeniden
+ * bağlanmak zorunda kalmamalı: karekod, cüzdana gidiş ve geri dönüş
+ * kullanıcıya yüklenen üç adımdır ve gereksizdir.
+ */
+describe("uygulama açılışında cüzdan hatırlanır", () => {
+  const source = withoutComments(read("src/components/WalletConnectPanel.tsx"));
+
+  it("açılışta saklı oturum denenir", () => {
+    expect(source).toContain("await restoreWalletConnect({");
+  });
+
+  it("geri yüklenen oturum NORMAL bağlanma akışına devredilir", () => {
+    // Aynı `onConnected` yolu: geri yüklenen oturum yeni bağlanandan farklı
+    // davranmaz.
+    expect(source).toContain("await latest.current.onConnected(restored.value)");
+  });
+
+  it("geri yüklenecek bir şey yoksa sessizce geçilir", () => {
+    // `null` bir hata değildir; kullanıcı normal bağlan düğmesini görür.
+    expect(source).toContain("restored === null || !restored.ok");
+  });
+
+  it("efekt bir kez çalışır: sonsuz döngü kurulmaz", () => {
+    /*
+     * `onConnected` her çizimde yeniden yaratılıyor; bağımlılık listesine
+     * konsaydı efekt kendini tetikleyip durur, uygulama kilitlenirdi.
+     */
+    expect(source).toMatch(/const latest = useRef\(\{ onConnected, locale \}\)/);
+    expect(source).toMatch(/\}, \[\]\);/);
+  });
+});
