@@ -553,6 +553,28 @@ Dağıtımda şu sunucu ortam değişkenleri tanımlanmalıdır:
 Hepsi `NEXT_PUBLIC_` olmadan, yalnızca sunucu tarafı değişken olarak eklenir.
 Mobil cüzdan bağlantısı isteniyorsa ayrıca `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID`
 tanımlanır; bu tek değişken bilinçli olarak istemci paketine girer.
+
+### `NEXT_PUBLIC_` bir değişken eklendikten sonra
+
+Bu değişkenler **derleme anında** koda gömülür, çalışma anında okunmaz.
+Vercel'e ekleyip kaydetmek tek başına hiçbir şey değiştirmez: yeni bir
+**derleme** gerekir.
+
+Boş bir commit itmek bunun için yeterli OLMAYABİLİR — kaynak ağacı birebir
+aynı kaldığında Vercel önceki derleme çıktısını yeniden kullanabilir ve
+değişken yine pakete girmez. Güvenilir iki yol:
+
+- Vercel panelinde **Redeploy**, ve **"Use existing Build Cache" işaretini
+  kaldırarak**;
+- ya da kaynağı gerçekten değiştiren bir commit itmek.
+
+Değerin pakete girip girmediği doğrudan ölçülebilir: derlemeden sonra
+istemci paketinde değişkenin ADI kalmamalıdır. Kaldıysa yerine koyma
+olmamış demektir.
+
+```bash
+grep -rl "env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" .next/static
+```
 Neon veritabanı **bu bölümde sağlanmadı**; Marketplace kurulumu, geçişin
 uygulanması ve `DATABASE_URL`'in tanımlanması ayrı bir adımdır.
 
