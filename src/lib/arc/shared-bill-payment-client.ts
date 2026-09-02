@@ -597,6 +597,68 @@ const FINALIZE_STATES: readonly FinalizeState[] = [
 ];
 
 /** Sunucu mutabakat yanıtını KATI biçimde çözer. */
+/**
+ * SUNUCUDAKİ ödeme durumu — sayfa yeniden yüklendiğinde okunur.
+ *
+ * NEDEN GEREKLİ: transfer zincire yazıldıktan SONRA sunucuya haber verme işi
+ * tarayıcıda çalışıyor. Mobilde cüzdana geçince Android sayfayı bellekten
+ * atabiliyor; geri dönüldüğünde sayfa sıfırdan yükleniyor ve o haber verme
+ * hiç tamamlanmıyor. Sonuç: PARA GİTMİŞ ama kayıt DÜŞMEMİŞ oluyor.
+ *
+ * Bu yüzden açılışta sunucuya "benim bekleyen bir ödemem var mı" diye
+ * sorulur ve varsa mutabakat kaldığı yerden sürdürülür.
+ */
+export type PaymentStatusView = Readonly<{
+  debtStatus: string;
+  attemptId: string | null;
+  attemptStatus: string | null;
+  txHash: string | null;
+  explorerUrl: string | null;
+}>;
+
+export function readPaymentStatusReport(payload: unknown): PaymentStatusView | null {
+  if (typeof payload !== "object" || payload === null) {
+    return null;
+  }
+  const record = payload as Record<string, unknown>;
+  if (typeof record.debtStatus !== "string") {
+    return null;
+  }
+  const text = (value: unknown): string | null =>
+    typeof value === "string" && value !== "" ? value : null;
+  return Object.freeze({
+    debtStatus: record.debtStatus,
+    attemptId: text(record.attemptId),
+    attemptStatus: text(record.attemptStatus),
+    txHash: text(record.txHash),
+    explorerUrl: text(record.explorerUrl),
+  });
+}
+
+/** Açılışta ne yapılacağı. */
+export type PaymentResume =
+  | { kind: "none" }
+  /** Sunucu zaten ödendiğini biliyor; kullanıcıya öyle gösterilir. */
+  | { kind: "paid"; txHash: string | null; explorerUrl: string | null }
+  /** Zincire yazılmış ama sunucu doğrulamamış; mutabakat sürdürülür. */
+  | { kind: "reconcile"; attemptId: string; txHash: string };
+
+/**
+ * Sunucu durumundan açılış kararını türetir. SAF: ağ, React ve zaman yok.
+ *
+ * Sıralama önemli: ÖDENDİ bilgisi her şeyi bastırır. Aksi hâlde tamamlanmış
+ * bir ödeme için gereksiz yere yeniden mutabakat başlatılırdı.
+ */
+export function decidePaymentResume(status: PaymentStatusView): PaymentResume {
+  if (status.debtStatus === "paid") {
+    return { kind: "paid", txHash: status.txHash, explorerUrl: status.explorerUrl };
+  }
+  if (status.attemptId !== null && status.txHash !== null) {
+    return { kind: "reconcile", attemptId: status.attemptId, txHash: status.txHash };
+  }
+  return { kind: "none" };
+}
+
 export function readFinalizeReport(payload: unknown): FinalizeReportView | null {
   if (typeof payload !== "object" || payload === null) {
     return null;

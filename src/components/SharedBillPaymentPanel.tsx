@@ -14,7 +14,10 @@ import {
   RECONCILE_POLL_INTERVAL_MS,
   buildOfferSnapshot,
   claimPayment,
+  decidePaymentResume,
   finalizePayment,
+  readPaymentStatus,
+  readPaymentStatusReport,
   outcomeForSendFailure,
   readFinalizeReport,
   reportOutcome,
@@ -140,6 +143,21 @@ export function SharedBillPaymentPanel({
     if (alive.current) setPhase(next);
   }, []);
 
+  /**
+   * ÖDENDİ demenin TEK yeri.
+   *
+   * İki yol buraya çıkar: mutabakat makbuzu doğruladığında, ve sayfa yeniden
+   * yüklendiğinde sunucu zaten ödendiğini bildirdiğinde. İkisi de SUNUCU
+   * kaynaklıdır; istemci kendi başına "ödendi" diyemez. Tek kapı olması bunu
+   * kaynakta da denetlenebilir kılar.
+   */
+  const markPaid = useCallback(
+    (txHash: string | null, explorerUrl: string | null) => {
+      commit({ status: "paid", txHash, explorerUrl });
+    },
+    [commit],
+  );
+
   /*
    * -------------------------------------------------------------------------
    * 1) TAZE TEKLİF
@@ -224,12 +242,8 @@ export function SharedBillPaymentPanel({
         }
 
         if (report.state === "confirmed") {
-          // ÖDENDİ ancak BURADA söylenir: sunucu makbuzu doğruladı.
-          commit({
-            status: "paid",
-            txHash: report.txHash ?? txHash,
-            explorerUrl: report.explorerUrl ?? explorerUrl,
-          });
+          // Sunucu makbuzu doğruladı.
+          markPaid(report.txHash ?? txHash, report.explorerUrl ?? explorerUrl);
           return;
         }
         if (report.state === "reverted") {
@@ -277,8 +291,70 @@ export function SharedBillPaymentPanel({
         explorerUrl,
       });
     },
-    [billId, commit],
+    [billId, commit, markPaid],
   );
+
+  /*
+   * -------------------------------------------------------------------------
+   * AÇILIŞTA KURTARMA
+   * -------------------------------------------------------------------------
+   *
+   * Transfer zincire yazıldıktan sonra sunucuya haber verme işi tarayıcıda
+   * çalışır. Mobilde cüzdana geçildiğinde Android sayfayı bellekten ATABİLİR;
+   * geri dönüldüğünde sayfa sıfırdan yüklenir ve o haber verme hiç tamamlanmaz.
+   * Sonuç: PARA GİTMİŞ ama kayıt DÜŞMEMİŞ olur.
+   *
+   * Bu yüzden açılışta sunucuya durum sorulur. Ödendiği biliniyorsa öyle
+   * gösterilir; zincire yazılmış ama doğrulanmamış bir deneme varsa mutabakat
+   * KALDIĞI YERDEN sürdürülür.
+   *
+   * Yalnızca boştayken çalışır: kullanıcı bu sırada yeni bir ödemeye
+   * başladıysa onun akışı bozulmaz.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const response = await readPaymentStatus(billId);
+      if (cancelled || !alive.current || !response.ok) {
+        return;
+      }
+      const status = readPaymentStatusReport(response.value);
+      if (status === null) {
+        return;
+      }
+      const resume = decidePaymentResume(status);
+      if (resume.kind === "none") {
+        return;
+      }
+      /*
+       * SÜREN bir ödemenin üstüne yazılmaz: kullanıcı bu sırada yeni bir
+       * ödemeye başladıysa onun akışı bozulmamalı.
+       */
+      let idle = false;
+      setPhase((current) => {
+        idle = current.status === "idle";
+        return current;
+      });
+      if (!idle) {
+        return;
+      }
+
+      if (resume.kind === "paid") {
+        markPaid(resume.txHash, resume.explorerUrl);
+        return;
+      }
+      commit({
+        status: "confirming",
+        txHash: resume.txHash,
+        explorerUrl: buildArcExplorerTxUrl(resume.txHash),
+        note: messageKey("sharedPay.noteNetworkRetry"),
+      });
+      await reconcile(resume.attemptId, resume.txHash);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [billId, commit, markPaid, reconcile]);
 
   /** Sonucu sunucuya bildirir; "başarılı" İDDİA EDİLEMEZ. */
   const report = useCallback(
