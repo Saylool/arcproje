@@ -37,6 +37,8 @@ cp .env.example .env.local
 | `AUTH_GOOGLE_ID` | Google girişinde evet | Google OAuth Web client ID. **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_SECRET` | Google girişinde evet | Google OAuth Web client secret. **Yalnızca sunucuda okunur.** |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | hayır | WalletConnect Cloud proje kimliği. Tanımlı değilse mobil cüzdan seçeneği hiç gösterilmez; masaüstündeki EIP-6963 akışı etkilenmez. **Sır değildir**, aşağıya bakın. |
+| `ANDROID_PACKAGE_NAME` | hayır | TWA paketinin adı (ters DNS). Tanımlı değilse `/.well-known/assetlinks.json` 404 döner. **Yalnızca sunucuda okunur.** |
+| `ANDROID_APP_FINGERPRINTS` | hayır | Virgülle ayrılmış SHA-256 sertifika parmak izleri. **İKİSİ de gerekir**: yükleme anahtarın ve Google'ın uygulama imzalama anahtarı. **Yalnızca sunucuda okunur.** |
 
 Yukarıdaki **sunucu** değişkenlerinin hiçbiri `NEXT_PUBLIC_` önekiyle
 tanımlanmaz ve hiçbiri istemci paketine girmez.

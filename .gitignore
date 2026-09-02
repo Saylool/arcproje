@@ -43,3 +43,10 @@ next-env.d.ts
 
 # local tooling (Claude Code preview launch config)
 .claude/
+
+# android imzalama anahtarlari — ASLA commit edilmez
+*.keystore
+*.jks
+android.keystore
+/app-release-*.aab
+/app-release-*.apk
