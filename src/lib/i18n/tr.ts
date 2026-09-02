@@ -69,6 +69,9 @@ export const tr = {
     sharedBillDescription:
       "Kendi borcunu görmek için cüzdanını bağla ve kimlik doğrulama mesajı imzala.",
     authErrorTitle: "Oturum hatası — Hesabı Böl",
+    privacyTitle: "Gizlilik Politikası — Hesabı Böl",
+    privacyDescription:
+      "Hesabı Böl'ün hangi verileri işlediği, bunların nereye gittiği ve ne kadar süreyle saklandığı.",
   },
 
   /* --------------------------------------------------------------------- */
@@ -155,6 +158,17 @@ export const tr = {
     walletConnectFailed: "WalletConnect oturumu kurulamadı.",
     walletConnectArcNotice:
       "Cüzdanın Arc Testnet'i tanımıyorsa bağlantı yine kurulur; ardından ağı değiştirmen istenir.",
+  },
+
+  /* --------------------------------------------------------------------- */
+  /* Gizlilik sayfası ve altbilgi                                            */
+  /* --------------------------------------------------------------------- */
+  legal: {
+    /** Hukuki metnin kendisi `src/lib/legal/privacy.ts` içindedir. */
+    effectiveFrom: "Yürürlük tarihi: {date}",
+    privacyLink: "Gizlilik",
+    footerLabel: "Site altbilgisi",
+    backHome: "Ana sayfaya dön",
   },
 
   /* --------------------------------------------------------------------- */

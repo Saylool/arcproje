@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 
+import { SiteFooter } from "@/components/SiteFooter";
 import { SURFACE_DARK, SURFACE_LIGHT } from "@/lib/brand/mark";
 import { LocaleProvider } from "@/lib/i18n/context";
 import { translate } from "@/lib/i18n/dictionary";
@@ -76,7 +77,10 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
       </head>
       <body className="antialiased">
-        <LocaleProvider initialLocale={locale}>{children}</LocaleProvider>
+        <LocaleProvider initialLocale={locale}>
+          {children}
+          <SiteFooter />
+        </LocaleProvider>
       </body>
     </html>
   );

@@ -66,6 +66,9 @@ export const en: Dictionary = {
     sharedBillDescription:
       "Connect your wallet and sign an authentication message to see what you owe.",
     authErrorTitle: "Sign-in error — Split the Bill",
+    privacyTitle: "Privacy Policy — Split the Bill",
+    privacyDescription:
+      "Which data Split the Bill processes, where it goes and how long it is kept.",
   },
 
   common: {
@@ -143,6 +146,13 @@ export const en: Dictionary = {
     walletConnectFailed: "Could not start the WalletConnect session.",
     walletConnectArcNotice:
       "If your wallet does not know Arc Testnet the connection still succeeds; you will then be asked to switch networks.",
+  },
+
+  legal: {
+    effectiveFrom: "In effect from {date}",
+    privacyLink: "Privacy",
+    footerLabel: "Site footer",
+    backHome: "Back to home",
   },
 
   progress: {
