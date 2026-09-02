@@ -53,6 +53,17 @@ export const REQUESTED_EVENTS: readonly string[] = [
  *
  * Bu bir SUNUCU SIRRI DEĞİLDİR: WalletConnect projectId'si tanımı gereği
  * istemci paketinde bulunur ve tek başına hiçbir şeye yetki vermez.
+ *
+ * DEĞİŞKENİ EKLEMEK YETMEZ, YENİDEN DERLEMEK GEREKİR. Değer buraya derleme
+ * anında gömüldüğü için, dağıtım ortamına sonradan eklenen bir değişken ancak
+ * yeni bir derlemeyle pakete girer. Üstelik derleme ÖNBELLEĞİ bu dosyanın eski
+ * hâlini geri getirebilir: dosya değişmediyse Next onu yeniden derlemeyebilir
+ * ve içinde `process.env...` ifadesi ham hâliyle kalır. Şüphelenince ölç —
+ * derleme sonrası istemci paketinde değişkenin ADI kalmamalıdır:
+ *
+ *     grep -rl "env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" .next/static
+ *
+ * Çıktı boş değilse yerine koyma olmamıştır; önbelleksiz yeniden derle.
  */
 const CONFIGURED_PROJECT_ID =
   process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID ?? "";
