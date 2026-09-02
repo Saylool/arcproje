@@ -38,6 +38,11 @@ import {
 
 import { SharedBillPaymentPanel } from "./SharedBillPaymentPanel";
 import { WalletConnectPanel } from "./WalletConnectPanel";
+import {
+  needsManualNetwork,
+  switchFailureMessage,
+} from "@/lib/arc/wallet-messages";
+import { ArcNetworkParameters } from "./ArcNetworkParameters";
 
 /**
  * ORTAK BAĞLANTI — borçlu tarafı.
@@ -76,6 +81,7 @@ export function SharedBillDebtorView({ billId }: Props) {
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
+  const [manualNetwork, setManualNetwork] = useState(false);
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
   const [stage, setStage] = useState<Stage>({ status: "idle" });
@@ -159,11 +165,13 @@ export function SharedBillDebtorView({ billId }: Props) {
 
   const switchNetwork = async () => {
     if (selectedWalletUuid === null) return;
+    setManualNetwork(false);
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
+      setManualNetwork(needsManualNetwork(switched.code));
       setStage({
         status: "error",
-        message: messageKey("wallet.switchFailedPickManually"),
+        message: messageKey(switchFailureMessage(switched.code)),
       });
       return;
     }
@@ -347,6 +355,7 @@ export function SharedBillDebtorView({ billId }: Props) {
             })}
           </button>
         )}
+        {manualNetwork && <ArcNetworkParameters />}
         {account !== null && onArc && stage.status !== "ready" && (
           <button
             type="button"

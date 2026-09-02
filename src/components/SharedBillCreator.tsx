@@ -51,6 +51,11 @@ import type { Receipt } from "@/lib/receipt/schema";
 import type { DebtCalculationSuccess } from "@/lib/split/debts";
 import type { Participant } from "@/lib/split/participants";
 import { WalletConnectPanel } from "./WalletConnectPanel";
+import {
+  needsManualNetwork,
+  switchFailureMessage,
+} from "@/lib/arc/wallet-messages";
+import { ArcNetworkParameters } from "./ArcNetworkParameters";
 
 /**
  * TEK BAGLANTILI paylasilan hesap olusturucu — fisi odeyen (ALICI) tarafi.
@@ -119,6 +124,7 @@ export function SharedBillCreator({
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
+  const [manualNetwork, setManualNetwork] = useState(false);
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
 
@@ -250,9 +256,11 @@ export function SharedBillCreator({
   const switchNetwork = async () => {
     if (selectedWalletUuid === null) return;
     setErrorMessage(null);
+    setManualNetwork(false);
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
-      setErrorMessage(messageKey("wallet.switchFailedPickManually"));
+      setManualNetwork(needsManualNetwork(switched.code));
+      setErrorMessage(messageKey(switchFailureMessage(switched.code)));
       return;
     }
     const chain = await getChainId(selectedWalletUuid);
@@ -458,6 +466,7 @@ export function SharedBillCreator({
             })}
           </button>
         )}
+        {manualNetwork && <ArcNetworkParameters />}
       </div>
 
       {/* Borclu adresleri */}
