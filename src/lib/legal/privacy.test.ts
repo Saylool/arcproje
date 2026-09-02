@@ -64,6 +64,26 @@ function policyText(policy: PrivacyPolicy): string {
   return parts.join("\n");
 }
 
+/**
+ * Kaynakta BAĞLANILAN dış alan adları.
+ *
+ * `xmlns` bildirimleri elenir: `http://www.w3.org/2000/svg` bir AD ALANI
+ * kimliğidir, ağ adresi değil — hiçbir zaman istek yapılmaz. Onu "veri alan
+ * üçüncü taraf" diye politikaya yazmak yanıltıcı olurdu. Eleme dar tutulur:
+ * aynı alan adına gerçek bir istek yapılsaydı yine yakalanırdı.
+ */
+export function externalHosts(source: string): string[] {
+  const withoutNamespaces = source.replace(/\bxmlns(:[\w-]+)?="[^"]*"/g, " ");
+  const hosts = new Set<string>();
+  for (const match of withoutNamespaces.matchAll(/https?:\/\/([a-zA-Z0-9.-]+)/g)) {
+    const host = match[1].toLowerCase();
+    if (host !== "localhost") {
+      hosts.add(host);
+    }
+  }
+  return [...hosts];
+}
+
 /** Testler ve `node_modules` dışında kalan tüm kaynak. */
 function sourceFiles(dir = "src"): string[] {
   const found: string[] = [];
@@ -133,19 +153,24 @@ describe("dışarı bağlanan HER servis metinde geçer", () => {
      */
     const hosts = new Set<string>();
     for (const file of sourceFiles()) {
-      for (const match of readFileSync(file, "utf8").matchAll(
-        /https?:\/\/([a-zA-Z0-9.-]+)/g,
-      )) {
-        const host = match[1].toLowerCase();
-        if (host !== "localhost") {
-          hosts.add(host);
-        }
+      for (const host of externalHosts(readFileSync(file, "utf8"))) {
+        hosts.add(host);
       }
     }
     expect(hosts.size).toBeGreaterThan(0);
     for (const host of hosts) {
       expect(DISCLOSED_HOSTS, `${host} politikada bildirilmemiş`).toContain(host);
     }
+  });
+
+  it("ad alanı bildirimleri taraf SAYILMAZ, gerçek istekler sayılır", () => {
+    // Eleme dar olmalı: aynı alan adına yapılan gerçek bir istek yakalanır.
+    expect(
+      externalHosts('<svg xmlns="http://www.w3.org/2000/svg" />'),
+    ).toEqual([]);
+    expect(externalHosts('fetch("https://www.w3.org/veri")')).toEqual([
+      "www.w3.org",
+    ]);
   });
 
   it("kütüphaneden gelen, kaynakta görünmeyen taraflar da bildirilmiştir", () => {

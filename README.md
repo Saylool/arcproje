@@ -37,6 +37,8 @@ cp .env.example .env.local
 | `AUTH_GOOGLE_ID` | Google girişinde evet | Google OAuth Web client ID. **Yalnızca sunucuda okunur.** |
 | `AUTH_GOOGLE_SECRET` | Google girişinde evet | Google OAuth Web client secret. **Yalnızca sunucuda okunur.** |
 | `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | hayır | WalletConnect Cloud proje kimliği. Tanımlı değilse mobil cüzdan seçeneği hiç gösterilmez; masaüstündeki EIP-6963 akışı etkilenmez. **Sır değildir**, aşağıya bakın. |
+| `ANDROID_PACKAGE_NAME` | hayır | TWA paketinin adı (ters DNS). Tanımlı değilse `/.well-known/assetlinks.json` 404 döner. **Yalnızca sunucuda okunur.** |
+| `ANDROID_APP_FINGERPRINTS` | hayır | Virgülle ayrılmış SHA-256 sertifika parmak izleri. **İKİSİ de gerekir**: yükleme anahtarın ve Google'ın uygulama imzalama anahtarı. **Yalnızca sunucuda okunur.** |
 
 Yukarıdaki **sunucu** değişkenlerinin hiçbiri `NEXT_PUBLIC_` önekiyle
 tanımlanmaz ve hiçbiri istemci paketine girmez.
@@ -79,6 +81,42 @@ npm run dev
 ```
 
 Uygulama `http://localhost:3000` adresinde açılır.
+
+## Uygulama kabuğu (PWA)
+
+Uygulama `/manifest.webmanifest` yayınlar ve ana ekrana kurulabilir. Kurulan
+uygulamanın adı **Hesabı Böl**'dür ve manifest tek dillidir: `<link
+rel="manifest">` varsayılan olarak çerez göndermez, bu yüzden dil çerezine
+bakan bir manifest güvenilir çalışmaz. Sayfa metinleri her zamanki gibi
+kullanıcının dilinde kalır.
+
+**Servis çalışanı YOKTUR ve bilerek yoktur.** Sayfalar `no-store`; bir
+önbellek ödeme sayfasını ya da imzalı bir yükü saklayabilir, o sınırı delerdi.
+Çevrimdışı bir hedef de yok. Android'de "ana ekrana ekle" istemi çıkmazsa ilk
+bakılacak yer burasıdır.
+
+### Marka işareti ve ikonlar
+
+İşaret (`₺`) **yalnızca geometriyle** çizilir ve hiçbir fonta bağlı değildir:
+kaynağı `src/lib/brand/mark.ts`, başlıktaki işaret ile uygulama ikonları aynı
+yollardan üretilir. Daha önce başlıktaki `₺` bir metin düğümüydü, yani her
+cihazda o cihazın fontuyla çiziliyordu.
+
+İkonlar depoya işlenmiştir; çalışma zamanında hiçbir şey yeniden çizilmez.
+Geometri değişirse yeniden üretmek gerekir:
+
+```bash
+node scripts/generate-icons.mjs
+```
+
+Betik `npm run build`'in parçası **değildir** ve `sharp`'a ihtiyaç duyar.
+`sharp` bir bağımlılık olarak tanımlı değildir; Next ile birlikte geldiği için
+genelde bulunur, bulunmazsa betik bunu açıkça söyler.
+
+İşaret maskelenebilir güvenli alanın (merkezi %80 çaplı daire) içinde kaldığı
+için aynı görsel hem `any` hem `maskable` amacıyla bildirilir; ayrı bir
+maskelenebilir dosya gerekmez. Bu, `src/lib/brand/pwa-shell.test.ts` içinde
+ölçülür — geometri büyürse test kırmızıya döner.
 
 ## Gizlilik politikası ve Play Console veri güvenliği
 

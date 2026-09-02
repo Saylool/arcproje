@@ -59,6 +59,11 @@ import {
   type WalletInfo,
 } from "@/lib/arc/wallet";
 import { WalletConnectPanel } from "./WalletConnectPanel";
+import {
+  needsManualNetwork,
+  switchFailureMessage,
+} from "@/lib/arc/wallet-messages";
+import { ArcNetworkParameters } from "./ArcNetworkParameters";
 
 /**
  * Ödeme talebi ödeme sayfası — BORÇLU (gönderen) tarafı.
@@ -114,6 +119,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   const [wallets, setWallets] = useState<WalletInfo[]>([]);
   const [walletsScanned, setWalletsScanned] = useState(false);
   const [selectedWalletUuid, setSelectedWalletUuid] = useState<string | null>(null);
+  const [manualNetwork, setManualNetwork] = useState(false);
   const [account, setAccount] = useState<string | null>(null);
   const [chainId, setChainId] = useState<number | null>(null);
 
@@ -365,15 +371,11 @@ function RequestSession({ encoded }: { encoded: string | null }) {
   const switchNetwork = async () => {
     if (selectedWalletUuid === null) return;
     setErrorMessage(null);
+    setManualNetwork(false);
     const switched = await switchToArcTestnet(selectedWalletUuid);
     if (!switched.ok) {
-      setErrorMessage(
-        messageKey(
-          switched.code === "rejected"
-            ? "wallet.switchRejected"
-            : "wallet.switchFailed",
-        ),
-      );
+      setManualNetwork(needsManualNetwork(switched.code));
+      setErrorMessage(messageKey(switchFailureMessage(switched.code)));
       return;
     }
     const chain = await getChainId(selectedWalletUuid);
@@ -850,6 +852,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 </button>
               )}
             </div>
+            {manualNetwork && <ArcNetworkParameters />}
             {account !== null && (
               <p className="text-[11px] text-ink-faint">
                 {t("wallet.connectedAccount")}{" "}

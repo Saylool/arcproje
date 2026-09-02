@@ -28,6 +28,7 @@ function withoutComments(source: string): string {
 
 const COMPONENT_FILES = [
   "src/components/AppHeader.tsx",
+  "src/components/ArcNetworkParameters.tsx",
   "src/components/AssignmentSummary.tsx",
   "src/components/DebtSummary.tsx",
   "src/components/LanguageSelect.tsx",

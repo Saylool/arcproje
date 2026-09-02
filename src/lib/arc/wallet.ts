@@ -3,6 +3,7 @@ import { DEFAULT_LOCALE } from "../i18n/locale";
 import {
   ARC_TESTNET_CHAIN_ID_HEX,
   buildAddArcTestnetParams,
+  isArcTestnet,
   parseChainId,
 } from "./network";
 
@@ -126,6 +127,13 @@ export type WalletErrorCode =
   | "rejected"
   | "noAccount"
   | "unsupportedChain"
+  /**
+   * Cüzdan isteği kabul etti ama ağ DEĞİŞMEDİ.
+   *
+   * "Reddetti"den ayrı tutulur çünkü kullanıcının yapması gereken şey
+   * farklıdır: yeniden denemek işe yaramaz, ağın elle eklenmesi gerekir.
+   */
+  | "switchIgnored"
   | "requestFailed";
 
 export type WalletResult<T> =
@@ -221,9 +229,36 @@ export function switchToArcTestnet(uuid: string): Promise<WalletResult<true>> {
         params: [{ chainId: ARC_TESTNET_CHAIN_ID_HEX }],
       });
 
+    /**
+     * İsteğin ÇÖZÜLMESİ geçildiği anlamına GELMEZ.
+     *
+     * Bazı cüzdanlar — özellikle WalletConnect üzerinden bağlanan mobil
+     * olanlar — `wallet_switchEthereumChain` çağrısını sessizce yok sayıp
+     * başarı döndürür. Bu doğrulama olmasaydı çağıran taraf geçildiğini
+     * sanır, kullanıcı hiçbir açıklama görmeden aynı düğmeye basıp dururdu.
+     *
+     * Zincir okunamazsa GEÇİLDİ de GEÇİLMEDİ de denmez: doğrulanamayan bir
+     * geçiş başarı sayılmaz.
+     */
+    const confirmOnArc = async (): Promise<WalletResult<true>> => {
+      let chainId: number | null;
+      try {
+        chainId = parseChainId(await provider.request({ method: "eth_chainId" }));
+      } catch {
+        chainId = null;
+      }
+      if (chainId === null) {
+        return { ok: false as const, code: "requestFailed" as const };
+      }
+      if (!isArcTestnet(chainId)) {
+        return { ok: false as const, code: "switchIgnored" as const };
+      }
+      return { ok: true as const, value: true as const };
+    };
+
     try {
       await switchRequest();
-      return { ok: true as const, value: true as const };
+      return await confirmOnArc();
     } catch (error) {
       if (toWalletError(error) !== "unsupportedChain") {
         return { ok: false as const, code: toWalletError(error) };
@@ -236,10 +271,10 @@ export function switchToArcTestnet(uuid: string): Promise<WalletResult<true>> {
         params: [buildAddArcTestnetParams()],
       });
       await switchRequest();
-      return { ok: true as const, value: true as const };
     } catch (error) {
       return { ok: false as const, code: toWalletError(error) };
     }
+    return confirmOnArc();
   });
 }
 

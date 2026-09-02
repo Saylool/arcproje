@@ -118,8 +118,19 @@ export const en: Dictionary = {
     switchToArc: "Switch to Arc Testnet",
     switchRejected: "The network change was rejected.",
     switchFailed: "Could not switch to Arc Testnet.",
-    switchFailedPickManually:
-      "Could not switch networks. Select Arc Testnet in your wallet.",
+    switchIgnored:
+      "Your wallet accepted the request but did not change the network.",
+    switchUnsupported: "Your wallet does not know Arc Testnet.",
+
+    addManuallyTitle: "Add the network to your wallet by hand",
+    addManuallyIntro:
+      "Trying again will not fix this. Add the network below in your wallet, then try again.",
+    networkName: "Network name",
+    chainId: "Chain ID",
+    rpcUrl: "RPC URL",
+    symbol: "Symbol",
+    explorer: "Explorer",
+    copyNetwork: "Copy network details",
     connectedAccount: "Connected account:",
     connectedWallet: "Connected wallet:",
     notArcWithChain: "Not Arc Testnet (chain {chainId})",
