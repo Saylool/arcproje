@@ -121,6 +121,11 @@ export type DeleteContactOutcome =
   | { ok: true; deleted: number }
   | { ok: false; reason: "unavailable" };
 
+export type DeleteAppUserOutcome =
+  /** `deleted`, GERÇEKTEN bir satır gidip gitmediğini söyler. */
+  | { ok: true; deleted: boolean }
+  | { ok: false; reason: "unavailable" };
+
 export type ListRecentDebtorsOutcome =
   | { ok: true; contacts: readonly RecentDebtorContact[] }
   /** Depo yapılandırılmamış veya erişilemiyor. Boş listeyle KARIŞTIRILMAZ. */
@@ -306,6 +311,20 @@ export type SharedBillRepository = SharedBillPaymentRepository &
     userId: string;
     contactId?: string;
   }): Promise<DeleteContactOutcome>;
+
+  /**
+   * Uygulama kullanıcısını ve ona BAĞLI kişisel veriyi siler.
+   *
+   * Silinen: `app_users` satırı (e-posta, ad, avatar) ve kayıtlı kişiler —
+   * ikincisi şemadaki ON DELETE CASCADE ile gider, burada ayrıca silinmez.
+   *
+   * SİLİNMEYEN: oluşturduğu ortak hesaplar. Bunlar ON DELETE SET NULL ile
+   * sahipsiz kalır ama AYAKTA durur, çünkü içlerinde BAŞKA insanların borcu
+   * vardır; hesabı silen kişi onların ödeme yolunu kapatamaz.
+   *
+   * Olmayan bir kullanıcıyı silmek HATA DEĞİLDİR: `deleted: false` döner.
+   */
+  deleteAppUser(input: { userId: string }): Promise<DeleteAppUserOutcome>;
 
   listRecentDebtorsFor(input: {
     createdByUserId: string;

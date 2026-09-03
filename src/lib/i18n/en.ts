@@ -69,7 +69,40 @@ export const en: Dictionary = {
     privacyTitle: "Privacy Policy — Split the Bill",
     privacyDescription:
       "Which data Split the Bill processes, where it goes and how long it is kept.",
+    accountTitle: "Your account — Split the Bill",
+    accountDescription:
+      "Permanently remove the record created by your Google sign-in, along with the personal data attached to it.",
   },
+  account: {
+    heading: "Your account",
+    signedOutTitle: "You are not signed in",
+    signedOutBody:
+      "To delete your account you first need to sign in with Google. If you have never signed in, there is no account record to remove.",
+    deleteHeading: "Delete my account",
+    deleteIntro:
+      "This cannot be undone. Read what goes and what stays before you delete.",
+    goesHeading: "What gets deleted",
+    goesEmail: "Your verified email address",
+    goesName: "Your display name and the address of your profile picture",
+    goesContacts: "Your saved contact book (names and addresses)",
+    staysHeading: "What stays",
+    staysBills:
+      "The shared bills you created. Other people owe money in them, and we do not close their way to pay. The records lose their owner and their link to you.",
+    staysChain:
+      "Transfers written to the chain. Those are public and permanent; a deletion right does not reach them.",
+    startButton: "I want to delete my account",
+    confirmQuestion: "We cannot undo this. Shall we go ahead?",
+    confirmButton: "Yes, delete my account",
+    cancelButton: "Keep my account",
+    working: "Deleting…",
+    doneTitle: "Your account is gone",
+    doneBody:
+      "Your record and your saved contacts were removed and you have been signed out. Signing in again with the same Google account starts a brand new record.",
+    failed: "The account could not be deleted. Please try again shortly.",
+    contactNote:
+      "If you cannot reach the app, you can send a deletion request to this address:",
+  },
+
 
   common: {
     back: "Go back",
@@ -149,6 +182,7 @@ export const en: Dictionary = {
   },
 
   legal: {
+    accountLink: "Your account",
     effectiveFrom: "In effect from {date}",
     privacyLink: "Privacy",
     footerLabel: "Site footer",

@@ -72,7 +72,43 @@ export const tr = {
     privacyTitle: "Gizlilik Politikası — Hesabı Böl",
     privacyDescription:
       "Hesabı Böl'ün hangi verileri işlediği, bunların nereye gittiği ve ne kadar süreyle saklandığı.",
+    accountTitle: "Hesabın — Hesabı Böl",
+    accountDescription:
+      "Google hesabınla oluşturduğun kaydı ve ona bağlı kişisel verileri kalıcı olarak sil.",
   },
+  /* --------------------------------------------------------------------- */
+  /* Hesap silme                                                             */
+  /* --------------------------------------------------------------------- */
+  account: {
+    heading: "Hesabın",
+    signedOutTitle: "Oturum açık değil",
+    signedOutBody:
+      "Hesabını silmek için önce Google ile oturum açman gerekiyor. Oturum açmadıysan sende bir hesap kaydı da yoktur.",
+    deleteHeading: "Hesabımı sil",
+    deleteIntro:
+      "Bu işlem geri alınamaz. Silmeden önce neyin gittiğini ve neyin kaldığını oku.",
+    goesHeading: "Silinecekler",
+    goesEmail: "Doğrulanmış e-posta adresin",
+    goesName: "Görünen adın ve profil görselinin adresi",
+    goesContacts: "Kayıtlı kişi defterin (adlar ve adresler)",
+    staysHeading: "Silinmeyecekler",
+    staysBills:
+      "Oluşturduğun ortak hesaplar. İçlerinde başkalarının borcu var; onların ödeme yolunu kapatmıyoruz. Kayıtlar sahipsiz kalır, seninle bağı kesilir.",
+    staysChain:
+      "Zincire yazılmış transferler. Bunlar herkese açık ve kalıcıdır; silme hakkı oraya ulaşmaz.",
+    startButton: "Hesabımı silmek istiyorum",
+    confirmQuestion: "Bunu geri alamayız. Devam edilsin mi?",
+    confirmButton: "Evet, hesabımı sil",
+    cancelButton: "Vazgeç",
+    working: "Siliniyor…",
+    doneTitle: "Hesabın silindi",
+    doneBody:
+      "Kaydın ve kayıtlı kişilerin kaldırıldı, oturumun kapatıldı. Aynı Google hesabıyla yeniden girersen sıfırdan yeni bir kayıt açılır.",
+    failed: "Hesap silinemedi. Lütfen birazdan tekrar dene.",
+    contactNote:
+      "Uygulamaya giremiyorsan silme talebini şu adrese yazabilirsin:",
+  },
+
 
   /* --------------------------------------------------------------------- */
   /* Ortak                                                                   */
@@ -164,6 +200,7 @@ export const tr = {
   /* Gizlilik sayfası ve altbilgi                                            */
   /* --------------------------------------------------------------------- */
   legal: {
+    accountLink: "Hesabın",
     /** Hukuki metnin kendisi `src/lib/legal/privacy.ts` içindedir. */
     effectiveFrom: "Yürürlük tarihi: {date}",
     privacyLink: "Gizlilik",
