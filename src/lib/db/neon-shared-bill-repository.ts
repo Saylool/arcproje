@@ -8,6 +8,7 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  CountExpiredBillsOutcome,
   DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
@@ -340,6 +341,16 @@ RETURNING contact_id
  * sahiplik bağı ise shared_bills'teki ON DELETE SET NULL ile gider. Hesapların
  * KENDİSİ durur: içlerinde başka insanların borcu var.
  */
+/*
+ * SAYAR, SİLMEZ. Bu dosyada shared_bills için hiçbir DELETE yoktur ve bu
+ * bilinçlidir; saklama temizliği ayrı bir adımda açılır.
+ */
+const COUNT_BILLS_PAST_RETENTION = `
+SELECT count(*)::int AS expired
+FROM shared_bills
+WHERE expires_at < to_timestamp($1 / 1000.0)
+`;
+
 const DELETE_APP_USER = `
 DELETE FROM app_users
 WHERE user_id = $1
@@ -1130,6 +1141,24 @@ export async function createNeonSharedBillRepository(
               ]);
         const deleted = Array.isArray(result) ? result.length : 0;
         return { ok: true, deleted };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async countBillsPastRetention(input: {
+      cutoffMs: number;
+    }): Promise<CountExpiredBillsOutcome> {
+      try {
+        const rows = (await sql.query(COUNT_BILLS_PAST_RETENTION, [
+          input.cutoffMs,
+        ])) as { expired: unknown }[];
+        const raw = rows[0]?.expired;
+        const count = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isInteger(count) || count < 0) {
+          return { ok: false, reason: "unavailable" };
+        }
+        return { ok: true, count };
       } catch {
         return { ok: false, reason: "unavailable" };
       }
