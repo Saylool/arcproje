@@ -1,6 +1,7 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
   SaveContactOutcome,
@@ -94,6 +95,8 @@ export type FakeSharedBillRepository = SharedBillRepository & {
   readonly offers: ReadonlyMap<string, StoredPaymentOffer>;
   readonly attempts: ReadonlyMap<string, StoredPaymentAttempt>;
   readonly calls: number;
+  /** app_users karşılığı; testler doğrudan ekleyip çıkarabilir. */
+  readonly appUsers: Set<string>;
   controls: FakeRepositoryControls;
 };
 
@@ -115,6 +118,12 @@ export function createFakeSharedBillRepository(
   let writeSequence = 0;
   /* Kayıtlı kişiler: kullanıcı kimliği → kayıtlar. */
   const savedContacts = new Map<string, SavedContact[]>();
+  /*
+   * app_users tablosunun karşılığı. Şemada gerçek bir satır var ve silmenin
+   * "bir şey sildi mi" cevabı ona bağlı; sahte depo bunu taklit etmezse
+   * eşleşme testi olmayan bir satırı silmeyi başarı sayar.
+   */
+  const appUsers = new Set<string>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -144,6 +153,7 @@ export function createFakeSharedBillRepository(
       return calls;
     },
     savedContacts,
+    appUsers,
 
     async createSharedBill(
       record: SharedBillRecord,
@@ -399,6 +409,28 @@ export function createFakeSharedBillRepository(
       );
       savedContacts.set(input.userId, next);
       return { ok: true, deleted: own.length - next.length };
+    },
+
+    async deleteAppUser(input: {
+      userId: string;
+    }): Promise<DeleteAppUserOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const existed = appUsers.delete(input.userId);
+      /*
+       * Şemadaki yabancı anahtarların YAPTIĞI iş burada elle yapılır:
+       * saved_contacts ON DELETE CASCADE, shared_bills ON DELETE SET NULL.
+       * Hesap satırlarının KENDİSİ durur.
+       */
+      savedContacts.delete(input.userId);
+      for (const bill of bills.values()) {
+        if (bill.createdByUserId === input.userId) {
+          bill.createdByUserId = null;
+        }
+      }
+      return { ok: true, deleted: existed };
     },
 
     async listRecentDebtorsFor(input: {

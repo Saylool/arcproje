@@ -165,8 +165,25 @@ Güvenlik uygulamaları bölümü:
 | Soru | Cevap |
 | --- | --- |
 | Veri aktarım sırasında şifreleniyor mu | Evet (HTTPS/TLS) |
-| Kullanıcı silme talep edebiliyor mu | Evet, politikadaki adrese yazarak |
+| Kullanıcı silme talep edebiliyor mu | Evet |
+| Uygulama içinde hesap silme yolu var mı | Evet, `/account` |
+| Silme talebi için web adresi | `https://arcproje-seven.vercel.app/account` |
 | Bağımsız güvenlik incelemesinden geçti mi | Hayır |
+
+### Hesap silme
+
+Play, hesap açtıran uygulamalardan **iki** şey ister: uygulama İÇİNDE bir silme
+yolu ve silme talebi için herkesin açabileceği bir **web adresi**. `/account`
+sayfası ikisini birden karşılar; forma verilecek adres budur.
+
+Silme kapsamı şemadaki yabancı anahtarlarla belirlenir, kodda ayrıca
+silinmez:
+
+- `app_users` satırı gider (doğrulanmış e-posta, görünen ad, avatar adresi).
+- `saved_contacts` **ON DELETE CASCADE** ile gider.
+- `shared_bills` **ON DELETE SET NULL** ile SAHİPSİZ kalır ama **durur**.
+  İçlerinde başkalarının borcu vardır; hesabını silen kişi onların ödeme
+  yolunu kapatamaz. Politika bunu ve zincirin silinemezliğini açıkça söyler.
 
 Google girişi yalnızca hesap **oluşturan** akış için gerekir. Bağlantıyla gelen
 borçlu, Google hesabı olmadan yalnızca cüzdan imzasıyla kendi borcunu görür ve

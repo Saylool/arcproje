@@ -8,6 +8,7 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
   SaveContactOutcome,
@@ -330,6 +331,19 @@ const DELETE_ALL_SAVED_CONTACTS = `
 DELETE FROM saved_contacts
 WHERE user_id = $1
 RETURNING contact_id
+`;
+
+/*
+ * Yalnızca app_users satırını siler.
+ *
+ * Kayıtlı kişiler saved_contacts'taki ON DELETE CASCADE ile, ortak hesapların
+ * sahiplik bağı ise shared_bills'teki ON DELETE SET NULL ile gider. Hesapların
+ * KENDİSİ durur: içlerinde başka insanların borcu var.
+ */
+const DELETE_APP_USER = `
+DELETE FROM app_users
+WHERE user_id = $1
+RETURNING user_id
 `;
 
 type SavedContactRow = {
@@ -1116,6 +1130,17 @@ export async function createNeonSharedBillRepository(
               ]);
         const deleted = Array.isArray(result) ? result.length : 0;
         return { ok: true, deleted };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async deleteAppUser(input: {
+      userId: string;
+    }): Promise<DeleteAppUserOutcome> {
+      try {
+        const result = await sql.query(DELETE_APP_USER, [input.userId]);
+        return { ok: true, deleted: Array.isArray(result) && result.length > 0 };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

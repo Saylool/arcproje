@@ -22,6 +22,15 @@ import type { PrivacyPolicy } from "./privacy-types";
  */
 
 export const PRIVACY_CONTACT_EMAIL = "sametgoc81tr@gmail.com";
+
+/*
+ * Hesap silme sayfası. Google Play, hesap açtıran uygulamalardan uygulama
+ * içi bir silme yolu VE herkesin açabileceği bir web adresi ister; bu tek
+ * sayfa ikisini de karşılar ve politikada adıyla geçer.
+ */
+export const ACCOUNT_PAGE_PATH = "/account";
+const ACCOUNT_DELETE_LABEL = "Hesabımı sil";
+const ACCOUNT_DELETE_LABEL_EN = "Delete my account";
 export const PRIVACY_EFFECTIVE_DATE = "2026-09-01";
 
 /** Borçlu oturumunun ömrü; `SHARED_BILL_SESSION_LIFETIME_MS` ile eşliği test edilir. */
@@ -274,7 +283,7 @@ const tr: PrivacyPolicy = {
         },
         {
           kind: "paragraph",
-          text: `Talebini ${PRIVACY_CONTACT_EMAIL} adresine yazman yeterlidir. Google hesabınla girdiysen, hesabını ve ona bağlı kayıtları silmeni de aynı adresten isteyebilirsin. Kayıtlı kişileri uygulama içinden kendin silebilirsin.`,
+          text: `Google hesabınla girdiysen hesabını UYGULAMA İÇİNDEN kendin silebilirsin: ${ACCOUNT_PAGE_PATH} sayfasındaki "${ACCOUNT_DELETE_LABEL}" bölümü kaydını ve kayıtlı kişilerini kaldırır. Aynı adres tarayıcıdan da açılır. Diğer talepler ve uygulamaya erişemediğin durumlar için ${PRIVACY_CONTACT_EMAIL} adresine yazman yeterlidir.`,
         },
         {
           kind: "paragraph",
@@ -541,7 +550,7 @@ const en: PrivacyPolicy = {
         },
         {
           kind: "paragraph",
-          text: `Writing to ${PRIVACY_CONTACT_EMAIL} is enough. If you signed in with Google, you can ask at the same address for your account and the records linked to it to be deleted. Saved people can be deleted by you from within the app.`,
+          text: `If you signed in with Google you can delete your account FROM INSIDE THE APP: the "${ACCOUNT_DELETE_LABEL_EN}" section on ${ACCOUNT_PAGE_PATH} removes your record and your saved people. The same address opens in a browser too. For anything else, or if you cannot reach the app, writing to ${PRIVACY_CONTACT_EMAIL} is enough.`,
         },
         {
           kind: "paragraph",
