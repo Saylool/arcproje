@@ -11,8 +11,8 @@ import { SHARED_BILL_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill";
  * bir sorunun fark edilmesi için pay bırakılır.
  *
  * BU DOSYA HİÇBİR ŞEY SİLMEZ. Yalnızca "hangi kayıtlar silinmeye uygun"
- * sorusunu tanımlar. Silme ayrı ve sonraki bir adımdır; önce sayının
- * beklendiği gibi olduğu görülür.
+ * sorusunu ve her çalışmanın üst sınırını tanımlar; silmenin kendisi depo
+ * katmanındadır.
  */
 
 /** Süre dolduktan SONRA kaydın tutulmaya devam ettiği süre. */
@@ -49,3 +49,12 @@ export function isPastRetention(
 ): boolean {
   return expiresAtMs < retentionCutoffMs(nowMs);
 }
+
+/**
+ * Bir çalışmada silinecek EN FAZLA hesap sayısı.
+ *
+ * Sınırsız bir temizlik, birikmiş bir kuyrukta uzun süren tek bir işlem
+ * demektir. Görev günlük çalıştığı için artan kısım ertesi gün gider; acele
+ * edilecek bir şey yok.
+ */
+export const RETENTION_BATCH_LIMIT = 500;

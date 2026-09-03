@@ -3,19 +3,25 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
 import {
   BILL_RETENTION_DAYS,
+  RETENTION_BATCH_LIMIT,
   retentionCutoffMs,
 } from "@/lib/db/retention";
 
 /**
- * `GET /api/cron/retention` — saklama süresi dolmuş kayıtları SAYAR.
+ * `GET /api/cron/retention` — saklama süresi dolmuş kayıtları SİLER.
  *
- * BU UÇ HİÇBİR ŞEY SİLMEZ. Amacı, geri dönüşü olmayan bir temizliği açmadan
- * önce "kaç kayıt etkilenecek" sorusunu ÖLÇMEK. Sayı beklendiği gibi
- * çıktığında silme ayrı bir adımda eklenir.
+ * Önce sayar, sonra siler ve her çalışmada ikisini de bildirir. Tablodaki
+ * toplam da raporlanır: uygun sayısı sıfırken toplam da sıfırsa, ölçütün
+ * gerçekten bir şey bulup bulamadığı bilinemez.
  *
- * KİMLİK DOĞRULAMASI ZORUNLUDUR ve gevşetilemez. Bu adres herkese açıktır;
- * korumasız bırakılırsa ileride buraya eklenecek silme, yabancıların
- * tetikleyebileceği bir düğmeye dönüşür.
+ * Bu uç, sayan hâliyle önce yayına alındı ve üretimde ölçüldü: tablo boş
+ * DEĞİLKEN uygun sayısı sıfır döndü. Bu, eşiğin geleceğe kaymadığını —
+ * yani her kaydı eşleştiren bozuk bir ölçüt olmadığını — kanıtlar. Silme,
+ * o sayımla BİREBİR aynı eşiği kullanır.
+ *
+ * KİMLİK DOĞRULAMASI ZORUNLUDUR ve gevşetilemez. Bu adres herkese açıktır ve
+ * arkasında GERİ ALINAMAZ bir silme durur; korumasız bırakılırsa yabancıların
+ * tetikleyebileceği bir "verileri sil" düğmesine dönüşür.
  *
  * `CRON_SECRET` tanımlıysa Vercel, cron çağrısında `Authorization: Bearer`
  * başlığını KENDİSİ gönderir. Sır tanımlı değilse uç ÇALIŞMAZ: açık bir uç,
@@ -100,21 +106,49 @@ async function retentionGet(
   }
 
   /*
-   * Günlüğe yazılır: sayıyı görmek için kimsenin sırrı elle taşıması
+   * Toplam da okunur. Uygun sayısı SIFIRKEN toplam da sıfırsa, ölçütün
+   * gerçekten bir şey bulup bulamadığı bilinemez; ikisi birlikte anlamlıdır.
+   * Okunamazsa temizlik yine de sürer — bu yalnızca tanısal bir sayıdır.
+   */
+  const total = await repository.countAllBills();
+
+  /*
+   * HİÇBİR ŞEY UYGUN DEĞİLSE silme HİÇ ÇAĞRILMAZ. Boş bir temizlik zararsız
+   * olurdu ama çağrılmaması, günlükte "0 uygun → 0 silindi" satırının
+   * gerçekten bir şey yapılmadığını göstermesini sağlar.
+   */
+  let deleted = 0;
+  if (counted.count > 0) {
+    const removed = await repository.deleteBillsPastRetention({
+      cutoffMs,
+      limit: RETENTION_BATCH_LIMIT,
+    });
+    if (!removed.ok) {
+      return errorResponse(
+        503,
+        "SERVICE_UNAVAILABLE",
+        "Temizlik şu anda yapılamıyor.",
+      );
+    }
+    deleted = removed.deleted;
+  }
+
+  /*
+   * Günlüğe yazılır: sayıları görmek için kimsenin sırrı elle taşıması
    * gerekmesin. Kayıt kimliği, adres ya da etiket YAZILMAZ — yalnızca sayı.
    */
   console.log(
-    `[retention] silinmeye uygun hesap: ${counted.count} (sınır ${new Date(cutoffMs).toISOString()}, saklama ${BILL_RETENTION_DAYS} gün)`,
+    `[retention] uygun ${counted.count}, silinen ${deleted}, tablodaki toplam ${total.ok ? total.count : "okunamadi"} (sınır ${new Date(cutoffMs).toISOString()}, saklama ${BILL_RETENTION_DAYS} gün)`,
   );
 
   return NextResponse.json(
     {
       eligible: counted.count,
+      deleted,
+      total: total.ok ? total.count : null,
       cutoff: new Date(cutoffMs).toISOString(),
       retentionDays: BILL_RETENTION_DAYS,
-      /* Bu adımda silme YOKTUR; yanıt bunu açıkça söyler. */
-      deleted: 0,
-      mode: "count-only",
+      batchLimit: RETENTION_BATCH_LIMIT,
     },
     { status: 200, headers: NO_STORE_HEADERS },
   );

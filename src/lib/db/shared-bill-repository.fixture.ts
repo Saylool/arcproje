@@ -2,6 +2,7 @@ import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
   CountExpiredBillsOutcome,
+  DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
@@ -430,6 +431,58 @@ export function createFakeSharedBillRepository(
         }
       }
       return { ok: true, count };
+    },
+
+    async countAllBills(): Promise<CountExpiredBillsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      return { ok: true, count: bills.size };
+    },
+
+    async deleteBillsPastRetention(input: {
+      cutoffMs: number;
+      limit: number;
+    }): Promise<DeleteExpiredBillsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /*
+       * SQL ile AYNI seçim: ölçüt, belirlenimci sıralama ve üst sınır.
+       * Sahte deponun sınırsız ya da gelişigüzel davranması, gerçek
+       * sorgudaki bir kaymayı gizlerdi.
+       */
+      const targets = [...bills.values()]
+        .filter((bill) => bill.manifest.expiresAt * 1000 < input.cutoffMs)
+        .sort(
+          (a, b) =>
+            a.manifest.expiresAt - b.manifest.expiresAt ||
+            a.billId.localeCompare(b.billId),
+        )
+        .slice(0, input.limit);
+
+      for (const bill of targets) {
+        /* Çocuklar da gider; gerçek işlemde bunu sıralı silmeler yapar. */
+        for (const key of [...sessions.keys()]) {
+          if (sessions.get(key)?.billId === bill.billId) {
+            sessions.delete(key);
+          }
+        }
+        for (const key of [...offers.keys()]) {
+          if (offers.get(key)?.billId === bill.billId) {
+            offers.delete(key);
+          }
+        }
+        for (const key of [...attempts.keys()]) {
+          if (attempts.get(key)?.billId === bill.billId) {
+            attempts.delete(key);
+          }
+        }
+        bills.delete(bill.billId);
+      }
+      return { ok: true, deleted: targets.length };
     },
 
     async deleteAppUser(input: {
