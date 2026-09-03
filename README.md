@@ -132,11 +132,23 @@ politikayı güncellemeden testlerden geçemez.
 
 ### Denetimin iki dürüst sonucu
 
-- **Süresi dolan ortak hesap kayıtları SİLİNMEZ.** Süre dolunca hesap açılamaz
-  ve ödenemez, ama satır veritabanında kalır — kodda `shared_bills` için
-  hiçbir silme yolu yoktur. Nonce'lar, oturumlar, teklifler ve denemeler ise
-  süresi dolunca gerçekten silinir. Sürenin kendisi koddaki sabitten türetilir
-  ve politikada yazar; burada tekrarlanmaz.
+- **Süresi dolan ortak hesap kayıtları artık siliniyor.** Süre dolunca hesap
+  açılamaz ve ödenemez; kayıt bir süre daha durur, sonra günlük çalışan bir
+  temizlikle (`/api/cron/retention`) borç satırlarıyla birlikte kaldırılır.
+  Süreler koddaki sabitlerden (`src/lib/db/retention.ts`) türetilir ve
+  politikada yazar; burada tekrarlanmaz.
+
+  Temizliğin iki ayrıntısı kazara bozulabilir:
+
+  - **Cascade'e güvenilmez.** `shared_bill_payment_attempts`, teklifleri
+    `ON DELETE RESTRICT` ile referanslıyor; tek bir cascade'li silme sıraya
+    bağlı olarak yabancı anahtar hatasıyla düşebilir. Silme, çocuktan
+    ebeveyne AÇIK sırayla ve tek işlemde yapılır.
+  - **Bütün deyimler AYNI hedef kümesini kullanır.** Ölçüt tek yerde
+    tanımlanıp her deyime gömülür; farklı kümeler, borç satırları silinmiş
+    ama kendisi duran bir hesap bırakabilirdi.
+
+  Uç `CRON_SECRET` ile korunur ve sır tanımlı değilse **hiç çalışmaz**.
 - **Zincire yazılan hiçbir şey geri alınamaz.** Silme hakkı oraya ulaşmaz;
   politika bunu yumuşatmadan söyler.
 

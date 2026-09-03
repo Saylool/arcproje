@@ -2,6 +2,10 @@ import { SHARED_BILL_ACCESS_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill-access
 import { SHARED_BILL_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill";
 import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { LOCALE_COOKIE_MAX_AGE_SECONDS, type Locale } from "@/lib/i18n/locale";
+import {
+  BILL_RETENTION_AFTER_EXPIRY_MS,
+  BILL_RETENTION_DAYS,
+} from "@/lib/db/retention";
 import { QUOTE_LIFETIME_MS } from "@/lib/rates/quote";
 
 import type { PrivacyPolicy } from "./privacy-types";
@@ -49,6 +53,14 @@ export const POLICY_DURATIONS = {
 } as const;
 
 const BILL_DAYS = POLICY_DURATIONS.billDays;
+
+/*
+ * Saklama süreleri KODDAN türer, elle yazılmaz. Temizlik görevi bu sayıları
+ * kullanır; politika ile davranışın ayrışması böylece imkânsızlaşır.
+ */
+const BILL_RETENTION_AFTER_EXPIRY_DAYS =
+  BILL_RETENTION_AFTER_EXPIRY_MS / (24 * 60 * 60 * 1000);
+const BILL_TOTAL_RETENTION_DAYS = BILL_RETENTION_DAYS;
 const ACCESS_MINUTES = POLICY_DURATIONS.accessMinutes;
 const QUOTE_MINUTES = POLICY_DURATIONS.quoteMinutes;
 const COOKIE_DAYS = POLICY_DURATIONS.cookieDays;
@@ -136,7 +148,7 @@ const tr: PrivacyPolicy = {
               "Ortak hesap: alıcı ve borçlu cüzdan adresleri, verdiğin etiketler, TL tutarlar, imzalar, ödeme işlemi hash'leri",
               "Bağlantıyı açan kişiye yalnızca kendi borcunu gösterebilmek",
               "Sözleşmenin ifası — KVKK m. 5/2-c, GDPR m. 6/1-b",
-              `${BILL_DAYS} gün sonra erişilemez olur; kayıt silme talebine kadar durur`,
+              `${BILL_DAYS} gün sonra erişilemez olur; toplam ${BILL_TOTAL_RETENTION_DAYS} gün sonra silinir`,
             ],
             [
               "Kayıtlı kişiler: verdiğin ad ve cüzdan adresi",
@@ -160,7 +172,7 @@ const tr: PrivacyPolicy = {
         },
         {
           kind: "warning",
-          text: `Süresi dolan ortak hesap kayıtları otomatik olarak SİLİNMEZ. ${BILL_DAYS} gün sonra hesap artık açılamaz ve ödenemez, ancak kayıt veritabanında kalmaya devam eder. Silinmesini istiyorsan yukarıdaki adrese yazman gerekir.`,
+          text: `Süresi dolan ortak hesap kayıtları otomatik olarak silinir. ${BILL_DAYS} gün sonra hesap artık açılamaz ve ödenemez; kayıt bundan ${BILL_RETENTION_AFTER_EXPIRY_DAYS} gün daha durur, sonra günlük çalışan bir temizlikle borç satırlarıyla birlikte veritabanından kaldırılır. Daha erken silinmesini istiyorsan yukarıdaki adrese yazabilirsin.`,
         },
       ],
     },
@@ -403,7 +415,7 @@ const en: PrivacyPolicy = {
               "Shared bill: recipient and debtor wallet addresses, the labels you type, TRY amounts, signatures, payment transaction hashes",
               "Showing each person who opens the link only their own share",
               "Performance of a contract — KVKK art. 5/2-c, GDPR art. 6(1)(b)",
-              `Becomes unreachable after ${BILL_DAYS} days; the record is kept until you ask for deletion`,
+              `Becomes unreachable after ${BILL_DAYS} days; deleted after ${BILL_TOTAL_RETENTION_DAYS} days in total`,
             ],
             [
               "Saved people: the name you give and the wallet address",
@@ -427,7 +439,7 @@ const en: PrivacyPolicy = {
         },
         {
           kind: "warning",
-          text: `Expired shared bills are NOT deleted automatically. After ${BILL_DAYS} days the bill can no longer be opened or paid, but the record remains in the database. If you want it removed, write to the address above.`,
+          text: `Expired shared bills are deleted automatically. After ${BILL_DAYS} days the bill can no longer be opened or paid; the record is kept for a further ${BILL_RETENTION_AFTER_EXPIRY_DAYS} days and is then removed from the database, together with its debt rows, by a daily cleanup. If you want it gone sooner, you can write to the address above.`,
         },
       ],
     },

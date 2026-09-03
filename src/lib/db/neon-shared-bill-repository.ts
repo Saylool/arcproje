@@ -9,6 +9,7 @@ import {
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
   CountExpiredBillsOutcome,
+  DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
@@ -341,14 +342,72 @@ RETURNING contact_id
  * sahiplik bağı ise shared_bills'teki ON DELETE SET NULL ile gider. Hesapların
  * KENDİSİ durur: içlerinde başka insanların borcu var.
  */
-/*
- * SAYAR, SİLMEZ. Bu dosyada shared_bills için hiçbir DELETE yoktur ve bu
- * bilinçlidir; saklama temizliği ayrı bir adımda açılır.
- */
 const COUNT_BILLS_PAST_RETENTION = `
 SELECT count(*)::int AS expired
 FROM shared_bills
 WHERE expires_at < to_timestamp($1 / 1000.0)
+`;
+
+/*
+ * Tablodaki TOPLAM hesap sayısı.
+ *
+ * Tanısaldır: uygun sayısı sıfırken toplam da sıfırsa, sorgunun bir şey bulup
+ * bulamadığı BİLİNEMEZ. İkisi birlikte raporlanır.
+ */
+const COUNT_ALL_BILLS = `
+SELECT count(*)::int AS total
+FROM shared_bills
+`;
+
+/*
+ * SAKLAMA TEMİZLİĞİ — hangi kayıtlara dokunulacağı.
+ *
+ * Ölçüt TEK YERDE tanımlanır ve aşağıdaki altı deyimin HEPSİNE aynen gömülür,
+ * çünkü hepsi AYNI kümeye dokunmak zorundadır. Farklı kümeler, borç satırları
+ * silinmiş ama kendisi DURAN bir hesap bırakabilirdi.
+ *
+ * `ORDER BY` sıralamayı belirlenimci yapar. Sıralama olmadan `LIMIT` her
+ * deyimde başka satırlar seçebilir; asıl tehlike budur, uzun süren sorgu
+ * değil.
+ *
+ * Eşik `COUNT_BILLS_PAST_RETENTION` ile BİREBİR aynıdır: sayımda ölçülen
+ * davranışın silmede de geçerli olması buna bağlıdır.
+ */
+const RETENTION_TARGETS = `
+  SELECT bill_id
+  FROM shared_bills
+  WHERE expires_at < to_timestamp($1 / 1000.0)
+  ORDER BY expires_at ASC, bill_id ASC
+  LIMIT $2
+`;
+
+/*
+ * SİLME SIRASI ÇOCUKTAN EBEVEYNE.
+ *
+ * Cascade'e GÜVENİLMEZ: `shared_bill_payment_attempts` teklifleri
+ * `ON DELETE RESTRICT` ile referanslıyor. Tek bir cascade'li silmede teklif
+ * denemeden önce silinmeye kalkarsa yabancı anahtar hatası verir ve temizlik
+ * tümüyle düşer. Sıra bu yüzden AÇIKÇA verilir.
+ */
+const RETENTION_DELETE_ORDER = [
+  "shared_bill_payment_attempts",
+  "shared_bill_payment_offers",
+  "shared_bill_sessions",
+  "shared_bill_auth_nonces",
+  "shared_bill_debts",
+] as const;
+
+const RETENTION_CHILD_DELETES = RETENTION_DELETE_ORDER.map(
+  (table) => `
+DELETE FROM ${table}
+WHERE bill_id IN (${RETENTION_TARGETS})
+`,
+);
+
+const DELETE_RETENTION_BILLS = `
+DELETE FROM shared_bills
+WHERE bill_id IN (${RETENTION_TARGETS})
+RETURNING bill_id
 `;
 
 const DELETE_APP_USER = `
@@ -1159,6 +1218,52 @@ export async function createNeonSharedBillRepository(
           return { ok: false, reason: "unavailable" };
         }
         return { ok: true, count };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async countAllBills(): Promise<CountExpiredBillsOutcome> {
+      try {
+        const rows = (await sql.query(COUNT_ALL_BILLS, [])) as {
+          total: unknown;
+        }[];
+        const raw = rows[0]?.total;
+        const count = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isInteger(count) || count < 0) {
+          return { ok: false, reason: "unavailable" };
+        }
+        return { ok: true, count };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async deleteBillsPastRetention(input: {
+      cutoffMs: number;
+      limit: number;
+    }): Promise<DeleteExpiredBillsOutcome> {
+      /*
+       * TEK İŞLEM. Herhangi bir deyim düşerse hiçbiri uygulanmaz; yarım
+       * temizlenmiş, borç satırları gitmiş ama kendisi duran bir hesap
+       * kalmaz.
+       *
+       * Sürücünün `transaction()` API'si SABİT bir dizi alır — burada
+       * dallanma zaten gerekmez, sıra baştan bellidir.
+       */
+      const parameters = [input.cutoffMs, input.limit];
+      try {
+        const results = await sql.transaction((txn) => [
+          ...RETENTION_CHILD_DELETES.map((statement) =>
+            txn.query(statement, parameters),
+          ),
+          txn.query(DELETE_RETENTION_BILLS, parameters),
+        ]);
+        const removed = results[results.length - 1];
+        return {
+          ok: true,
+          deleted: Array.isArray(removed) ? removed.length : 0,
+        };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

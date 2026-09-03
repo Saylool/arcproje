@@ -125,6 +125,10 @@ export type CountExpiredBillsOutcome =
   | { ok: true; count: number }
   | { ok: false; reason: "unavailable" };
 
+export type DeleteExpiredBillsOutcome =
+  | { ok: true; deleted: number }
+  | { ok: false; reason: "unavailable" };
+
 export type DeleteAppUserOutcome =
   /** `deleted`, GERÇEKTEN bir satır gidip gitmediğini söyler. */
   | { ok: true; deleted: boolean }
@@ -343,6 +347,29 @@ export type SharedBillRepository = SharedBillPaymentRepository &
   countBillsPastRetention(input: {
     cutoffMs: number;
   }): Promise<CountExpiredBillsOutcome>;
+
+  /**
+   * Tablodaki TOPLAM hesap sayısı.
+   *
+   * Tanısaldır. Uygun sayısı sıfırken toplam da sıfırsa, ölçütün gerçekten
+   * bir şey bulup bulamadığı BİLİNEMEZ; ikisi birlikte raporlanır.
+   */
+  countAllBills(): Promise<CountExpiredBillsOutcome>;
+
+  /**
+   * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.
+   *
+   * TEK İŞLEMDE ve ÇOCUKTAN EBEVEYNE sırayla. Cascade'e bırakılmaz: ödeme
+   * denemeleri teklifleri `ON DELETE RESTRICT` ile referansladığı için tek
+   * bir cascade'li silme yabancı anahtar hatasıyla düşebilir.
+   *
+   * `limit` her çalışmada dokunulacak hesap sayısını sınırlar; seçim
+   * belirlenimcidir, yoksa deyimler farklı kümelere dokunabilirdi.
+   */
+  deleteBillsPastRetention(input: {
+    cutoffMs: number;
+    limit: number;
+  }): Promise<DeleteExpiredBillsOutcome>;
 
   listRecentDebtorsFor(input: {
     createdByUserId: string;

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { SHARED_BILL_ACCESS_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill-access";
 import { SHARED_BILL_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill";
+import { BILL_RETENTION_DAYS } from "@/lib/db/retention";
 import { SHARED_BILL_SESSION_LIFETIME_MS } from "@/lib/db/shared-bill-access-service";
 import { LOCALE_COOKIE_MAX_AGE_SECONDS, LOCALES } from "@/lib/i18n/locale";
 import { QUOTE_LIFETIME_MS } from "@/lib/rates/quote";
@@ -238,14 +239,40 @@ describe("yumuşatılmaması gereken iki sınır", () => {
     expect(policyText(PRIVACY_POLICY.en)).toContain("permanently");
   });
 
-  it("süresi dolan kaydın SİLİNMEDİĞİ söylenir", () => {
+  it("silme SÖZÜ, gerçekten çalışan bir temizliğe dayanır", () => {
     /*
-     * Kodda `shared_bills` için hiçbir silme yolu yok; "otomatik silinir"
-     * demek yanlış beyan olurdu. Bu testin düşmesi metnin gerçekten
-     * yumuşatıldığı anlamına gelir.
+     * Bu metin bir zamanlar "otomatik olarak SİLİNMEZ" diyordu ve o gün
+     * DOĞRUYDU: kodda `shared_bills` için hiçbir silme yolu yoktu. Söz ancak
+     * temizlik gerçekten çalıştığı için verilebiliyor.
+     *
+     * Bağ burada kurulur: silme yolu kaldırılırsa ya da görev sökülürse bu
+     * test düşer ve politika yanlış beyanda BULUNAMAZ.
      */
-    expect(policyText(PRIVACY_POLICY.tr)).toContain("otomatik olarak SİLİNMEZ");
-    expect(policyText(PRIVACY_POLICY.en)).toContain("NOT deleted automatically");
+    const neon = readFileSync(
+      "src/lib/db/neon-shared-bill-repository.ts",
+      "utf8",
+    );
+    expect(neon).toContain("DELETE FROM shared_bills");
+
+    const crons = (
+      JSON.parse(readFileSync("vercel.json", "utf8")) as {
+        crons: { path: string }[];
+      }
+    ).crons;
+    expect(crons.some((cron) => cron.path === "/api/cron/retention")).toBe(true);
+
+    expect(policyText(PRIVACY_POLICY.tr)).toContain("otomatik olarak silinir");
+    expect(policyText(PRIVACY_POLICY.en)).toContain("deleted automatically");
+  });
+
+  it("saklama süresi KODDAKİ sabitten gelir, elle yazılmaz", () => {
+    /* Politikadaki gün sayısı ile görevin kullandığı sayı ayrışamaz. */
+    expect(policyText(PRIVACY_POLICY.tr)).toContain(
+      `${BILL_RETENTION_DAYS} gün`,
+    );
+    expect(policyText(PRIVACY_POLICY.en)).toContain(
+      `${BILL_RETENTION_DAYS} days`,
+    );
   });
 
   it("test ağı uyarısı KENDİ bölümünde durur", () => {
