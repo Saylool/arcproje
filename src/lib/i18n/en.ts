@@ -711,6 +711,10 @@ export const en: Dictionary = {
   },
 
   errors: {
+    receiptTooLargeToSend:
+      "This image is too big to send. Try photographing the receipt from a little further away, in a single frame.",
+    receiptUnreadableImage:
+      "This image could not be opened. Try another photo, or a file in JPG or PNG format.",
     generic: "Something went wrong. Please try again.",
     analyzeFailed: "The receipt could not be analyzed. Please try again.",
     analyzeTimeout: "The analysis timed out. Please try again.",

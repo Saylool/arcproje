@@ -762,6 +762,10 @@ export const tr = {
   /* Hata sözlükleri — kararlı kodlarla anahtarlanır                          */
   /* --------------------------------------------------------------------- */
   errors: {
+    receiptTooLargeToSend:
+      "Bu görsel gönderilemeyecek kadar büyük. Fişi biraz daha uzaktan, tek kare hâlinde çekmeyi dene.",
+    receiptUnreadableImage:
+      "Bu görsel açılamadı. Başka bir fotoğraf ya da JPG/PNG biçiminde bir dosya dene.",
     /** Bilinmeyen bir sunucu kodu için güvenli genel karşılık. */
     generic: "Bir şeyler ters gitti. Lütfen tekrar dene.",
     analyzeFailed: "Fiş analiz edilemedi. Lütfen tekrar dene.",

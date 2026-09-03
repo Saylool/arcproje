@@ -22,6 +22,7 @@ import {
   resolveMessage,
   type MessageDescriptor,
 } from "@/lib/i18n/messages";
+import { prepareReceiptUpload } from "@/lib/receipt/prepare-upload";
 import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
 import {
   calculateDebts,
@@ -236,8 +237,26 @@ export function ReceiptFlow({
     }, CLIENT_TIMEOUT_MS);
 
     try {
+      /*
+       * GÖNDERMEDEN ÖNCE küçült. Platformun istek gövdesi sınırı uygulama
+       * koduna ULAŞMADAN devreye giriyor; sunucudaki hiçbir doğrulama bu
+       * duruma yetişemez. Sınırın altındaki dosyaya dokunulmaz.
+       */
+      const prepared = await prepareReceiptUpload(file);
+      if (!prepared.ok) {
+        setErrorMessage(
+          messageKey(
+            prepared.reason === "tooLarge"
+              ? "errors.receiptTooLargeToSend"
+              : "errors.receiptUnreadableImage",
+          ),
+        );
+        setStatus("error");
+        return;
+      }
+
       const body = new FormData();
-      body.append("receipt", file);
+      body.append("receipt", prepared.file);
 
       const response = await fetch("/api/receipts/analyze", {
         method: "POST",
@@ -247,6 +266,16 @@ export function ReceiptFlow({
       const payload: unknown = await response.json().catch(() => null);
 
       if (!response.ok) {
+        /*
+         * 413 PLATFORMDAN gelir, uygulamadan değil: gövdesi JSON değil düz
+         * metindir ve okunacak bir kod TAŞIMAZ. Ayrıca karşılanmazsa
+         * kullanıcı, sebebini anlatmayan genel bir hata görür.
+         */
+        if (response.status === 413) {
+          setErrorMessage(messageKey("errors.receiptTooLargeToSend"));
+          setStatus("error");
+          return;
+        }
         /*
          * Sunucunun hazir metni GOSTERILMEZ: yalnizca KARARLI KOD okunur ve
          * cumle sozlukten, etkin dilde secilir. Taninmayan kod guvenli genel
