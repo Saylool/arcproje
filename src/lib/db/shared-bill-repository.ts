@@ -121,6 +121,10 @@ export type DeleteContactOutcome =
   | { ok: true; deleted: number }
   | { ok: false; reason: "unavailable" };
 
+export type CountExpiredBillsOutcome =
+  | { ok: true; count: number }
+  | { ok: false; reason: "unavailable" };
+
 export type DeleteAppUserOutcome =
   /** `deleted`, GERÇEKTEN bir satır gidip gitmediğini söyler. */
   | { ok: true; deleted: boolean }
@@ -325,6 +329,20 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * Olmayan bir kullanıcıyı silmek HATA DEĞİLDİR: `deleted: false` döner.
    */
   deleteAppUser(input: { userId: string }): Promise<DeleteAppUserOutcome>;
+
+  /**
+   * Saklama süresi DOLMUŞ hesapların SAYISINI döndürür.
+   *
+   * YALNIZCA SAYAR. Hiçbir satıra dokunmaz. Silme ayrı bir adımdır ve önce
+   * bu sayının beklendiği gibi olduğu görülür; geri dönüşü olmayan bir işi
+   * ölçmeden açmak doğru olmaz.
+   *
+   * Sınır ÇAĞIRANDAN gelir ve sorgunun içinde uygulanır: depo kendi başına
+   * "şimdi"den bir eşik türetmez.
+   */
+  countBillsPastRetention(input: {
+    cutoffMs: number;
+  }): Promise<CountExpiredBillsOutcome>;
 
   listRecentDebtorsFor(input: {
     createdByUserId: string;

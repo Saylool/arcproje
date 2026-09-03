@@ -1,6 +1,7 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  CountExpiredBillsOutcome,
   DeleteAppUserOutcome,
   DeleteContactOutcome,
   ListSavedContactsOutcome,
@@ -409,6 +410,26 @@ export function createFakeSharedBillRepository(
       );
       savedContacts.set(input.userId, next);
       return { ok: true, deleted: own.length - next.length };
+    },
+
+    async countBillsPastRetention(input: {
+      cutoffMs: number;
+    }): Promise<CountExpiredBillsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /*
+       * SQL ile AYNI ölçüt: sınırın kendisi dahil DEĞİL. Sahte deponun
+       * gevşek davranması, gerçek sorgunun bir günlük kaymasını gizlerdi.
+       */
+      let count = 0;
+      for (const bill of bills.values()) {
+        if (bill.manifest.expiresAt * 1000 < input.cutoffMs) {
+          count += 1;
+        }
+      }
+      return { ok: true, count };
     },
 
     async deleteAppUser(input: {
