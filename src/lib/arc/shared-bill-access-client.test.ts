@@ -394,6 +394,90 @@ describe("oturum cerezi politikasi", () => {
   });
 });
 
+describe("hala gecerli oturum YENIDEN IMZA istemeden kullanilir", () => {
+  const view = readFileSync("src/components/SharedBillDebtorView.tsx", "utf8");
+
+  it("acilista mevcut oturumla borc getirilmeye calisilir", () => {
+    /*
+     * Odemeden sonra cuzdandan donuldugunde sayfa yeniden yuklenir. Oturum
+     * cerezi hala gecerliyken yeniden imza istemek, kullaniciyi gereksiz yere
+     * bir kez daha cuzdana gonderirdi.
+     *
+     * IKI cagri vardir ve IKISI de gereklidir: biri acilistaki efekt, digeri
+     * imza akisinin kuyrugu. Sayilari sabitlenir ki biri sessizce dusmesin.
+     */
+    expect(view.split("await showFromSession(account, chainId)").length - 1).toBe(2);
+
+    const effect = view.slice(
+      view.indexOf("if (account === null || !onArc"),
+      view.indexOf("/** Bağlan → meydan okuma"),
+    );
+    expect(effect).toContain("await showFromSession(account, chainId)");
+  });
+
+  it("imza akisi da AYNI kuyrugu kullanir", () => {
+    const auth = view.slice(view.indexOf("const authenticate = async"));
+    expect(auth).toContain("await showFromSession(account, chainId)");
+  });
+
+  it("oturum getirilemediyse GOSTERILDI sayilmaz", () => {
+    /*
+     * Bu dal iki cagiranin da davranisini belirler: acilis sessizce gecer,
+     * imza akisi hata gosterir. "shown" donmek IKISINI birden bozardi -- acilis
+     * bos ekranda kalir, imza akisi da hatayi yutardi.
+     */
+    const session = view.slice(
+      view.indexOf("const showFromSession = useCallback"),
+      view.indexOf("const verified = await verifyAuthenticatedView"),
+    );
+    expect(session).toContain('return { kind: "unauthorized", code: fetched.code };');
+    expect(session).not.toContain('kind: "shown"');
+  });
+
+  it("imzadan SONRA borc getirilemezse hata GOSTERILIR", () => {
+    /*
+     * Acilista "oturum yok" beklenen durumdur ve sessizce gecilir; ama imza az
+     * once gectigi halde borc gelmiyorsa bu gercek bir hatadir ve sunucunun
+     * KODU gosterilir.
+     */
+    const auth = view.slice(view.indexOf("const authenticate = async"));
+    expect(auth).toContain('outcome.kind === "unauthorized"');
+    expect(auth).toContain("messageApi(outcome.code)");
+  });
+
+  it("YALNIZCA cuzdan bagliyken ve Arc'tayken denenir", () => {
+    // Adres olmadan dogrulama yapilamaz; yanlis agda borc gosterilmez.
+    expect(view).toContain("if (account === null || !onArc || stage.status !== \"idle\")");
+  });
+
+  it("IMZA KALDIRILMADI: oturumu kurmanin tek yolu hala imzadir", () => {
+    expect(view).toContain("signSharedBillAccessChallenge");
+    expect(view).toContain("requestAccessChallenge");
+    expect(view).toContain("submitAccessResolution");
+  });
+
+  it("DOGRULAMA tek yerdedir: iki yol da onu atlayamaz", () => {
+    /*
+     * Imzadan gelen yol ile oturumdan gelen yol ayni kuyrugu kullanir.
+     * `verifyAuthenticatedView` tek kez gecerse, hicbir yol onu atlayamaz.
+     */
+    expect(view.split("verifyAuthenticatedView(").length - 1).toBe(1);
+    expect(view.split("fetchAuthenticatedDebt(").length - 1).toBe(1);
+  });
+
+  it("dogrulama duserse HICBIR borc gosterilmez", () => {
+    const tail = view.slice(view.indexOf("const showFromSession"));
+    const failed = tail.indexOf("if (!verified.ok)");
+    const ready = tail.indexOf('status: "ready"');
+    expect(failed).toBeGreaterThan(-1);
+    expect(ready).toBeGreaterThan(failed);
+  });
+
+  it("borc YALNIZCA tek yerde gosterilir", () => {
+    expect(view.split('setStage({ status: "ready", view:').length - 1).toBe(1);
+  });
+});
+
 describe("borclu arayuzu sozlesmesi", () => {
   const view = readFileSync("src/components/SharedBillDebtorView.tsx", "utf8");
   const page = readFileSync("src/app/pay/[billId]/page.tsx", "utf8");
