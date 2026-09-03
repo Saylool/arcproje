@@ -12,11 +12,16 @@ import {
 
 import { useTranslator } from "@/lib/i18n/context";
 import { formatFileSize } from "@/lib/i18n/format";
+import { MAX_SOURCE_BYTES } from "@/lib/receipt/upload-limits";
 
 const ACCEPTED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 const ACCEPTED_EXTENSIONS = [".jpg", ".jpeg", ".png", ".webp"];
 const ACCEPT_ATTRIBUTE = ACCEPTED_MIME_TYPES.join(",");
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+/*
+ * Sınır tek yerden gelir. Daha önce bu sayı burada, sunucuda ve sözlükte
+ * ayrı ayrı yazılıydı ve üçü de platformun gerçek sınırından habersizdi.
+ */
+const MAX_FILE_SIZE_BYTES = MAX_SOURCE_BYTES;
 
 type SelectedReceipt = {
   file: File;
