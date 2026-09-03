@@ -180,6 +180,81 @@ export function SharedBillDebtorView({ billId }: Props) {
     resetResolved();
   };
 
+  /** Oturumla borç getirme denemesinin sonucu. */
+  type SessionOutcome =
+    | { kind: "shown" }
+    /** Oturum yok ya da süresi dolmuş — açılışta beklenen durum. */
+    | { kind: "unauthorized"; code?: string }
+    /** Doğrulama düştü; hata zaten gösterildi. */
+    | { kind: "failed" };
+
+  /**
+   * MEVCUT OTURUMLA borcu getirir, doğrular ve gösterir.
+   *
+   * İmza akışının kuyruğu burada tek yerde durur. Hem yeni imzadan sonra hem
+   * de sayfa yeniden yüklendiğinde AYNI yol çalışır; biri diğerinden farklı
+   * davranamaz.
+   *
+   * DOĞRULAMA HER İKİ YOLDA DA ÇALIŞIR: bağlı adres ve zincir sunucudan gelen
+   * yükle karşılaştırılır. Başkasının çerezi başka bir cüzdanla işe yaramaz.
+   */
+  const showFromSession = useCallback(
+    async (
+      address: string,
+      chain: number | null,
+    ): Promise<SessionOutcome> => {
+      const fetched = await fetchAuthenticatedDebt(billId);
+      if (!fetched.ok) {
+        /*
+         * Oturum yok ya da süresi dolmuş. Açılışta bu BEKLENEN durumdur ve
+         * sessizce geçilir; imzadan hemen sonra ise gerçek bir hatadır ve
+         * çağıran taraf sunucunun KODUNU gösterir.
+         */
+        return { kind: "unauthorized", code: fetched.code };
+      }
+      const verified = await verifyAuthenticatedView({
+        payload: fetched.value,
+        connectedAddress: address,
+        connectedChainId: chain,
+        billId,
+        nowMs: Date.now(),
+      });
+      if (!verified.ok) {
+        // Doğrulama düşerse HİÇBİR borç gösterilmez.
+        setStage({
+          status: "error",
+          message: messageKey(`errors.view.${verified.problem}`),
+        });
+        return { kind: "failed" };
+      }
+      setStage({ status: "ready", view: verified.view });
+      return { kind: "shown" };
+    },
+    [billId],
+  );
+
+  /*
+   * -------------------------------------------------------------------------
+   * HÂLÂ GEÇERLİ OTURUMU KULLAN
+   * -------------------------------------------------------------------------
+   *
+   * Borçlu oturumu bir çerezde yaşıyor. Ödemeden sonra cüzdandan dönüldüğünde
+   * sayfa yeniden yükleniyor; o oturum hâlâ geçerliyken yeniden imza istemek
+   * kullanıcıyı gereksiz yere bir kez daha cüzdana gönderir.
+   *
+   * İmza KALDIRILMADI: oturumu kurmanın tek yolu hâlâ imzadır. Burada yalnızca
+   * ZATEN KAZANILMIŞ bir oturum kullanılıyor. Oturum yoksa ya da süresi
+   * dolduysa hiçbir şey olmaz ve imza düğmesi her zamanki gibi görünür.
+   */
+  useEffect(() => {
+    if (account === null || !onArc || stage.status !== "idle") {
+      return;
+    }
+    void (async () => {
+      await showFromSession(account, chainId);
+    })();
+  }, [account, chainId, onArc, showFromSession, stage.status]);
+
   /** Bağlan → meydan okuma → imza → çözümle → doğrula → göster. */
   const authenticate = async () => {
     if (selectedWalletUuid === null || account === null || !onArc) {
@@ -220,30 +295,12 @@ export function SharedBillDebtorView({ billId }: Props) {
       return;
     }
 
-    const fetched = await fetchAuthenticatedDebt(billId);
-    if (!fetched.ok) {
-      setStage({ status: "error", message: messageApi(fetched.code) });
-      return;
-    }
-
     setStage({ status: "working", step: messageKey("sharedPay.stepVerify") });
-    const verified = await verifyAuthenticatedView({
-      payload: fetched.value,
-      connectedAddress: account,
-      connectedChainId: chainId,
-      billId,
-      nowMs: Date.now(),
-    });
-    if (!verified.ok) {
-      // Doğrulama düşerse HİÇBİR borç gösterilmez.
-      setStage({
-        status: "error",
-        message: messageKey(`errors.view.${verified.problem}`),
-      });
-      return;
+    const outcome = await showFromSession(account, chainId);
+    if (outcome.kind === "unauthorized") {
+      // İmza az önce geçtiği hâlde borç getirilemedi: bu gerçek bir hatadır.
+      setStage({ status: "error", message: messageApi(outcome.code) });
     }
-
-    setStage({ status: "ready", view: verified.view });
   };
 
   const copyRecipient = async () => {
