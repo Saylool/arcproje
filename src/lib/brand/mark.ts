@@ -1,14 +1,23 @@
 /**
- * MARKA İŞARETİ — ₺.
+ * MARKA İŞARETİ — ikiye ayrılmış bir hesap fişi.
  *
- * YALNIZCA GEOMETRİ, hiçbir fonta bağlı değil. Nedeni pratik: başlıktaki
- * işaret bugüne kadar bir metin düğümüydü, yani her cihazda o cihazın
- * fontuyla çiziliyordu ve uygulamanın sabit bir marka varlığı hiç yoktu.
- * Buradaki yollar her makinede aynı çıkar, gözden geçirilebilir ve hem
- * başlıkta hem uygulama ikonlarında AYNI kaynaktan kullanılır.
+ * YALNIZCA GEOMETRİ, hiçbir fonta bağlı değil. Buradaki yollar her makinede
+ * aynı çıkar, gözden geçirilebilir ve hem başlıkta hem uygulama ikonlarında
+ * AYNI kaynaktan kullanılır.
  *
- * Kurgu: dikey bir sap, sapı kesen iki paralel çapraz bar ve sapın dibinde
- * merkezi sapın sağ kenarında olan bir çeyrek halka (kanca).
+ * NEDEN ARTIK LİRA SİMGESİ DEĞİL: eski işaret Türk lirasının simgesiydi ve
+ * uygulamayı tek bir ülkeye bağlıyordu. Üstelik yanlıştı da — bu uygulama
+ * lirayla değil, Arc Testnet üzerindeki test USDC'siyle ödeme yapıyor. Bu
+ * dosyanın hiçbir yerinde para birimi simgesi geçmez; test de bunu ölçer.
+ *
+ * Yerine geçen işaret bir harf ya da para birimi taşımaz: yan yana duran,
+ * biri diğerinden kısa iki fiş. Hangi dili konuşursa konuşsun herkes aynı
+ * şeyi okur — bir hesap, iki pay.
+ *
+ * Kurgu: her fiş üstten yuvarlatılmış, altı yırtık kenarlı bir dikdörtgen.
+ * İçindeki tutar satırları BOYA DEĞİL DELİKTİR; ters yönde sarılmış alt
+ * yollar oldukları için işaret hangi zemine basılırsa basılsın satırlar o
+ * zemini gösterir.
  */
 
 export const MARK_SIZE = 512;
@@ -25,48 +34,90 @@ export const SURFACE_LIGHT = "#ffffff";
 export const SURFACE_DARK = "#0b1120";
 export const MARK_INK = "#ffffff";
 
-const STEM_X = 180;
-const STEM_W = 52;
-const STEM_TOP = 105;
+/**
+ * İkinci fişin rengi.
+ *
+ * `globals.css`te KARŞILIĞI YOKTUR ve olmamalıdır: bu renk arayüzde hiçbir
+ * anlam taşımaz, yalnızca işaretin iki payını birbirinden ayırır. Bir uyarı
+ * ya da durum rengine bağlansaydı, o palet ayarlandığında marka sessizce
+ * değişirdi.
+ */
+export const MARK_ACCENT = "#fcd34d";
 
-const HOOK_CX = STEM_X + STEM_W;
-const HOOK_CY = 275;
-const HOOK_R = 132;
-/** Kanca kalınlığı sap kalınlığına EŞİTTİR; aksi hâlde birleşim yerinde kırılır. */
-const HOOK_T = STEM_W;
-const STEM_BOTTOM = HOOK_CY + HOOK_R;
+/* Fişlerin ölçüleri. MARK_BOUNDS bunlardan TÜRETİLİR, elle yazılmaz. */
+const SLIP_W = 120;
+const SLIP_GAP = 34;
+const LEFT_X = (MARK_SIZE - (SLIP_W * 2 + SLIP_GAP)) / 2;
+const RIGHT_X = LEFT_X + SLIP_W + SLIP_GAP;
 
-const BAR_T = 40;
-const BAR_X1 = 146;
-const BAR_X2 = 360;
-const BAR_RISE = 58;
-const BAR_Y_TOP = 219;
-const BAR_GAP = 80;
+/** İki fiş de aynı hizada yırtılmıştır; farklı olan üst kenarları. */
+const BOTTOM = 404;
+const TALL_TOP = 108;
+const SHORT_TOP = 152;
 
-function bar(yLeft: number): string {
-  const yRight = yLeft - BAR_RISE;
-  return `M${BAR_X1} ${yLeft}L${BAR_X2} ${yRight}v${BAR_T}L${BAR_X1} ${yLeft + BAR_T}Z`;
+const CORNER_R = 22;
+/** Yırtık kenardaki diş sayısı. SLIP_W buna tam bölünür; ondalık koordinat çıkmaz. */
+const TEETH = 3;
+const TOOTH_DIP = 28;
+
+const LINE_INSET = 22;
+const LINE_H = 18;
+const LINE_LONG = SLIP_W - LINE_INSET * 2;
+const LINE_SHORT = 46;
+/** İlk satırın fişin üst kenarına uzaklığı; iki fişte de aynıdır. */
+const LINE_TOP = 48;
+const LINE_GAP = 66;
+
+function lineYs(top: number, count: number): number[] {
+  return Array.from({ length: count }, (_, i) => top + LINE_TOP + i * LINE_GAP);
 }
 
-const rIn = HOOK_R - HOOK_T;
+/**
+ * Bir fiş: dış hat SAAT YÖNÜNDE, tutar satırları TERS yönde.
+ *
+ * Ters sarım, varsayılan `nonzero` doldurma kuralıyla satırları delik yapar.
+ * Boyanmış olsalardı işaretin zemini bilmesi gerekirdi; başlıkta zemin mor,
+ * ikonda mor, koyu temada başka bir şey olurdu.
+ */
+function slip(x: number, top: number, lineCount: number): string {
+  const right = x + SLIP_W;
+  const step = SLIP_W / TEETH;
 
-/** İşareti oluşturan dört yol. Sıra önemsizdir; hepsi aynı renkle doldurulur. */
-export const MARK_PATHS: readonly string[] = [
-  `M${STEM_X} ${STEM_TOP}h${STEM_W}v${STEM_BOTTOM - STEM_TOP}h-${STEM_W}Z`,
-  `M${HOOK_CX + HOOK_R} ${HOOK_CY}A${HOOK_R} ${HOOK_R} 0 0 1 ${HOOK_CX} ${HOOK_CY + HOOK_R}v-${HOOK_T}A${rIn} ${rIn} 0 0 0 ${HOOK_CX + rIn} ${HOOK_CY}Z`,
-  bar(BAR_Y_TOP),
-  bar(BAR_Y_TOP + BAR_GAP),
+  let d = `M${x + CORNER_R} ${top}H${right - CORNER_R}A${CORNER_R} ${CORNER_R} 0 0 1 ${right} ${top + CORNER_R}V${BOTTOM}`;
+  for (let i = 0; i < TEETH; i += 1) {
+    d += `L${right - step * (i + 0.5)} ${BOTTOM - TOOTH_DIP}L${right - step * (i + 1)} ${BOTTOM}`;
+  }
+  d += `V${top + CORNER_R}A${CORNER_R} ${CORNER_R} 0 0 1 ${x + CORNER_R} ${top}Z`;
+
+  const ys = lineYs(top, lineCount);
+  for (const [index, y] of ys.entries()) {
+    /* Son satır kısa: bir fişin toplam satırı diğerlerinden kısadır. */
+    const width = index === ys.length - 1 ? LINE_SHORT : LINE_LONG;
+    d += `M${x + LINE_INSET} ${y}v${LINE_H}h${width}v-${LINE_H}Z`;
+  }
+  return d;
+}
+
+/** İşaretin iki parçası. `ink` her yerde, `accent` yalnızca istendiğinde ayrı renk alır. */
+export type MarkTone = "ink" | "accent";
+
+export const MARK_SHAPES: readonly { d: string; tone: MarkTone }[] = [
+  { d: slip(LEFT_X, TALL_TOP, 3), tone: "ink" },
+  { d: slip(RIGHT_X, SHORT_TOP, 2), tone: "accent" },
 ];
+
+/** Tek renkli kullanım için yollar. Başlıktaki işaret bunu okur. */
+export const MARK_PATHS: readonly string[] = MARK_SHAPES.map((shape) => shape.d);
 
 /**
  * İşaretin kapladığı dikdörtgen. Yollardan değil, onları üreten SABİTLERDEN
  * türetilir; geometri değişirse birlikte değişir.
  */
 export const MARK_BOUNDS = {
-  minX: BAR_X1,
-  minY: STEM_TOP,
-  maxX: HOOK_CX + HOOK_R,
-  maxY: STEM_BOTTOM,
+  minX: LEFT_X,
+  minY: TALL_TOP,
+  maxX: RIGHT_X + SLIP_W,
+  maxY: BOTTOM,
 } as const;
 
 /**
@@ -88,24 +139,38 @@ export function markCornerRadius(): number {
   return Math.sqrt(dx * dx + dy * dy);
 }
 
-/** İşaretin bir kutu içindeki SVG'si. Ölçek ve konum çağıran tarafındadır. */
+/**
+ * İşaretin bir kutu içindeki SVG'si. Ölçek ve konum çağıran tarafındadır.
+ *
+ * `accent` verilmezse iki parça da `ink` ile çizilir; tek renkli kullanım
+ * varsayılandır, ikinci renk açıkça istenir.
+ */
 export function markSvg(options: {
   size: number;
   background: string | null;
   ink?: string;
+  accent?: string;
   scale?: number;
 }): string {
-  const { size, background, ink = MARK_INK, scale = 1 } = options;
+  const { size, background, ink = MARK_INK, accent, scale = 1 } = options;
   const offset = ((1 - scale) * MARK_SIZE) / 2;
   const fill =
     background === null
       ? ""
       : `<rect width="${MARK_SIZE}" height="${MARK_SIZE}" fill="${background}"/>`;
-  const paths = MARK_PATHS.map((d) => `<path d="${d}"/>`).join("");
+  const group = (tone: MarkTone, colour: string) => {
+    const paths = MARK_SHAPES.filter((shape) => shape.tone === tone)
+      .map((shape) => `<path d="${shape.d}"/>`)
+      .join("");
+    return paths === ""
+      ? ""
+      : `<g fill="${colour}" transform="translate(${offset} ${offset}) scale(${scale})">${paths}</g>`;
+  };
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${MARK_VIEWBOX}" width="${size}" height="${size}">`,
     fill,
-    `<g fill="${ink}" transform="translate(${offset} ${offset}) scale(${scale})">${paths}</g>`,
+    group("ink", ink),
+    group("accent", accent ?? ink),
     `</svg>`,
   ].join("");
 }

@@ -5,8 +5,11 @@ import { describe, expect, it } from "vitest";
 import manifest from "@/app/manifest";
 import {
   BRAND_COLOR,
+  MARK_ACCENT,
   MARK_BOUNDS,
+  MARK_INK,
   MARK_PATHS,
+  MARK_SHAPES,
   MARK_SIZE,
   MASKABLE_SAFE_RADIUS,
   SURFACE_DARK,
@@ -44,6 +47,7 @@ function pngSize(path: string): { width: number; height: number } {
 describe("marka işareti", () => {
   it("hiçbir FONTA bağlı değildir", () => {
     // Başlıktaki eski `₺` bir metin düğümüydü ve her cihazda farklı çizilirdi.
+    // Yerine geçen fiş işareti de aynı kuralda: yol var, yazı yok.
     const source = read("src/lib/brand/mark.ts");
     expect(source).not.toContain("<text");
     expect(source).not.toContain("font-family");
@@ -90,6 +94,88 @@ describe("marka işareti", () => {
     const svg = markSvg({ size: 512, background: null, scale: 0.5 });
     // (1 - 0.5) * 512 / 2 = 128
     expect(svg).toContain("translate(128 128) scale(0.5)");
+    // İki parça da AYNI dönüşümü alır; biri kalsaydı işaret ikiye ayrılırdı.
+    expect(svg.split("translate(128 128) scale(0.5)").length - 1).toBe(2);
+  });
+});
+
+describe("işaret bir para birimine ya da ülkeye BAĞLI DEĞİLDİR", () => {
+  const source = read("src/lib/brand/mark.ts");
+
+  it("hiçbir para birimi simgesi taşımaz", () => {
+    /*
+     * Eski işaret ₺ idi: uygulamayı tek bir ülkeye bağlıyordu ve yanlıştı da,
+     * çünkü ödemeler lirayla değil Arc Testnet'teki test USDC'siyle yapılıyor.
+     * Bu test simgenin geri sızmasını engeller.
+     */
+    const symbols = ["₺", "$", "€", "£", "¥", "₽", "₹"];
+    for (const symbol of symbols) {
+      for (const d of MARK_PATHS) {
+        expect(d, symbol).not.toContain(symbol);
+      }
+    }
+    /* Kaynakta `$` şablon değişmezlerinde geçer; geri kalanının işi yok. */
+    for (const symbol of symbols.filter((s) => s !== "$")) {
+      expect(source, symbol).not.toContain(symbol);
+    }
+  });
+});
+
+describe("iki pay, iki ton", () => {
+  it("işaret İKİ parçadan oluşur: bir mürekkep, bir vurgu", () => {
+    expect(MARK_SHAPES).toHaveLength(2);
+    expect(MARK_SHAPES.filter((s) => s.tone === "ink")).toHaveLength(1);
+    expect(MARK_SHAPES.filter((s) => s.tone === "accent")).toHaveLength(1);
+  });
+
+  it("tek renkli liste ile parça listesi AYRIŞAMAZ", () => {
+    // Başlık `MARK_SHAPES`, geriye kalan her yer `MARK_PATHS` okur.
+    expect(MARK_PATHS).toEqual(MARK_SHAPES.map((s) => s.d));
+  });
+
+  it("vurgu rengi mürekkepten de zeminden de FARKLIDIR", () => {
+    // Aynı olsalardı ikinci pay görünmezdi; testi geçen ama boş bir marka olurdu.
+    expect(MARK_ACCENT).not.toBe(MARK_INK);
+    expect(MARK_ACCENT).not.toBe(BRAND_COLOR);
+  });
+
+  it("vurgu İSTENMEDİKÇE kullanılmaz", () => {
+    // Varsayılan tek renktir: işaret zemini bilmediği yerlerde de doğru çıkar.
+    const mono = markSvg({ size: 512, background: null });
+    expect(mono).not.toContain(MARK_ACCENT);
+    expect(mono.split(`fill="${MARK_INK}"`).length - 1).toBe(2);
+  });
+
+  it("vurgu istendiğinde YALNIZCA ikinci payı boyar", () => {
+    const svg = markSvg({ size: 512, background: BRAND_COLOR, accent: MARK_ACCENT });
+    expect(svg.split(`fill="${MARK_ACCENT}"`).length - 1).toBe(1);
+    expect(svg).toContain(`fill="${MARK_INK}"`);
+  });
+});
+
+describe("tutar satırları DELİKTİR, boya değil", () => {
+  /*
+   * Satırlar zemin rengiyle boyansaydı işaretin bastığı zemini bilmesi
+   * gerekirdi: ikonda mor, başlıkta mor rozet, koyu temada başka bir şey.
+   * Ters yönde sarılmış alt yollar `nonzero` kuralıyla gerçek delik açar.
+   */
+
+  it("işaret zeminsiz çizildiğinde marka rengi HİÇ geçmez", () => {
+    const svg = markSvg({ size: 512, background: null });
+    expect(svg).not.toContain(BRAND_COLOR);
+  });
+
+  it("her satır dış hattın TERSİ yönde sarılmıştır", () => {
+    for (const { d } of MARK_SHAPES) {
+      const [outline, ...holes] = d.split("M").filter((part) => part !== "");
+      // Dış hat üst kenardan SAĞA gider: saat yönü.
+      expect(outline).toMatch(/^\d+ \d+H/);
+      expect(holes.length).toBeGreaterThan(0);
+      for (const hole of holes) {
+        // Satır önce AŞAĞI iner: saat yönünün tersi, yani delik.
+        expect(hole).toMatch(/^\d+ \d+v\d+h\d+v-\d+Z$/);
+      }
+    }
   });
 });
 
@@ -124,7 +210,7 @@ describe("ikon dosyaları", () => {
   it("sekme ikonu AYNI geometriden üretilmiştir", () => {
     // Elle düzenlenirse ikon ile başlık ayrışır; burada eşitlikleri sabitlenir.
     expect(read("src/app/icon.svg")).toBe(
-      `${markSvg({ size: 512, background: BRAND_COLOR })}\n`,
+      `${markSvg({ size: 512, background: BRAND_COLOR, accent: MARK_ACCENT })}\n`,
     );
   });
 });
@@ -213,6 +299,8 @@ describe("başlık ile ikon AYNI işareti kullanır", () => {
   it("işaret bileşeni ORTAK geometriyi okur", () => {
     const mark = read("src/components/BrandMark.tsx");
     expect(mark).toContain('from "@/lib/brand/mark"');
-    expect(mark).toContain("MARK_PATHS");
+    expect(mark).toContain("MARK_SHAPES");
+    // Yolların kendisi burada YAZILMAZ; yazılsaydı ikonla sessizce ayrışırdı.
+    expect(mark).not.toMatch(/d="M\d/);
   });
 });
