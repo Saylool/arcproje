@@ -6,12 +6,15 @@ import { DISCLOSED_HOSTS } from "@/lib/legal/privacy";
 
 import {
   BROWSER_CONNECT_HOSTS,
+  CONTENT_SECURITY_POLICY,
   CONTENT_SECURITY_POLICY_REPORT_ONLY,
   SECURITY_HEADERS,
 } from "./headers";
 
-/** Tek politika var ve simdilik yalnizca RAPORLANIYOR. */
-const POLICY = CONTENT_SECURITY_POLICY_REPORT_ONLY;
+/** UYGULANAN politika: connect-src disindaki her sey burada zorlayicidir. */
+const POLICY = CONTENT_SECURITY_POLICY;
+/** OLCEN politika: yalnizca connect-src burada katidir. */
+const MEASURED = CONTENT_SECURITY_POLICY_REPORT_ONLY;
 
 /**
  * GUVENLIK BASLIKLARI.
@@ -90,7 +93,7 @@ describe("yonergeler: acilan yuzeyler kapatilir", () => {
 
 describe("baglantilar: yalnizca BILDIRILEN adresler", () => {
   it("cuzdan ve zincir icin gerekenler acik", () => {
-    const connect = directive(POLICY, "connect-src");
+    const connect = directive(MEASURED, "connect-src");
     expect(connect).toContain("'self'");
     expect(connect).toContain("https://rpc.testnet.arc.io");
     /* WalletConnect rolesi WEBSOCKET kullanir; wss ayrica gerekir. */
@@ -114,40 +117,47 @@ describe("baglantilar: yalnizca BILDIRILEN adresler", () => {
      * OpenAI ve veritabanina SUNUCU baglanir. Bunlari connect-src'ye koymak,
      * gereksiz yere tarayiciya izin vermek olurdu.
      */
-    const connect = directive(POLICY, "connect-src");
+    const connect = directive(MEASURED, "connect-src");
     expect(connect).not.toContain("api.openai.com");
     expect(connect).not.toContain("neon.tech");
   });
 });
 
-describe("CSP simdilik RAPORLAR, uygulanmaz", () => {
-  it("uygulanan bir CSP basligi GONDERILMEZ", () => {
-    /*
-     * Sebep olculmus bir bilinmezlik: `@circle-fin/app-kit` tarayicida
-     * dinamik olarak yukleniyor ve transfer sirasinda nereye bagladigini
-     * gercek bir transfer yapmadan sayamayiz. Eksik bir `connect-src`, tam da
-     * uygulamanin asil isini -- parayi gondermeyi -- kirardi.
-     */
+describe("uygulanan ve olcen politikalar birlikte gonderilir", () => {
+  it("IKISI de gonderilir", () => {
     const keys = SECURITY_HEADERS.map((header) => header.key);
+    expect(keys).toContain("Content-Security-Policy");
     expect(keys).toContain("Content-Security-Policy-Report-Only");
-    expect(keys).not.toContain("Content-Security-Policy");
   });
 
-  it("cerceveleme korumasi CSP'yi BEKLEMEZ", () => {
+  it("connect-src YALNIZCA olcen politikada katidir", () => {
     /*
-     * Asil kazanc buydu ve AYRI bir baslikla bugun uygulaniyor; CSP'nin
-     * raporda kalmasi onu geciktirmiyor.
+     * Uretimde olculen tek ihlal sinifi buydu ve olcum yalnizca
+     * masaustu/eklenti borclu akisini kapsiyor. Mobil WalletConnect ve
+     * hesabi OLUSTURAN akis henuz calistirilmadi; eksik bir liste parayi
+     * gondermeyi kirardi.
      */
-    const byKey = new Map(SECURITY_HEADERS.map((h) => [h.key, h.value]));
-    expect(byKey.get("X-Frame-Options")).toBe("DENY");
+    expect(directive(POLICY, "connect-src")).toContain("*");
+    expect(directive(MEASURED, "connect-src")).toContain("'self'");
+    expect(directive(MEASURED, "connect-src")).not.toContain("*");
   });
 
-  it("satir ici script RAPORDA da serbesttir", () => {
+  it("connect-src DISINDA iki politika AYNIDIR", () => {
     /*
-     * Amac satir ici script gurultusu degil; `connect-src` gibi GERCEKTEN
-     * bilmedigimiz ihlalleri gorebilmek.
+     * Ayrisirlarsa olcum, uygulananla ilgisiz bir seyi olcmeye baslar.
      */
+    const strip = (policy: string) =>
+      policy
+        .split(";")
+        .map((part) => part.trim())
+        .filter((part) => !part.startsWith("connect-src"));
+    expect(strip(POLICY)).toEqual(strip(MEASURED));
+  });
+
+  it("satir ici script HER IKISINDE de serbesttir", () => {
+    /* Amac satir ici gurultusu degil; gercekten bilmedigimiz ihlaller. */
     expect(directive(POLICY, "script-src")).toContain("'unsafe-inline'");
+    expect(directive(MEASURED, "script-src")).toContain("'unsafe-inline'");
   });
 });
 

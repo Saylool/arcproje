@@ -1138,15 +1138,25 @@ hiçbir isteği kırma riski taşımaz.
 En somut kazanç çerçeveleme: ödeme sayfası daha önce **birinin sitesinde
 iframe'e alınabiliyordu**. `X-Frame-Options` bunu bugün kapatıyor.
 
-**CSP şimdilik yalnızca raporluyor** (`Content-Security-Policy-Report-Only`),
-uygulanmıyor. Sebep ölçülmüş bir bilinmezlik: `@circle-fin/app-kit` tarayıcıda
-dinamik olarak yükleniyor ve transfer sırasında nereye bağlandığını gerçek bir
-transfer yapmadan sayamıyoruz. Eksik bir `connect-src`, tam da uygulamanın asıl
-işini — parayı göndermeyi — kırardı. Gerçek ihlal listesi görüldükten sonra
-ayrı bir adımda uygulanacak.
+**CSP uygulanıyor** — `connect-src` hariç. İkisi birden gönderiliyor:
 
-Politikanın içeriği: `frame-ancestors 'none'`, `base-uri 'none'`,
-`object-src 'none'`, `form-action 'self'`, `default-src 'self'`.
+| Başlık | Kapsam |
+| --- | --- |
+| `Content-Security-Policy` | `connect-src` dışında her şey **zorlayıcı** |
+| `Content-Security-Policy-Report-Only` | yalnızca `connect-src` katı, **ölçüyor** |
+
+Kapsamı **kanıt** belirledi. Üretimde tam bir ödeme akışı rapor kipiyle
+çalıştırıldı ve `connect-src` dışında **tek bir ihlal bile** çıkmadı; yani
+`frame-ancestors`, `frame-src`, `img-src`, `script-src`, `style-src`,
+`worker-src` kısıtlarının hepsi ölçülmüş, tahmin edilmemiştir.
+
+`connect-src` neden hâlâ ölçümde: o ölçüm yalnızca **masaüstü/eklenti borçlu**
+akışını kapsadı. Mobil WalletConnect yolu ve hesabı **oluşturan** akış henüz
+çalıştırılmadı. Eksik bir liste parayı göndermeyi kırar; onlar da temiz
+çıktığında uygulanana taşınacak.
+
+Bir test, iki politikanın `connect-src` dışında **birebir aynı** kalmasını
+zorluyor — ayrışırlarsa ölçüm, uygulananla ilgisiz bir şeyi ölçmeye başlar.
 
 `connect-src`, tarayıcının bağlandığı adreslerle sınırlıdır ve bir test bu
 listeyi gizlilik politikasındaki `DISCLOSED_HOSTS` ile karşılaştırır — yeni bir
