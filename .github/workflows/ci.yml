@@ -43,10 +43,16 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          # Vercel'in derleme ortamıyla uyumlu LTS. Depoya `.nvmrc` veya
-          # `engines` EKLENMEDİ: onlar Vercel'in derleme imajını da
-          # değiştirir ve bu ayrı, açıkça istenmesi gereken bir karardır.
-          node-version: 22.x
+          # KİLİDİ YAZAN npm ile aynı majör sürüm olmalı.
+          #
+          # Ölçüldü: `package-lock.json` npm 11 ile yazılmış; Node 22'nin
+          # getirdiği npm 10, aynı ağacı farklı çözüp `npm ci`yi
+          # "Missing: utf-8-validate@5.0.10 from lock file" ile reddediyor.
+          # Kuramayan bir CI hiçbir işe yaramaz.
+          #
+          # Bu seçim Vercel'i ETKİLEMEZ: derleme imajını `.nvmrc` ve
+          # `engines` belirler, ikisi de bilerek eklenmedi.
+          node-version: 26.x
           cache: npm
 
       - run: npm ci

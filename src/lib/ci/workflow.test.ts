@@ -66,6 +66,16 @@ describe("CI dogru anlarda calisir", () => {
     expect(workflow).toContain("fetch-depth: 0");
   });
 
+  it("Node surumu SABITLENMISTIR", () => {
+    /*
+     * `npm ci`, kilidi YAZAN npm ile uyumlu bir npm ister. Olculdu: kilit
+     * npm 11 ile yazilmis ve npm 10 onu reddediyor. Surumu serbest birakmak,
+     * runner'in varsayilani degistiginde CI'i sessizce kirar.
+     */
+    expect(workflow).toMatch(/node-version:\s*\d+\.x/);
+    expect(workflow).not.toContain("node-version: latest");
+  });
+
   it("is en az yetkiyle calisir", () => {
     expect(workflow).toContain("contents: read");
   });
