@@ -1,0 +1,79 @@
+# Kapı: lint · typecheck · test · build
+#
+# Bu depoda kapı zaten elle çalıştırılıyordu. Buradaki fark ZORUNLU olması:
+# unutulmaya bağlı kalmıyor.
+#
+# Asıl kazanç tek tek PR'lar değil, BİRLEŞME SONUCU. Bu projede bir kez
+# yaşandı: #14–#18 ayrı ayrı yeşilken, birleşmiş hâlde bir test kırıldı —
+# gizlilik politikasının alan adı taraması, başka bir daldan gelen SVG'nin
+# `xmlns` değerini yakaladı. GitHub, `pull_request` olayında PR'ı hedef dalla
+# BİRLEŞTİRİP çalıştırır; tam da o sınıfı yakalar.
+#
+# CI'ın YAPAMADIĞI şeyler de var ve bunlar gizlenmemeli: cüzdan akışı, fiş
+# analizi ve gerçek bir Postgres burada çalışmaz. Kapsam artmıyor, yalnızca
+# mevcut kapı zorunlu hâle geliyor.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Aynı dala arka arkaya push gelirse eskisini iptal et; sıraya girmesin.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# En az yetki: iş yalnızca kodu okur.
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Boşluk denetimi PR'ın DEĞİŞTİRDİĞİ satırlara bakar; hedef dalın
+          # geçmişi olmadan karşılaştırma yapılamaz.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          # KİLİDİ YAZAN npm ile aynı majör sürüm olmalı.
+          #
+          # Ölçüldü: `package-lock.json` npm 11 ile yazılmış; Node 22'nin
+          # getirdiği npm 10, aynı ağacı farklı çözüp `npm ci`yi
+          # "Missing: utf-8-validate@5.0.10 from lock file" ile reddediyor.
+          # Kuramayan bir CI hiçbir işe yaramaz.
+          #
+          # Bu seçim Vercel'i ETKİLEMEZ: derleme imajını `.nvmrc` ve
+          # `engines` belirler, ikisi de bilerek eklenmedi.
+          node-version: 26.x
+          cache: npm
+
+      - run: npm ci
+
+      # Adımlar AYRI: hangisinin düştüğü tek bakışta görünsün.
+      - name: lint
+        run: npm run lint
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+      - name: git diff --check
+        # Yalnızca PR'da anlamlı: bu dalın hedefe göre EKLEDİĞİ satırlarda
+        # bozuk boşluk var mı. `main`'e push'ta karşılaştıracak taban yok.
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff --check \
+            "origin/${{ github.base_ref }}...HEAD"
