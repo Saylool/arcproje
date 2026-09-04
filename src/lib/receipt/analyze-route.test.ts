@@ -93,6 +93,13 @@ describe("fis analizi Google oturum kapisi", () => {
       }),
       configured: () => true,
       extract,
+      /*
+       * Kota analiz yolunun bir parcasi oldu. Bu test kotayi degil, oturum
+       * kapisini ve multipart davranisini olcuyor; kota GECER birakilir ve
+       * kendi testlerinde ayrica kanitlanir.
+       */
+      createRepository: async () => ({}) as never,
+      consumeQuota: async () => ({ ok: true as const, remaining: 24 }),
     });
 
     const response = await route(multipartRequest());

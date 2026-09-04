@@ -13,6 +13,8 @@ import {
   resolveImageMimeType,
   type ImageTypeResolution,
 } from "@/lib/receipt/image-type";
+import { consumeAnalysisQuota } from "@/lib/db/analysis-quota-service";
+import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
 
 export const runtime = "nodejs";
 
@@ -73,6 +75,9 @@ type ReceiptRouteDependencies = Readonly<{
   authenticate: AuthenticateRequest;
   configured: typeof isReceiptAnalysisConfigured;
   extract: typeof extractReceipt;
+  createRepository: typeof createNeonSharedBillRepository;
+  consumeQuota: typeof consumeAnalysisQuota;
+  now: () => number;
 }>;
 
 export function createReceiptAnalyzePost(
@@ -82,6 +87,10 @@ export function createReceiptAnalyzePost(
     authenticate: dependencies.authenticate ?? authenticateRequest,
     configured: dependencies.configured ?? isReceiptAnalysisConfigured,
     extract: dependencies.extract ?? extractReceipt,
+    createRepository:
+      dependencies.createRepository ?? createNeonSharedBillRepository,
+    consumeQuota: dependencies.consumeQuota ?? consumeAnalysisQuota,
+    now: dependencies.now ?? (() => Date.now()),
   };
   return (request: Request) => receiptAnalyzePost(request, resolved);
 }
@@ -178,6 +187,28 @@ async function receiptAnalyzePost(
     );
   }
 
+  /*
+   * KOTA BURADA DÜŞÜLÜR: bütün doğrulamalardan SONRA, sağlayıcıya gitmeden
+   * ÖNCE. Bozuk bir dosya yüzünden hak yanmaz; sağlayıcıya ulaşan her deneme
+   * ise sayılır, çünkü parayı harcatan odur.
+   */
+  const repository = await dependencies.createRepository();
+  if (repository === null) {
+    return errorResponse(
+      503,
+      "SERVICE_NOT_CONFIGURED",
+      "Analiz kotası okunamıyor. Sunucuda DATABASE_URL tanımlı değil.",
+    );
+  }
+  const quota = await dependencies.consumeQuota({
+    userId: authentication.user.id,
+    repository,
+    nowMs: dependencies.now(),
+  });
+  if (!quota.ok) {
+    return errorResponse(quota.status, quota.code, quota.message);
+  }
+
   // Görsel yalnızca bellekte tutulur; diske yazılmaz, veritabanına kaydedilmez.
   const imageDataUrl = `data:${imageType.mimeType};base64,${Buffer.from(bytes).toString("base64")}`;
 
@@ -187,7 +218,11 @@ async function receiptAnalyzePost(
       const failure = FAILURE_RESPONSES[result.code];
       return errorResponse(failure.status, result.code, failure.message);
     }
-    return NextResponse.json({ receipt: result.receipt }, { status: 200 });
+    /* Kalan hak yanıtta döner ki kullanıcı kaç analizi kaldığını görsün. */
+    return NextResponse.json(
+      { receipt: result.receipt, remainingAnalyses: quota.remaining },
+      { status: 200 },
+    );
   } catch (error) {
     console.error(
       "[receipt-analyze] Beklenmeyen hata:",
