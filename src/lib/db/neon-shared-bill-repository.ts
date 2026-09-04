@@ -430,6 +430,14 @@ WHERE bill_id IN (${RETENTION_TARGETS})
 RETURNING bill_id
 `;
 
+/* Varlık sorgusu; satırın kendisi okunmaz, yalnızca var olup olmadığı. */
+const APP_USER_EXISTS = `
+SELECT 1 AS present
+FROM app_users
+WHERE user_id = $1
+LIMIT 1
+`;
+
 const DELETE_APP_USER = `
 DELETE FROM app_users
 WHERE user_id = $1
@@ -1316,6 +1324,21 @@ export async function createNeonSharedBillRepository(
         };
       } catch {
         return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async appUserExists(input: { userId: string }) {
+      try {
+        const rows = (await sql.query(APP_USER_EXISTS, [
+          input.userId,
+        ])) as unknown[];
+        return { ok: true as const, exists: rows.length > 0 };
+      } catch {
+        /*
+         * Erişilememe "yok" ile KARIŞTIRILMAZ: yoksa 401 döner ve kullanıcı
+         * var olan hesabıyla dışarı atılırdı.
+         */
+        return { ok: false as const, reason: "unavailable" as const };
       }
     },
 

@@ -12,3 +12,11 @@ export async function startGoogleSignIn() {
 export async function endGoogleSession() {
   await actions.endSession();
 }
+
+/**
+ * Hesap silindikten sonra çağrılır: çerez ölür ama kullanıcı ana sayfaya
+ * fırlatılmaz, silme sonucunu görebilir.
+ */
+export async function endGoogleSessionWithoutRedirect() {
+  await actions.endSessionWithoutRedirect();
+}

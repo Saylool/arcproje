@@ -10,7 +10,10 @@ import {
   remainingAfter,
 } from "@/lib/receipt/quota";
 
-import { consumeAnalysisQuota } from "./analysis-quota-service";
+import {
+  appUserStillExists,
+  consumeAnalysisQuota,
+} from "./analysis-quota-service";
 import { createFakeSharedBillRepository } from "./shared-bill-repository.fixture";
 import type { SharedBillRepository } from "./shared-bill-repository";
 
@@ -307,6 +310,175 @@ describe("gecis dosyasi", () => {
 });
 
 /**
+ * SILINEN HESAP ANALIZ CAGIRAMAZ.
+ *
+ * Oturum bir JWT'dir ve sunucu onu IPTAL EDEMEZ: hesabini silen biri, cerezi
+ * duran BASKA bir cihazdan istek gondermeye devam edebilir. Yabanci anahtari
+ * olan tablolarda bu kendiliginden durur; kota tablosunun yabanci anahtari
+ * YOKTUR ve tam da para harcayan yol odur.
+ */
+describe("silinen hesap analiz cagiramaz", () => {
+  it("kullanici yoksa var DEMEZ", async () => {
+    const repository = createFakeSharedBillRepository();
+
+    const result = await appUserStillExists({ userId: USER, repository });
+
+    expect(result).toEqual({ ok: true, exists: false });
+  });
+
+  it("kullanici duruyorsa var DER", async () => {
+    const repository = createFakeSharedBillRepository();
+    repository.appUsers.add(USER);
+
+    expect(await appUserStillExists({ userId: USER, repository })).toEqual({
+      ok: true,
+      exists: true,
+    });
+  });
+
+  it("bicimsiz kimlik SURUCUYE gitmez", async () => {
+    const repository = createFakeSharedBillRepository();
+    const before = repository.calls;
+
+    const result = await appUserStillExists({
+      userId: "not-a-uuid",
+      repository,
+    });
+
+    expect(result).toEqual({ ok: true, exists: false });
+    expect(repository.calls).toBe(before);
+  });
+
+  it("ERISILEMEME, yok ile karistirilmaz", async () => {
+    /*
+     * Karistirilirsa var olan hesabiyla gelen kullanici 401 alip disari
+     * atilirdi.
+     */
+    const repository = createFakeSharedBillRepository({
+      failWithUnavailable: true,
+    });
+
+    const result = await appUserStillExists({ userId: USER, repository });
+
+    expect(result).toEqual({ ok: false, reason: "unavailable" });
+  });
+
+  it("rota: hesap yoksa 401 doner ve KOTA harcanmaz", async () => {
+    const consumeQuota = vi.fn();
+    const extract = vi.fn();
+    const { createReceiptAnalyzePost } = await import(
+      "@/app/api/receipts/analyze/route"
+    );
+    const POST = createReceiptAnalyzePost({
+      authenticate: async () => ({
+        status: "authenticated" as const,
+        user: { id: USER, name: "Ada", image: null },
+      }),
+      configured: () => true,
+      extract,
+      createRepository: async () => ({}) as unknown as SharedBillRepository,
+      userExists: async () => ({ ok: true as const, exists: false }),
+      consumeQuota,
+      now: () => NOW,
+    });
+
+    const body = new FormData();
+    body.append(
+      "receipt",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0])], "f.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const response = await POST(
+      new Request("https://ornek.invalid/api/receipts/analyze", {
+        method: "POST",
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("ACCOUNT_DELETED");
+    /* Silinen hesap ne kota harcar ne de saglayiciya ulasir. */
+    expect(consumeQuota).not.toHaveBeenCalled();
+    expect(extract).not.toHaveBeenCalled();
+  });
+
+  it("rota: kontrol ERISILEMEZSE 503 doner, 401 DEGIL", async () => {
+    /*
+     * 401 donmek, veritabani bir an aksadi diye VAR OLAN hesabiyla gelen
+     * kullaniciyi disari atardi. Gecici bir arizanin cezasi hesap kaybi
+     * gibi gorunmemeli.
+     */
+    const consumeQuota = vi.fn();
+    const { createReceiptAnalyzePost } = await import(
+      "@/app/api/receipts/analyze/route"
+    );
+    const POST = createReceiptAnalyzePost({
+      authenticate: async () => ({
+        status: "authenticated" as const,
+        user: { id: USER, name: "Ada", image: null },
+      }),
+      configured: () => true,
+      extract: vi.fn(),
+      createRepository: async () => ({}) as unknown as SharedBillRepository,
+      userExists: async () => ({
+        ok: false as const,
+        reason: "unavailable" as const,
+      }),
+      consumeQuota,
+      now: () => NOW,
+    });
+
+    const body = new FormData();
+    body.append(
+      "receipt",
+      new File([new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 0])], "f.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    const response = await POST(
+      new Request("https://ornek.invalid/api/receipts/analyze", {
+        method: "POST",
+        body,
+      }),
+    );
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).not.toBe("ACCOUNT_DELETED");
+    expect(consumeQuota).not.toHaveBeenCalled();
+  });
+
+  it("Neon: catch dali ERISILEMEME der, yok DEMEZ", () => {
+    /*
+     * Bu depoda calisan bir Postgres olmadigi icin bu dal calistirilamiyor;
+     * kaynak duzeyinde sabitlenir. Karisirsa gecici bir baglanti hatasi,
+     * kullaniciya "hesabin silinmis" der.
+     */
+    const neon = readFileSync(
+      "src/lib/db/neon-shared-bill-repository.ts",
+      "utf8",
+    );
+    const impl = neon.slice(
+      neon.indexOf("async appUserExists("),
+      neon.indexOf("async deleteAppUser("),
+    );
+    const catchBranch = impl.slice(impl.indexOf("} catch {"));
+    expect(catchBranch).toContain('reason: "unavailable"');
+    expect(catchBranch).not.toContain("exists:");
+  });
+
+  it("rota: varlik kontrolu KOTADAN once yapilir", () => {
+    const route = readFileSync(
+      "src/app/api/receipts/analyze/route.ts",
+      "utf8",
+    );
+    expect(route.indexOf("dependencies.userExists(")).toBeLessThan(
+      route.indexOf("dependencies.consumeQuota("),
+    );
+  });
+});
+
+/**
  * ROTAYA BAGLANMA.
  *
  * Kotanin dogru olmasi yetmez; SAGLAYICIYA gitmeden once cagrilmasi gerekir.
@@ -359,6 +531,7 @@ describe("rota kotayi dogru anda harcar", () => {
       configured: () => true,
       extract,
       createRepository: async () => ({}) as unknown as SharedBillRepository,
+      userExists: async () => ({ ok: true as const, exists: true }),
       consumeQuota: async () => ({
         ok: false as const,
         status: 429,

@@ -99,6 +99,7 @@ describe("fis analizi Google oturum kapisi", () => {
        * kendi testlerinde ayrica kanitlanir.
        */
       createRepository: async () => ({}) as never,
+      userExists: async () => ({ ok: true as const, exists: true }),
       consumeQuota: async () => ({ ok: true as const, remaining: 24 }),
     });
 

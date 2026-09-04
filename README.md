@@ -188,6 +188,24 @@ Play, hesap açtıran uygulamalardan **iki** şey ister: uygulama İÇİNDE bir 
 yolu ve silme talebi için herkesin açabileceği bir **web adresi**. `/account`
 sayfası ikisini birden karşılar; forma verilecek adres budur.
 
+**Oturum çerezi silme yanıtında ölür.** Oturum bir JWT'dir ve 30 gün yaşar;
+çerez temizlenmezse silinen hesap istek göndermeye devam eder. Çerez adlarını
+elle üretmek yerine Auth.js kendi çerezlerini temizler (adlar ortama göre
+değişir: `__Secure-` öneki, parçalı çerezler).
+
+**Ama bu yalnızca isteği gönderen tarayıcıyı kapatır.** Sunucu bir JWT'yi
+iptal edemez; başka bir cihazdaki oturum süresi dolana kadar geçerli kalır.
+O yolu kapatan şey `/api/receipts/analyze` üzerindeki varlık kontrolüdür.
+
+Neden yalnızca o rota: `saved_contacts` ve `shared_bills` tablolarının
+`app_users`'a yabancı anahtarı var, silinmiş kullanıcının yazması düşer ve
+okuması boş döner. `receipt_analysis_quota`'nın yabancı anahtarı **yok** (genel
+satır yüzünden) ve o rota **para harcıyor** — zincirin dışında kalan tek yer
+orasıydı.
+
+Erişilememe "yok" ile **karıştırılmaz**: veritabanı bir an aksadı diye var olan
+hesabıyla gelen kullanıcı dışarı atılmaz (503, 401 değil).
+
 Silme kapsamı şemadaki yabancı anahtarlarla belirlenir, kodda ayrıca
 silinmez:
 

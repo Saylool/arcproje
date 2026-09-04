@@ -514,6 +514,14 @@ export function createFakeSharedBillRepository(
       return { ok: true, deleted: targets.length };
     },
 
+    async appUserExists(input: { userId: string }) {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false as const, reason: "unavailable" as const };
+      }
+      return { ok: true as const, exists: appUsers.has(input.userId) };
+    },
+
     async deleteAppUser(input: {
       userId: string;
     }): Promise<DeleteAppUserOutcome> {

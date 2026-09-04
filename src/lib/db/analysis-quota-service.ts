@@ -105,3 +105,24 @@ export async function consumeAnalysisQuota(input: {
 
   return { ok: true, remaining: remainingAfter(own.used, perUserLimit) };
 }
+
+/**
+ * Oturumdaki kullanıcı HÂLÂ var mı?
+ *
+ * Silinen bir hesabın JWT'si, çerezi duran başka bir cihazda süresi dolana
+ * kadar geçerli kalır. Yabancı anahtarı olan tablolarda bu kendiliğinden
+ * durur; kota tablosunun yabancı anahtarı YOKTUR ve tam da para harcayan yol
+ * odur.
+ */
+export async function appUserStillExists(input: {
+  userId: string;
+  repository: SharedBillRepository;
+}): Promise<
+  { ok: true; exists: boolean } | { ok: false; reason: "unavailable" }
+> {
+  if (!isAppUserId(input.userId)) {
+    /* Biçimsiz kimlik sürücüye GİTMEZ; var olmayan sayılır. */
+    return { ok: true, exists: false };
+  }
+  return await input.repository.appUserExists({ userId: input.userId });
+}

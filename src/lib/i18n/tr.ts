@@ -1144,6 +1144,8 @@ export const tr = {
       MISSING_FILE: "Fiş görseli bulunamadı.",
       EMPTY_FILE: "Dosya boş görünüyor. Lütfen başka bir görsel dene.",
       FILE_TOO_LARGE: "Görsel çok büyük. En fazla 10 MB yükleyebilirsin.",
+      ACCOUNT_DELETED:
+        "Bu hesap silinmiş. Devam etmek için yeniden giriş yapman gerekiyor.",
       DAILY_LIMIT_REACHED:
         "Bugünlük analiz hakkın doldu. Yarın yeniden deneyebilirsin.",
       SERVICE_BUSY:

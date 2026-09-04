@@ -1095,6 +1095,8 @@ export const en: Dictionary = {
       MISSING_FILE: "No receipt image was found.",
       EMPTY_FILE: "The file looks empty. Please try another image.",
       FILE_TOO_LARGE: "The image is too large. You can upload up to 10 MB.",
+      ACCOUNT_DELETED:
+        "This account has been deleted. Sign in again to continue.",
       DAILY_LIMIT_REACHED:
         "You have used up today's analyses. You can try again tomorrow.",
       SERVICE_BUSY:

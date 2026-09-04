@@ -19,6 +19,7 @@ const resolveRuntime = createAuthenticationRuntimeResolver({
       readSession: () => instance.auth(),
       beginGoogleSignIn: () => instance.signIn("google", { redirectTo: "/" }),
       endSession: () => instance.signOut({ redirectTo: "/" }),
+      endSessionWithoutRedirect: () => instance.signOut({ redirect: false }),
     };
   },
 });

@@ -13,11 +13,16 @@ import { PRIVACY_CONTACT_EMAIL } from "@/lib/legal/privacy";
  * okunur, sonra ayrı bir düğmeyle onaylanır. Geri alınamayan bir işlem için
  * yanlışlıkla tıklama tek başına yeterli olmamalıdır.
  *
- * ÇIKIŞ AYRI BİR ADIMDIR. Silme başarılı olduğunda oturumu hemen kapatmak,
- * kullanıcıyı ana sayfaya fırlatır ve işlemin başarılı olduğunu GÖREMEZ.
- * Bu yüzden önce sonuç gösterilir, çıkış onun düğmesiyle yapılır. Kalan
- * çerez bir yetki taşımaz: kayıt gittiği için yazma denemeleri yabancı
- * anahtarda düşer, okumalar boş döner.
+ * ÇEREZ SUNUCUDA ÖLDÜRÜLÜR. Silme yanıtı oturum çerezini temizler; buradaki
+ * düğme yalnızca kullanıcıyı ana sayfaya götürür.
+ *
+ * Bu yorumun eski hâli "kalan çerez bir yetki taşımaz" diyordu ve YAZILDIĞI
+ * GÜN doğruydu: bütün tablolarda `app_users`a yabancı anahtar vardı, yazma
+ * düşer okuma boş dönerdi. Sonradan eklenen kota tablosunun yabancı anahtarı
+ * YOK ve o yol para harcıyor; gerekçe böylece geçersiz kaldı.
+ *
+ * Çerez temizliği yalnızca İSTEĞİ GÖNDEREN tarayıcıyı kapatır. Başka bir
+ * cihazdaki oturumu kapatan şey, analiz ucundaki varlık kontrolüdür.
  */
 
 type Phase =
