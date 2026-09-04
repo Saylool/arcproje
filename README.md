@@ -1125,6 +1125,59 @@ olarak değiştirilmez.
 - **Kalıcı depo**: Neon Postgres; şema gözden geçirilmiş bir SQL geçişiyle
   **elle** uygulanır.
 
+## Güvenlik başlıkları
+
+Başlıklar `src/lib/security/headers.ts` içinde VERİ olarak durur;
+`next.config.ts` yalnızca listeyi bağlar. Böylece testler gerçek değerleri
+okuyabiliyor.
+
+Kapatılan yüzeyler: `frame-ancestors 'none'` (+ eski tarayıcılar için
+`X-Frame-Options: DENY`), `base-uri 'none'`, `object-src 'none'`,
+`form-action 'self'`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`.
+
+En somut kazanç çerçeveleme: ödeme sayfası daha önce **birinin sitesinde
+iframe'e alınabiliyordu**.
+
+`connect-src`, tarayıcının bağlandığı adreslerle sınırlıdır ve bir test bu
+listeyi gizlilik politikasındaki `DISCLOSED_HOSTS` ile karşılaştırır — yeni bir
+dış bağlantı, politikaya da yazılmadan geçemez. OpenAI ve veritabanı burada
+YOKTUR: onlara sunucu bağlanır.
+
+### Bilinen eksik: `script-src`
+
+`script-src` bilerek `'unsafe-inline'` içerir. Ölçüldü: sayfa 10 satır içi
+script taşıyor (Next.js önyüklemesi ve temanın yanıp sönmeyi önleyen script'i)
+ve hiçbirinde nonce yok; kaldırılırsa uygulama açılmaz.
+
+Sıkılaştırmak, her istekte nonce üreten bir middleware ister. O gelene kadar
+katı sürüm `Content-Security-Policy-Report-Only` olarak yayında duruyor ve
+ihlalleri tarayıcı konsoluna yazıyor — önce ölç, sonra uygula.
+
+## Bilinçli olarak yapılmayanlar
+
+Bir denetimde çıkan ve **kasıtlı olarak ele alınmayan** maddeler. Her
+incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
+
+- **Merkezi hata izleme (Sentry vb.) eklenmedi.** Yeni bir üçüncü taraf
+  demektir; bu projede bedeli yüksektir çünkü gizlilik politikası kodda geçen
+  her dış alan adını bildirmeye zorlar ve bir test bunu denetler. Hata yükleri
+  cüzdan adresi taşıyabilir. Vercel'in kendi günlükleri şu ölçek için yeterli.
+- **Playwright/Cypress E2E yok.** En riskli yollar — cüzdan bağlama, imza,
+  transfer — tarayıcı otomasyonuyla sürülemez. Geriye kalan kısım zaten birim
+  testleriyle kaplı; kazanç "parçalar tarayıcıda birbirine bağlanıyor mu"
+  sorusuyla sınırlı kalır.
+- **Büyük dosyalar bölünmedi.** `neon-shared-bill-repository.ts`'te bütün
+  SQL'in tek yerde olması bilinçlidir (eşleşme testleri bu dosyayı okur),
+  `tr.ts` `Dictionary` tipinin kaynağıdır, `send.ts`'e dokunulmaz. Satır
+  sayısı için yeniden düzenleme, kullanıcıya hiçbir şey kazandırmadan gerileme
+  riski taşır.
+- **`npm audit` bulguları düzeltilmedi**, takip ediliyor. 23 bulgu **3 kök
+  uyarıdan** geliyor ve üçü de `@circle-fin/adapter-viem-v2` zincirinden:
+  `elliptic` (ethers v5 içi), `stream-json` ve `uuid` (ikisi de
+  `@solana/web3.js` → `jayson` üzerinden). Bu uygulama **Solana'ya hiç
+  dokunmuyor** ve imzalama yolu viem + cüzdandır. Yani üçü de çalıştırılmayan
+  kod yollarında. `npm audit fix` otomatik çalıştırılmaz.
+
 ## Sınırlar ve bilinen eksikler
 
 - **Yalnızca Arc Testnet.** Mainnet'e hazır **değildir** ve mainnet/Ethereum
