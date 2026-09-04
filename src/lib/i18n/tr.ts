@@ -264,6 +264,7 @@ export const tr = {
   /* Fiş yükleme                                                             */
   /* --------------------------------------------------------------------- */
   upload: {
+    remainingAnalyses: "Bugün kalan analiz hakkın: {count}",
     sectionLabel: "Fiş yükleme",
     inputLabel: "Fiş görseli seç",
     dropHere: "Fişini buraya sürükle",
@@ -1143,6 +1144,10 @@ export const tr = {
       MISSING_FILE: "Fiş görseli bulunamadı.",
       EMPTY_FILE: "Dosya boş görünüyor. Lütfen başka bir görsel dene.",
       FILE_TOO_LARGE: "Görsel çok büyük. En fazla 10 MB yükleyebilirsin.",
+      DAILY_LIMIT_REACHED:
+        "Bugünlük analiz hakkın doldu. Yarın yeniden deneyebilirsin.",
+      SERVICE_BUSY:
+        "Bugün toplam analiz sınırına ulaşıldı. Bu senin hakkınla ilgili değil; yarın yeniden dene.",
       UNSUPPORTED_FILE_TYPE: "Yalnızca JPG, PNG ve WEBP dosyaları desteklenir.",
       MODEL_REFUSED:
         "Bu görsel analiz edilemedi. Lütfen fişin net ve tam bir fotoğrafını dene.",

@@ -23,6 +23,7 @@ import {
   type MessageDescriptor,
 } from "@/lib/i18n/messages";
 import { prepareReceiptUpload } from "@/lib/receipt/prepare-upload";
+import { readRemainingAnalyses } from "@/lib/receipt/quota-response";
 import { ReceiptSchema, type Receipt } from "@/lib/receipt/schema";
 import {
   calculateDebts,
@@ -101,6 +102,13 @@ export function ReceiptFlow({
   const [errorMessage, setErrorMessage] =
     useState<MessageDescriptor | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  /*
+   * Bugün kalan analiz hakkı. SUNUCUDAN gelir; istemci saymaz. `null`,
+   * "henüz bilinmiyor" demektir ve hiçbir şey gösterilmez.
+   */
+  const [remainingAnalyses, setRemainingAnalyses] = useState<number | null>(
+    null,
+  );
   // Yeni bir analiz geldiğinde düzenleyicinin taslak input'ları sıfırlansın.
   const [analysisKey, setAnalysisKey] = useState(0);
   const isAnalyzingRef = useRef(false);
@@ -271,6 +279,10 @@ export function ReceiptFlow({
          * metindir ve okunacak bir kod TAŞIMAZ. Ayrıca karşılanmazsa
          * kullanıcı, sebebini anlatmayan genel bir hata görür.
          */
+        if (response.status === 429) {
+          /* Sınıra ulaşıldı: kalan hak sıfırdır. */
+          setRemainingAnalyses(0);
+        }
         if (response.status === 413) {
           setErrorMessage(messageKey("errors.receiptTooLargeToSend"));
           setStatus("error");
@@ -285,6 +297,13 @@ export function ReceiptFlow({
         setStatus("error");
         return;
       }
+
+      /*
+       * Kalan hak sunucudan gelir. Kullanıcı sınıra çarpınca şaşırmasın diye
+       * gösterilir; istemci bunu SAYMAZ, yalnızca sunucunun söylediğini
+       * yansıtır.
+       */
+      setRemainingAnalyses(readRemainingAnalyses(payload));
 
       const parsed = ReceiptSchema.safeParse(readReceiptField(payload));
       if (!parsed.success) {
@@ -364,6 +383,21 @@ export function ReceiptFlow({
             onFileChange={handleFileChange}
             disabled={isAnalyzing}
           />
+
+          {remainingAnalyses !== null && (
+            /*
+             * Yalnızca sunucu bir sayı bildirdiğinde görünür. Sınıra
+             * çarpmadan önce uyarmak, çarptıktan sonra açıklamaktan iyidir.
+             */
+            <p
+              role="status"
+              className="text-xs text-ink-faint"
+            >
+              {t("upload.remainingAnalyses", {
+                count: String(remainingAnalyses),
+              })}
+            </p>
+          )}
 
           {file !== null && (
             <div className="flex flex-col gap-3 rounded-3xl border border-line bg-card p-4 shadow-card">

@@ -237,6 +237,7 @@ export const en: Dictionary = {
   },
 
   upload: {
+    remainingAnalyses: "Analyses left today: {count}",
     sectionLabel: "Receipt upload",
     inputLabel: "Choose a receipt image",
     dropHere: "Drag your receipt here",
@@ -1094,6 +1095,10 @@ export const en: Dictionary = {
       MISSING_FILE: "No receipt image was found.",
       EMPTY_FILE: "The file looks empty. Please try another image.",
       FILE_TOO_LARGE: "The image is too large. You can upload up to 10 MB.",
+      DAILY_LIMIT_REACHED:
+        "You have used up today's analyses. You can try again tomorrow.",
+      SERVICE_BUSY:
+        "The total analysis limit for today has been reached. This is not about your own allowance; try again tomorrow.",
       UNSUPPORTED_FILE_TYPE: "Only JPG, PNG and WEBP files are supported.",
       MODEL_REFUSED:
         "This image could not be analyzed. Please try a clear, complete photo of the receipt.",

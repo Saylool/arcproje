@@ -1207,6 +1207,40 @@ Sıkılaştırmak, her istekte nonce üreten bir middleware ister. O gelene kada
 katı sürüm `Content-Security-Policy-Report-Only` olarak yayında duruyor ve
 ihlalleri tarayıcı konsoluna yazıyor — önce ölç, sonra uygula.
 
+## Fiş analizi kotası (OpenAI maliyeti)
+
+Google girişi vardı ama **sayı sınırı yoktu**: oturum açmış bir kullanıcı
+istediği kadar analiz çağırabiliyordu ve her çağrı OpenAI'de gerçek para
+harcıyor. Üst sınırı olmayan tek maliyet buydu.
+
+**İki sayaç, iki farklı iş** (`src/lib/receipt/quota.ts`):
+
+| Sayaç | Ne yapar | Değer |
+| --- | --- | --- |
+| Kullanıcı başına | **Adalet** — bir kişi diğerlerinin hakkını yiyemez | 25/gün |
+| Genel tavan | **Fatura** — hesap sayısından bağımsız | 250/gün |
+
+Kullanıcı başına kota tek başına faturayı korumaz: Google hesabı açmak bedava
+ve sınırsızdır. Genel tavan bunun içindir.
+
+**Atomiklik.** Koşul sorgunun İÇİNDEDİR (`ON CONFLICT ... DO UPDATE ... WHERE
+q.used < $3 RETURNING`); okuyup sonra yazan bir yol yoktur, iki eşzamanlı
+istek son hakkı birlikte kullanamaz. Sınıra ulaşılmışsa hiçbir sayaç artmaz —
+**reddedilen istek hak tüketmez**.
+
+**Sıra.** Önce genel tavan, sonra kullanıcı. İkisi ayrı ayrı atomiktir ama
+birlikte tek işlem değildir; genel geçip kullanıcı takılırsa genel sayaç bir
+fazla saymış olur. Bu, gereğinden **az** harcamaya yol açar — güvenli yön.
+
+**Ne zaman düşülür.** Bütün doğrulamalardan sonra, OpenAI'ye gitmeden önce.
+Bozuk bir dosya yüzünden hak yanmaz; sağlayıcıya ulaşan her deneme sayılır.
+
+**Gün UTC'dir.** `current_date` veritabanının saat dilimine bağlıdır; sınırın
+ne zaman sıfırlandığı sunucu ayarına bırakılmaz.
+
+Kullanıcı kalan hakkını yükleme ekranında görür; sayıyı **sunucu** bildirir,
+istemci saymaz.
+
 ## CI ve dal koruması
 
 Kapı (`lint`, `typecheck`, `test`, `build`, `git diff --check`) her PR'da
