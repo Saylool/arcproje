@@ -22,8 +22,27 @@ export type Locale = "tr" | "en";
 
 export const LOCALES = ["tr", "en"] as const;
 
-/** Hiçbir sinyal okunamadığında kullanılan güvenli varsayılan. */
+/**
+ * Uygulamanın KENDİ temel dili.
+ *
+ * İstek bağlamı olmayan yerlerde kullanılır: PWA manifesti ve sunucu
+ * tarafında üretilen varsayılan metinler. İSTEK ÇÖZÜMLEMESİNDE kullanılmaz —
+ * onun için `FALLBACK_LOCALE` vardır.
+ */
 export const DEFAULT_LOCALE: Locale = "tr";
+
+/**
+ * Tarayıcısı desteklediğimiz HİÇBİR dili istemeyen ziyaretçiye gösterilen dil.
+ *
+ * Ölçüldü: bu ayrım yokken Almanca, Fransızca ve İspanyolca tarayıcılar
+ * uygulamayı TÜRKÇE görüyordu — İngilizce bile değil. Anlamadığı bir dil
+ * yerine İngilizce görmek, uluslararası bir mağaza listesinde belirgin
+ * biçimde daha iyidir.
+ *
+ * `DEFAULT_LOCALE`den AYRI tutulur: ikisini birleştirmek uygulamanın kendi
+ * adını ve manifestini de İngilizceye çevirirdi.
+ */
+export const FALLBACK_LOCALE: Locale = "en";
 
 /** Tercih çerezi. Hassas veri TAŞIMAZ; yalnızca "tr" veya "en" değerini alır. */
 export const LOCALE_COOKIE_NAME = "hb_locale";
@@ -178,8 +197,11 @@ export function resolveLocale(input: {
   if (fromHeader !== null) {
     return fromHeader;
   }
-  // 3. Güvenli varsayılan.
-  return DEFAULT_LOCALE;
+  /*
+   * 3. Tarayıcı hiçbir dilimizi istemiyor. Türkçe göstermek, Almanca bir
+   *    ziyaretçiye anlamadığı bir dil dayatmak olurdu.
+   */
+  return FALLBACK_LOCALE;
 }
 
 /**

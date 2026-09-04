@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_LOCALE,
+  FALLBACK_LOCALE,
   LOCALE_COOKIE_MAX_AGE_SECONDS,
   LOCALE_COOKIE_NAME,
   isLocale,
@@ -176,12 +177,38 @@ describe("öncelik sırası", () => {
     }
   });
 
-  it("hiçbir sinyal yoksa TÜRKÇEYE düşer", () => {
-    expect(resolveLocale({})).toBe(DEFAULT_LOCALE);
-    expect(resolveLocale({ cookie: null, acceptLanguage: null })).toBe("tr");
-    expect(resolveLocale({ acceptLanguage: "de-DE,fr;q=0.9" })).toBe("tr");
-    expect(resolveLocale({ acceptLanguage: ";;;" })).toBe("tr");
+  it("desteklenmeyen dil TÜRKÇE değil İNGİLİZCE görür", () => {
+    /*
+     * Bu test eskiden "TÜRKÇEYE düşer" diyordu ve o gün kastedilen davranış
+     * buydu. Üretimde ölçülünce sonucu göründü: Almanca, Fransızca ve
+     * İspanyolca tarayıcılar uygulamayı Türkçe görüyordu — İngilizce bile
+     * değil. Anlamadığı bir dil dayatmak yerine İngilizce göstermek,
+     * uluslararası bir mağaza listesinde belirgin biçimde daha iyi.
+     */
+    expect(resolveLocale({ acceptLanguage: "de-DE,fr;q=0.9" })).toBe("en");
+    expect(resolveLocale({ acceptLanguage: "es-ES" })).toBe("en");
+    expect(resolveLocale({ acceptLanguage: "ja-JP" })).toBe("en");
+    expect(resolveLocale({})).toBe(FALLBACK_LOCALE);
+    expect(resolveLocale({ cookie: null, acceptLanguage: null })).toBe("en");
+    expect(resolveLocale({ acceptLanguage: ";;;" })).toBe("en");
+    expect(FALLBACK_LOCALE).toBe("en");
+  });
+
+  it("TÜRKÇE tarayıcı Türkçe görmeye DEVAM eder", () => {
+    /* Geri düşüşü değiştirmek, açık tercihi bozmamalı. */
+    expect(resolveLocale({ acceptLanguage: "tr-TR,tr;q=0.9" })).toBe("tr");
+    expect(resolveLocale({ cookie: "tr" })).toBe("tr");
+    /* Almanca tarayıcı bir kez Türkçe seçtiyse Türkçe kalır. */
+    expect(resolveLocale({ cookie: "tr", acceptLanguage: "de-DE" })).toBe("tr");
+  });
+
+  it("uygulamanın KENDİ dili ayrı kalır", () => {
+    /*
+     * İkisini birleştirmek PWA manifestinin adını ve sunucu tarafındaki
+     * varsayılan metinleri de İngilizceye çevirirdi.
+     */
     expect(DEFAULT_LOCALE).toBe("tr");
+    expect(FALLBACK_LOCALE).not.toBe(DEFAULT_LOCALE);
   });
 
   it("SUNUCU ve İSTEMCİ aynı fonksiyonu kullanır: sonuç ayrışamaz", () => {
