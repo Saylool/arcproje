@@ -1,7 +1,7 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
-  ConsumeQuotaOutcome,
+  ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -439,27 +439,37 @@ export function createFakeSharedBillRepository(
       return { ok: true, count };
     },
 
-    async consumeAnalysisQuota(input: {
-      quotaKey: string;
+    async reserveAnalysisQuota(input: {
+      globalKey: string;
+      userKey: string;
       day: string;
-      limit: number;
-    }): Promise<ConsumeQuotaOutcome> {
+      globalLimit: number;
+      userLimit: number;
+    }): Promise<ReserveQuotaOutcome> {
       calls += 1;
       if (repository.controls.failWithUnavailable === true) {
         return { ok: false, reason: "unavailable" };
       }
       /*
-       * SQL ile AYNI ölçüt: sınıra ULAŞILMIŞSA sayaç artmaz. Sahte deponun
-       * gevşek davranması, gerçek sorgudaki bir kaymayı gizlerdi.
+       * SQL ile AYNI ölçüt ve AYNI SIRA. Önce İKİSİ de okunur, ikisi de
+       * sınırın altındaysa İKİSİ birden yazılır. Sahte deponun gevşek
+       * davranması, gerçek sorgudaki bir kaymayı gizlerdi — kısmi tüketim
+       * tam da burada görünmez olurdu.
        */
-      const key = `${input.quotaKey}|${input.day}`;
-      const used = analysisQuota.get(key) ?? 0;
-      if (used >= input.limit) {
-        return { ok: false, reason: "exhausted" };
+      const globalCell = `${input.globalKey}|${input.day}`;
+      const userCell = `${input.userKey}|${input.day}`;
+      const globalUsed = analysisQuota.get(globalCell) ?? 0;
+      const userUsed = analysisQuota.get(userCell) ?? 0;
+
+      if (globalUsed >= input.globalLimit) {
+        return { ok: false, reason: "globalExhausted" };
       }
-      const next = used + 1;
-      analysisQuota.set(key, next);
-      return { ok: true, used: next };
+      if (userUsed >= input.userLimit) {
+        return { ok: false, reason: "userExhausted" };
+      }
+      analysisQuota.set(globalCell, globalUsed + 1);
+      analysisQuota.set(userCell, userUsed + 1);
+      return { ok: true, userUsed: userUsed + 1 };
     },
 
     async countAllBills(): Promise<CountExpiredBillsOutcome> {

@@ -14,6 +14,7 @@ import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
 import { GoogleSignInButton } from "@/components/AuthControl";
 import { readApiErrorCode } from "@/lib/i18n/api-errors";
+import { quotaDisplayAfterFailure } from "@/lib/receipt/quota-feedback";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
 import {
@@ -279,8 +280,22 @@ export function ReceiptFlow({
          * metindir ve okunacak bir kod TAŞIMAZ. Ayrıca karşılanmazsa
          * kullanıcı, sebebini anlatmayan genel bir hata görür.
          */
-        if (response.status === 429) {
-          /* Sınıra ulaşıldı: kalan hak sıfırdır. */
+        /*
+         * 429 TEK BAŞINA "senin hakkın bitti" DEMEK DEĞİLDİR.
+         *
+         *   DAILY_LIMIT_REACHED — kişinin KENDİ hakkı doldu. Kalan sıfırdır.
+         *   SERVICE_BUSY        — GENEL tavan doldu. Kişinin hakkı durur;
+         *                         sıfır yazmak ona olmayan bir şey söylerdi.
+         *
+         * Eskiden her 429'da sıfır yazılıyordu: genel tavan dolduğunda
+         * kullanıcı, hiç kullanmadığı hakkını bitmiş sanıyordu. Bilinmeyeni
+         * uydurmak yerine bilinen değer KORUNUR.
+         */
+        const failureCode = readApiErrorCode(payload);
+        if (
+          quotaDisplayAfterFailure(response.status, failureCode).kind ===
+          "showExhausted"
+        ) {
           setRemainingAnalyses(0);
         }
         if (response.status === 413) {
@@ -293,7 +308,7 @@ export function ReceiptFlow({
          * cumle sozlukten, etkin dilde secilir. Taninmayan kod guvenli genel
          * karsiliga duser.
          */
-        setErrorMessage(messageApi(readApiErrorCode(payload) ?? undefined));
+        setErrorMessage(messageApi(failureCode ?? undefined));
         setStatus("error");
         return;
       }

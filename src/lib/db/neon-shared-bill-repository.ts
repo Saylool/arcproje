@@ -8,7 +8,7 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
-  ConsumeQuotaOutcome,
+  ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -365,13 +365,74 @@ WHERE expires_at < to_timestamp($1 / 1000.0)
  *
  * `EXCLUDED` kullanılmaz; artış mevcut değerden hesaplanır.
  */
-const CONSUME_ANALYSIS_QUOTA = `
-INSERT INTO receipt_analysis_quota AS q (quota_key, day, used)
-VALUES ($1, $2::date, 1)
-ON CONFLICT (quota_key, day) DO UPDATE
+/**
+ * KOTA AYIRMA — İKİ SAYAÇ, TEK İŞLEM.
+ *
+ * Eskiden genel tavan ve kullanıcı sayacı AYRI AYRI düşülüyordu. Her biri tek
+ * başına atomikti ama BİRLİKTE değildi: genel geçip kullanıcı takılınca genel
+ * sayaç artmış kalıyordu ve geri alınmıyordu. Hakkı dolmuş TEK bir kullanıcı,
+ * reddedilen isteklerle genel tavanı tüketip DİĞER HERKESİ kilitleyebiliyordu
+ * — hiç OpenAI çağrısı yapmadan.
+ *
+ * Sıra değiştirmek çözüm DEĞİLDİR: o zaman da genel tavan dolduğunda
+ * kullanıcı hak kaybederdi. Doğru cevap, ikisinin tek bir işlemde birlikte
+ * düşülmesi.
+ *
+ * Üç deyim, tek işlem:
+ *   1. İki satırı da VAR ET (sayaç artırmadan).
+ *   2. İkisini de KİLİTLE. Sıralama `quota_key`e göre belirlenimcidir;
+ *      eşzamanlı iki istek aynı sırada kilitlediği için kilitlenme olmaz.
+ *   3. İkisini de OKU, ikisi de sınırın altındaysa İKİSİNİ BİRDEN artır.
+ *
+ * 3. adımdaki okuma, 2. adımda kilitlenmiş satırlardan yapılır; bu yüzden
+ * araya giren bir yazıcı değeri değiştiremez. Kilitler işlem sonuna kadar
+ * durur.
+ */
+const SEED_QUOTA_ROWS = `
+INSERT INTO receipt_analysis_quota (quota_key, day, used)
+VALUES ($1, $3::date, 0), ($2, $3::date, 0)
+ON CONFLICT (quota_key, day) DO NOTHING
+`;
+
+/** Belirlenimci sırada kilitler; kilitler işlem bitene kadar durur. */
+const LOCK_QUOTA_ROWS = `
+SELECT quota_key
+FROM receipt_analysis_quota
+WHERE day = $3::date AND quota_key IN ($1, $2)
+ORDER BY quota_key
+FOR UPDATE
+`;
+
+/**
+ * İkisini birden artırır ya da HİÇBİRİNİ artırmaz.
+ *
+ * `before` alt sorgusu tek kaynaktır: `bumped` ona baktığı için önce o
+ * değerlendirilir. Kardeş CTE'ler birbirinin yazdığını GÖRMEZ; bu yüzden
+ * koşul yazan CTE'nin içine değil, okuyan CTE'ye dayandırılmıştır.
+ */
+const RESERVE_ANALYSIS_QUOTA = `
+WITH before AS (
+  SELECT
+    max(used) FILTER (WHERE quota_key = $1) AS global_used,
+    max(used) FILTER (WHERE quota_key = $2) AS user_used
+  FROM receipt_analysis_quota
+  WHERE day = $3::date AND quota_key IN ($1, $2)
+),
+bumped AS (
+  UPDATE receipt_analysis_quota AS q
   SET used = q.used + 1
-  WHERE q.used < $3
-RETURNING used
+  FROM before b
+  WHERE q.day = $3::date
+    AND q.quota_key IN ($1, $2)
+    AND b.global_used < $4
+    AND b.user_used < $5
+  RETURNING q.quota_key, q.used
+)
+SELECT
+  (SELECT global_used FROM before)::int AS global_before,
+  (SELECT user_used FROM before)::int AS user_before,
+  (SELECT count(*) FROM bumped)::int AS bumped_rows,
+  (SELECT used FROM bumped WHERE quota_key = $2)::int AS user_after
 `;
 
 const COUNT_ALL_BILLS = `
@@ -1251,31 +1312,69 @@ export async function createNeonSharedBillRepository(
       }
     },
 
-    async consumeAnalysisQuota(input: {
-      quotaKey: string;
+    async reserveAnalysisQuota(input: {
+      globalKey: string;
+      userKey: string;
       day: string;
-      limit: number;
-    }): Promise<ConsumeQuotaOutcome> {
+      globalLimit: number;
+      userLimit: number;
+    }): Promise<ReserveQuotaOutcome> {
+      const parameters = [
+        input.globalKey,
+        input.userKey,
+        input.day,
+        input.globalLimit,
+        input.userLimit,
+      ];
       try {
-        const rows = (await sql.query(CONSUME_ANALYSIS_QUOTA, [
-          input.quotaKey,
-          input.day,
-          input.limit,
-        ])) as { used: unknown }[];
-        /*
-         * Satır dönmemesi SINIRA ULAŞILDIĞI anlamına gelir: `WHERE` koşulu
-         * tutmadığı için güncelleme yapılmadı. Bu bir HATA DEĞİLDİR ve
-         * erişilememeyle karıştırılmaz.
-         */
-        if (rows.length === 0) {
-          return { ok: false, reason: "exhausted" };
-        }
-        const raw = rows[0]?.used;
-        const used = typeof raw === "number" ? raw : Number(raw);
-        if (!Number.isInteger(used) || used < 1) {
+        const results = await sql.transaction((txn) => [
+          txn.query(SEED_QUOTA_ROWS, parameters),
+          txn.query(LOCK_QUOTA_ROWS, parameters),
+          txn.query(RESERVE_ANALYSIS_QUOTA, parameters),
+        ]);
+        const rows = results[results.length - 1] as {
+          global_before: unknown;
+          user_before: unknown;
+          bumped_rows: unknown;
+          user_after: unknown;
+        }[];
+        const row = rows[0];
+        if (row === undefined) {
           return { ok: false, reason: "unavailable" };
         }
-        return { ok: true, used };
+        const toInt = (value: unknown): number | null => {
+          const parsed = typeof value === "number" ? value : Number(value);
+          return Number.isInteger(parsed) ? parsed : null;
+        };
+        const globalBefore = toInt(row.global_before);
+        const userBefore = toInt(row.user_before);
+        const bumped = toInt(row.bumped_rows);
+        if (globalBefore === null || userBefore === null || bumped === null) {
+          return { ok: false, reason: "unavailable" };
+        }
+        if (bumped === 0) {
+          /*
+           * Hangi sınırın engellediği KULLANICIYA farklı şey söyler: genel
+           * tavan dolduğunda kişinin kendi hakkı durur. Genel önce bakılır,
+           * çünkü o dolduğunda kişisel hakka zaten dokunulmamıştır.
+           */
+          if (globalBefore >= input.globalLimit) {
+            return { ok: false, reason: "globalExhausted" };
+          }
+          if (userBefore >= input.userLimit) {
+            return { ok: false, reason: "userExhausted" };
+          }
+          return { ok: false, reason: "unavailable" };
+        }
+        /* İki satır artmalıydı; başka bir sayı sözleşmenin bozulduğu demektir. */
+        if (bumped !== 2) {
+          return { ok: false, reason: "unavailable" };
+        }
+        const userAfter = toInt(row.user_after);
+        if (userAfter === null || userAfter < 1) {
+          return { ok: false, reason: "unavailable" };
+        }
+        return { ok: true, userUsed: userAfter };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

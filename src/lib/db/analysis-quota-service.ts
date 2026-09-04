@@ -12,17 +12,25 @@ import type { SharedBillRepository } from "./shared-bill-repository";
 /**
  * FİŞ ANALİZİ KOTASININ HARCANMASI.
  *
- * İki sayaç vardır ve SIRA ÖNEMLİDİR: önce GENEL tavan, sonra kullanıcı.
+ * İki sayaç vardır ve İKİSİ BİRLİKTE, TEK İŞLEMDE ayrılır: ya ikisi de
+ * düşülür ya da hiçbiri.
  *
- * Sebebi, anormallik olduğunda hangi yöne sapılacağı. İki sayaç ayrı ayrı
- * atomiktir ama birlikte tek bir işlem değildir; genel geçip kullanıcı
- * takılırsa genel sayaç bir fazla saymış olur. Bu, gereğinden AZ harcamaya
- * yol açar — güvenli yön. Ters sırada olsaydı kullanıcı hakkını kaybederdi
- * ve analiz yine yapılmazdı; iki taraf da kaybederdi.
+ * Eskiden ikisi ayrı ayrı düşülüyordu ve sıranın "güvenli yöne saptığı"
+ * yazıyordu. Yanlıştı: genel tavan ÖNCE düşüldüğü için, hakkı dolmuş bir
+ * kullanıcının reddedilen her isteği genel sayacı artırıyordu. O kullanıcı
+ * tek başına genel tavanı tüketip DİĞER HERKESİ kilitleyebiliyordu — hiç
+ * OpenAI çağrısı yapmadan. Bu bir erişilebilirlik kusuruydu.
+ *
+ * Sırayı ters çevirmek çözüm değildi: o zaman da genel tavan dolduğunda
+ * kullanıcı hakkı boşuna yanardı. Doğru cevap tek atomik ayırma.
  *
  * ÇAĞRILMA ANI: bütün doğrulamalardan SONRA, OpenAI'ye gitmeden ÖNCE. Bozuk
  * bir dosya yüzünden hak yanmaz; OpenAI'ye ulaşan her deneme ise sayılır,
  * çünkü parayı harcatan odur.
+ *
+ * SAĞLAYICI HATASI İADE ETTİRMEZ: kabul edilmiş bir istek OpenAI tarafında
+ * düşerse hak geri verilmez. Bu bilinçli ve DEĞİŞMEYEN ürün kararıdır;
+ * burada yalnızca REDDEDİLEN isteklerin yalıtımı düzeltilmiştir.
  */
 
 export type QuotaDecision =
@@ -84,26 +92,25 @@ export async function consumeAnalysisQuota(input: {
   const totalLimit = input.totalLimit ?? DAILY_ANALYSES_TOTAL;
   const day = quotaDay(input.nowMs);
 
-  /* ÖNCE genel tavan. Dolmuşsa kullanıcının hakkına HİÇ dokunulmaz. */
-  const total = await input.repository.consumeAnalysisQuota({
-    quotaKey: GLOBAL_QUOTA_KEY,
+  const reserved = await input.repository.reserveAnalysisQuota({
+    globalKey: GLOBAL_QUOTA_KEY,
+    userKey: input.userId,
     day,
-    limit: totalLimit,
+    globalLimit: totalLimit,
+    userLimit: perUserLimit,
   });
-  if (!total.ok) {
-    return total.reason === "exhausted" ? GLOBAL_EXHAUSTED : UNAVAILABLE;
+
+  if (!reserved.ok) {
+    if (reserved.reason === "globalExhausted") {
+      return GLOBAL_EXHAUSTED;
+    }
+    if (reserved.reason === "userExhausted") {
+      return USER_EXHAUSTED;
+    }
+    return UNAVAILABLE;
   }
 
-  const own = await input.repository.consumeAnalysisQuota({
-    quotaKey: input.userId,
-    day,
-    limit: perUserLimit,
-  });
-  if (!own.ok) {
-    return own.reason === "exhausted" ? USER_EXHAUSTED : UNAVAILABLE;
-  }
-
-  return { ok: true, remaining: remainingAfter(own.used, perUserLimit) };
+  return { ok: true, remaining: remainingAfter(reserved.userUsed, perUserLimit) };
 }
 
 /**
