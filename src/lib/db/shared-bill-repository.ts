@@ -125,6 +125,13 @@ export type CountExpiredBillsOutcome =
   | { ok: true; count: number }
   | { ok: false; reason: "unavailable" };
 
+export type ConsumeQuotaOutcome =
+  /** Hak düşüldü. `used`, düşüldükten SONRAKİ değerdir. */
+  | { ok: true; used: number }
+  /** Sınıra ulaşıldı; HİÇBİR sayaç artmadı. */
+  | { ok: false; reason: "exhausted" }
+  | { ok: false; reason: "unavailable" };
+
 export type DeleteExpiredBillsOutcome =
   | { ok: true; deleted: number }
   | { ok: false; reason: "unavailable" };
@@ -355,6 +362,24 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * bir şey bulup bulamadığı BİLİNEMEZ; ikisi birlikte raporlanır.
    */
   countAllBills(): Promise<CountExpiredBillsOutcome>;
+
+  /**
+   * Bir günlük kotadan BİR hak düşer.
+   *
+   * ATOMİKTİR: koşul sorgunun İÇİNDEDİR, okuyup sonra yazan bir yol yoktur.
+   * İki eşzamanlı istek son hakkı birlikte kullanamaz.
+   *
+   * Sınıra ulaşılmışsa HİÇBİR ŞEY artmaz ve `exhausted` döner; reddedilen
+   * istek hak TÜKETMEZ.
+   *
+   * `day` çağırandan gelir ve UTC'dir: sınırın hangi anda sıfırlandığı
+   * veritabanının saat dilimine bırakılmaz.
+   */
+  consumeAnalysisQuota(input: {
+    quotaKey: string;
+    day: string;
+    limit: number;
+  }): Promise<ConsumeQuotaOutcome>;
 
   /**
    * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.

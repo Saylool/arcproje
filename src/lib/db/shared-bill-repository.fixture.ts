@@ -1,6 +1,7 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  ConsumeQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -99,6 +100,8 @@ export type FakeSharedBillRepository = SharedBillRepository & {
   readonly calls: number;
   /** app_users karşılığı; testler doğrudan ekleyip çıkarabilir. */
   readonly appUsers: Set<string>;
+  /** `receipt_analysis_quota` karşılığı; testler durumu okuyabilir. */
+  readonly analysisQuota: Map<string, number>;
   controls: FakeRepositoryControls;
 };
 
@@ -126,6 +129,8 @@ export function createFakeSharedBillRepository(
    * eşleşme testi olmayan bir satırı silmeyi başarı sayar.
    */
   const appUsers = new Set<string>();
+  /* `receipt_analysis_quota` karşılığı: "anahtar|gün" → kullanılan hak. */
+  const analysisQuota = new Map<string, number>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -156,6 +161,7 @@ export function createFakeSharedBillRepository(
     },
     savedContacts,
     appUsers,
+    analysisQuota,
 
     async createSharedBill(
       record: SharedBillRecord,
@@ -431,6 +437,29 @@ export function createFakeSharedBillRepository(
         }
       }
       return { ok: true, count };
+    },
+
+    async consumeAnalysisQuota(input: {
+      quotaKey: string;
+      day: string;
+      limit: number;
+    }): Promise<ConsumeQuotaOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /*
+       * SQL ile AYNI ölçüt: sınıra ULAŞILMIŞSA sayaç artmaz. Sahte deponun
+       * gevşek davranması, gerçek sorgudaki bir kaymayı gizlerdi.
+       */
+      const key = `${input.quotaKey}|${input.day}`;
+      const used = analysisQuota.get(key) ?? 0;
+      if (used >= input.limit) {
+        return { ok: false, reason: "exhausted" };
+      }
+      const next = used + 1;
+      analysisQuota.set(key, next);
+      return { ok: true, used: next };
     },
 
     async countAllBills(): Promise<CountExpiredBillsOutcome> {

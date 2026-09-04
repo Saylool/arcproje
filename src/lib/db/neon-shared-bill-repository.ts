@@ -8,6 +8,7 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  ConsumeQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -354,6 +355,25 @@ WHERE expires_at < to_timestamp($1 / 1000.0)
  * Tanısaldır: uygun sayısı sıfırken toplam da sıfırsa, sorgunun bir şey bulup
  * bulamadığı BİLİNEMEZ. İkisi birlikte raporlanır.
  */
+/*
+ * KOTADAN BİR HAK DÜŞER — tek deyimde, atomik.
+ *
+ * Satır yoksa `used = 1` ile yaratılır. Varsa `WHERE` koşulu sorgunun
+ * İÇİNDEDİR: sınıra ulaşılmışsa güncelleme HİÇ olmaz ve deyim satır
+ * döndürmez. Okuyup sonra yazan bir yol olmadığı için iki eşzamanlı istek
+ * son hakkı birlikte kullanamaz.
+ *
+ * `EXCLUDED` kullanılmaz; artış mevcut değerden hesaplanır.
+ */
+const CONSUME_ANALYSIS_QUOTA = `
+INSERT INTO receipt_analysis_quota AS q (quota_key, day, used)
+VALUES ($1, $2::date, 1)
+ON CONFLICT (quota_key, day) DO UPDATE
+  SET used = q.used + 1
+  WHERE q.used < $3
+RETURNING used
+`;
+
 const COUNT_ALL_BILLS = `
 SELECT count(*)::int AS total
 FROM shared_bills
@@ -1218,6 +1238,36 @@ export async function createNeonSharedBillRepository(
           return { ok: false, reason: "unavailable" };
         }
         return { ok: true, count };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async consumeAnalysisQuota(input: {
+      quotaKey: string;
+      day: string;
+      limit: number;
+    }): Promise<ConsumeQuotaOutcome> {
+      try {
+        const rows = (await sql.query(CONSUME_ANALYSIS_QUOTA, [
+          input.quotaKey,
+          input.day,
+          input.limit,
+        ])) as { used: unknown }[];
+        /*
+         * Satır dönmemesi SINIRA ULAŞILDIĞI anlamına gelir: `WHERE` koşulu
+         * tutmadığı için güncelleme yapılmadı. Bu bir HATA DEĞİLDİR ve
+         * erişilememeyle karıştırılmaz.
+         */
+        if (rows.length === 0) {
+          return { ok: false, reason: "exhausted" };
+        }
+        const raw = rows[0]?.used;
+        const used = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isInteger(used) || used < 1) {
+          return { ok: false, reason: "unavailable" };
+        }
+        return { ok: true, used };
       } catch {
         return { ok: false, reason: "unavailable" };
       }
