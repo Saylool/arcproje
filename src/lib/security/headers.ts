@@ -70,6 +70,9 @@ const STYLE_SRC = "'self' 'unsafe-inline'";
  */
 const OPEN_CONNECT_SRC = "* data: blob:";
 
+/** Raporların gönderildiği uç. Testler gerçek rotayla eşliğini zorlar. */
+export const CSP_REPORT_PATH = "/api/csp-report";
+
 function directives(scriptSrc: string, connectSrc: string): string {
   return [
     "default-src 'self'",
@@ -93,6 +96,15 @@ function directives(scriptSrc: string, connectSrc: string): string {
     "worker-src 'self' blob:",
     "manifest-src 'self'",
     "upgrade-insecure-requests",
+    /*
+     * İhlaller sunucuya BİLDİRİLİR. Konsola bakmak masaüstünde kolay ama
+     * telefonda neredeyse imkânsız; `connect-src`'yi engelleyici yapabilmek
+     * için mobil yolun ne yaptığını da bilmemiz gerekiyor.
+     *
+     * Uç yalnızca yönergeyi ve engellenen adresin KÖKENİNİ günlüğe yazar;
+     * sayfanın adresi yazılmaz.
+     */
+    `report-uri ${CSP_REPORT_PATH}`,
   ].join("; ");
 }
 

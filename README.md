@@ -1158,6 +1158,26 @@ akışını kapsadı. Mobil WalletConnect yolu ve hesabı **oluşturan** akış 
 Bir test, iki politikanın `connect-src` dışında **birebir aynı** kalmasını
 zorluyor — ayrışırlarsa ölçüm, uygulananla ilgisiz bir şeyi ölçmeye başlar.
 
+### İhlaller sunucuya bildiriliyor
+
+İki politika da `report-uri /api/csp-report` taşıyor. Konsola bakmak
+masaüstünde kolay ama **telefonda neredeyse imkânsız**; `connect-src`'yi
+engelleyici yapabilmek için mobil yolun ne yaptığını da bilmemiz gerekiyor.
+Uç sayesinde cihaz kendisi bildiriyor ve satırlar Vercel günlüklerine düşüyor:
+
+    [csp] connect-src <- https://ornek.invalid (report)
+
+**Gizlilik, bu ucun en önemli kısıtı.** Rapor gövdesi sayfanın TAM ADRESİNİ
+taşır ve ortak hesap adresleri `billId` içerir — o bağlantıyı bilen herkes
+hesabı açabilir. Bu yüzden günlüğe **yalnızca yönerge ve engellenen adresin
+KÖKENİ** yazılır; sayfanın adresi ve engellenen adresin yolu/sorgusu atılır.
+Bir test bunu zorluyor: `billId` benzeri bir dizge günlük satırında geçerse
+test düşer.
+
+Uç kimlik doğrulaması İSTEMEZ ve isteyemez — raporu tarayıcı, oturumdan
+bağımsız gönderir. Bu yüzden hiçbir şey okumaz, hiçbir şey yazmaz ve
+veritabanına dokunmaz; tek yaptığı kısa bir satır günlüğe düşürmek.
+
 `connect-src`, tarayıcının bağlandığı adreslerle sınırlıdır ve bir test bu
 listeyi gizlilik politikasındaki `DISCLOSED_HOSTS` ile karşılaştırır — yeni bir
 dış bağlantı, politikaya da yazılmadan geçemez. OpenAI ve veritabanı burada
