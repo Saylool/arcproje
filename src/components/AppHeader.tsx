@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { AuthControl, type SafeAuthState } from "@/components/AuthControl";
 import { LanguageSelect } from "@/components/LanguageSelect";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { MARK_ACCENT } from "@/lib/brand/mark";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
 import { BrandMark } from "./BrandMark";
@@ -50,7 +51,9 @@ export function AppHeader({
           aria-hidden="true"
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand text-white"
         >
-          <BrandMark className="h-4 w-4" />
+          {/* Rozet mor zeminde beyaz işaret: uygulama ikonunun küçük hâli.
+              İkinci pay orada da vurgu rengini alır ki ikisi ayrışmasın. */}
+          <BrandMark className="h-4 w-4" accent={MARK_ACCENT} />
         </span>
         <span className="truncate text-sm font-semibold tracking-tight text-ink">
           {t("app.name")}
