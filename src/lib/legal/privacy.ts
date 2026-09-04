@@ -78,6 +78,15 @@ export const DISCLOSED_HOSTS: readonly string[] = [
   "docs.arc.io",
   "faucet.circle.com",
   "rpc.testnet.arc.io",
+  /*
+   * İKİNCİ bir Arc RPC sunucusu. Bizim kodumuz `rpc.testnet.arc.io`
+   * kullanır; Circle App Kit ise viem'in gömülü `arcTestnet` tanımını
+   * kullandığı için tarayıcı ödeme sırasında BURAYA da bağlanır.
+   *
+   * Kaynak taramasıyla bulunamazdı: adres bizim kodumuzda değil, bağımlılığın
+   * içinde. Yalnızca CSP'nin rapor kipi ortaya çıkardı.
+   */
+  "rpc.testnet.arc.network",
   "testnet.arcscan.app",
   "arcscan.app",
   "api.openai.com",
@@ -201,9 +210,9 @@ const tr: PrivacyPolicy = {
               "Telefondaki cüzdanı bağlamak. Yalnızca bu yolu kullanırsan devreye girer",
             ],
             [
-              `${NETWORK} ağı`,
+              `${NETWORK} ağı ve RPC sunucuları`,
               "Cüzdan adresleri ve gönderdiğin işlemler",
-              "Transferin gerçekleşmesi. Bu veri HERKESE AÇIKTIR",
+              "Transferin gerçekleşmesi. Bu veri HERKESE AÇIKTIR. Tarayıcın BİRDEN FAZLA RPC sunucusuna bağlanır: uygulamanın kendi seçtiği sunucu ve cüzdan kitinin kullandığı sunucu",
             ],
             ["Neon (veritabanı) ve Vercel (barındırma)", "Yukarıda sayılan kayıtlar", "Uygulamanın çalışması"],
           ],
@@ -468,9 +477,9 @@ const en: PrivacyPolicy = {
               "Connecting the wallet on your phone. Only used if you take that route",
             ],
             [
-              `The ${NETWORK} network`,
+              `The ${NETWORK} network and its RPC servers`,
               "Wallet addresses and the transactions you send",
-              "Making the transfer happen. This data is PUBLIC",
+              "Making the transfer happen. This data is PUBLIC. Your browser reaches MORE THAN ONE RPC server: the one the app picks and the one the wallet kit uses",
             ],
             ["Neon (database) and Vercel (hosting)", "The records listed above", "Running the application"],
           ],
