@@ -1153,6 +1153,20 @@ listeyi gizlilik politikasındaki `DISCLOSED_HOSTS` ile karşılaştırır — y
 dış bağlantı, politikaya da yazılmadan geçemez. OpenAI ve veritabanı burada
 YOKTUR: onlara sunucu bağlanır.
 
+### Rapor kipinin yakaladığı şey
+
+Politikanın alan adı taraması **kaynak kodu** okur. Bir adres bağımlılığın
+içindeyse tarama onu göremez.
+
+Üretimde gerçek bir ödeme akışı sırasında tam olarak bu oldu: uygulama
+`rpc.testnet.arc.io` kullanıyor, ama **Circle App Kit** viem'in gömülü
+`arcTestnet` tanımını kullandığı için tarayıcı ayrıca
+`rpc.testnet.arc.network` adresine de bağlanıyor. İkinci sunucu politikada
+bildirilmemişti ve hiçbir test bunu yakalayamazdı.
+
+Ortaya çıkaran şey CSP'nin rapor kipi oldu. Bu, kipin varlık sebebi:
+bağımlılıkların gerçekte nereye bağlandığını **çalışırken** ölçmek.
+
 ### Bilinen eksik: `script-src`
 
 `script-src` bilerek `'unsafe-inline'` içerir. Ölçüldü: sayfa 10 satır içi

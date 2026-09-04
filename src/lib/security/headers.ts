@@ -20,6 +20,16 @@
 export const BROWSER_CONNECT_HOSTS: readonly string[] = [
   /* Arc Testnet RPC: cüzdansız okumalar ve tahminler buradan gider. */
   "https://rpc.testnet.arc.io",
+  /*
+   * İKİNCİ Arc RPC sunucusu ve bu bir varsayım değil, ÖLÇÜM.
+   *
+   * CSP'nin rapor kipi üretimde gerçek bir ödeme akışında yakaladı: Circle
+   * App Kit viem'in gömülü `arcTestnet` tanımını kullanıyor ve o tanımın
+   * varsayılan RPC'si `.network`. Bizim kendi istemcimiz `.io` kullanır.
+   *
+   * Kaynak taraması bunu bulamazdı; adres bağımlılığın içinde.
+   */
+  "https://rpc.testnet.arc.network",
   /* WalletConnect röle ve RPC'si. */
   "https://relay.walletconnect.org",
   "wss://relay.walletconnect.org",
