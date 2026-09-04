@@ -1163,6 +1163,34 @@ Sıkılaştırmak, her istekte nonce üreten bir middleware ister. O gelene kada
 katı sürüm `Content-Security-Policy-Report-Only` olarak yayında duruyor ve
 ihlalleri tarayıcı konsoluna yazıyor — önce ölç, sonra uygula.
 
+## CI ve dal koruması
+
+Kapı (`lint`, `typecheck`, `test`, `build`, `git diff --check`) her PR'da
+GitHub Actions ile zorunlu çalışır: `.github/workflows/ci.yml`.
+
+Asıl kazanç tek tek PR'lar değil, **birleşme sonucu**. Bu projede bir kez
+yaşandı: #14–#18 ayrı ayrı yeşilken, birleşmiş hâlde bir test kırıldı —
+gizlilik politikasının alan adı taraması, başka bir daldan gelen SVG'nin
+`xmlns` değerini yakaladı. GitHub `pull_request` olayında PR'ı hedef dalla
+birleştirip çalıştırdığı için tam da o sınıfı yakalar.
+
+**CI'ın yapamadıkları:** cüzdan akışı, fiş analizi ve gerçek bir Postgres
+burada çalışmaz. Kapsam artmıyor, mevcut kapı zorunlu hâle geliyor.
+
+Kapının kendisi de korunuyor: `src/lib/ci/workflow.test.ts`, `package.json`
+betikleriyle CI'da çalıştırılanları karşılaştırır — bir adım sessizce
+düşerse test kırılır.
+
+`.nvmrc` ve `engines` **bilerek eklenmedi**: ikisi de Vercel'in derleme
+imajını değiştirir ve bu ayrı, açıkça istenmesi gereken bir karardır.
+
+### Geçiş dosyaları
+
+`src/lib/db/migrations.test.ts` numaralandırmayı zorlar. Sebep bu depoya
+özgü: birden fazla dal art arda merge ediliyor ve iki dal da `0005_` eklerse
+**merge sırasında çakışma olmaz** — iki dosya sorunsuzca yan yana durur ve
+sıra belirsizleşir. Git bunu yakalamaz, çünkü metin çakışması yoktur.
+
 ## Bilinçli olarak yapılmayanlar
 
 Bir denetimde çıkan ve **kasıtlı olarak ele alınmayan** maddeler. Her
