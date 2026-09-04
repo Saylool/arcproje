@@ -55,7 +55,22 @@ const SCRIPT_SRC = "'self' 'unsafe-inline'";
 /** Aynı gerekçe: Tailwind ve Next satır içi stil üretiyor. */
 const STYLE_SRC = "'self' 'unsafe-inline'";
 
-function directives(scriptSrc: string): string {
+/**
+ * ŞİMDİLİK SERBEST BIRAKILAN `connect-src`.
+ *
+ * Üretimde ölçülen tek ihlal sınıfı buydu ve ölçüm YALNIZCA masaüstü/eklenti
+ * borçlu akışını kapsıyor. Mobil WalletConnect yolu ve hesabı OLUŞTURAN akış
+ * henüz çalıştırılmadı; eksik bir liste parayı göndermeyi kırar.
+ *
+ * `*` ağ şemalarını kapsar ama `data:`/`blob:` şemalarını kapsamaz; onlar
+ * ayrıca yazılır.
+ *
+ * Bugünkü durumdan kötü DEĞİLDİR: şu an hiç CSP uygulanmıyor. Kalan
+ * yönergeler ise ilk kez zorlayıcı oluyor.
+ */
+const OPEN_CONNECT_SRC = "* data: blob:";
+
+function directives(scriptSrc: string, connectSrc: string): string {
   return [
     "default-src 'self'",
     `script-src ${scriptSrc}`,
@@ -63,7 +78,7 @@ function directives(scriptSrc: string): string {
     /* data: QR ve ikonlar, blob: seçilen fişin önizlemesi. */
     `img-src 'self' data: blob: ${AVATAR_HOSTS.join(" ")}`,
     "font-src 'self'",
-    `connect-src 'self' ${BROWSER_CONNECT_HOSTS.join(" ")}`,
+    `connect-src ${connectSrc}`,
     /* Eklenti yok, taban etiketi enjeksiyonu yok. */
     "object-src 'none'",
     "base-uri 'none'",
@@ -82,24 +97,34 @@ function directives(scriptSrc: string): string {
 }
 
 /**
- * CSP ŞİMDİLİK YALNIZCA RAPORLAR, UYGULANMAZ.
+ * UYGULANAN politika.
  *
- * Sebebi ölçülmüş bir bilinmezlik: `@circle-fin/app-kit` tarayıcıda dinamik
- * olarak yükleniyor (`send.ts`) ve transfer sırasında nereye bağlandığını
- * gerçek bir transfer yapmadan SAYAMAYIZ. Eksik bir `connect-src`, tam da
- * uygulamanın asıl işini — parayı göndermeyi — kırardı.
- *
- * Bu yüzden politika ihlalleri önce toplanır. Gerçek liste görüldükten sonra
- * ayrı bir adımda uygulanır.
- *
- * Çerçeveleme koruması bunu BEKLEMEZ: `X-Frame-Options` ayrı bir başlıktır,
- * bugün uygulanır ve asıl kazanç zaten oydu.
+ * Kapsamı KANIT belirledi. Üretimde tam bir ödeme akışı rapor kipiyle
+ * çalıştırıldı; `connect-src` DIŞINDA hiçbir yönerge tek bir ihlal bile
+ * üretmedi. Yani buradaki her kısıt ölçülmüş, tahmin edilmemiştir —
+ * `frame-src`, `img-src`, `script-src`, `style-src`, `worker-src` dâhil.
  */
-export const CONTENT_SECURITY_POLICY_REPORT_ONLY = directives(SCRIPT_SRC);
+export const CONTENT_SECURITY_POLICY = directives(
+  SCRIPT_SRC,
+  OPEN_CONNECT_SRC,
+);
+
+/**
+ * ÖLÇMEYE DEVAM EDEN politika.
+ *
+ * Yalnızca `connect-src` burada katıdır. Ölçüm masaüstü/eklenti borçlu
+ * akışını kapsadı; mobil WalletConnect ve hesabı oluşturan akış henüz
+ * çalıştırılmadı. Onlar da temiz çıktığında `connect-src` uygulanana taşınır.
+ */
+export const CONTENT_SECURITY_POLICY_REPORT_ONLY = directives(
+  SCRIPT_SRC,
+  `'self' ${BROWSER_CONNECT_HOSTS.join(" ")}`,
+);
 
 export type SecurityHeader = Readonly<{ key: string; value: string }>;
 
 export const SECURITY_HEADERS: readonly SecurityHeader[] = [
+  { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
   {
     key: "Content-Security-Policy-Report-Only",
     value: CONTENT_SECURITY_POLICY_REPORT_ONLY,
