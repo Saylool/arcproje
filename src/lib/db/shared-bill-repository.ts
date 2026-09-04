@@ -339,6 +339,19 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    *
    * Olmayan bir kullanıcıyı silmek HATA DEĞİLDİR: `deleted: false` döner.
    */
+  /**
+   * Uygulama kullanıcısı HÂLÂ var mı?
+   *
+   * Oturum bir JWT'dir ve sunucu onu iptal EDEMEZ: hesabını silen biri,
+   * çerezi duran başka bir cihazdan istek göndermeye devam edebilir. Yabancı
+   * anahtarı olan tablolarda bu kendiliğinden durur — yazma düşer, okuma boş
+   * döner. Kota tablosunun yabancı anahtarı YOKTUR (genel satır yüzünden), bu
+   * yüzden PARA HARCAYAN yolda varlık ayrıca sorulur.
+   */
+  appUserExists(input: { userId: string }): Promise<
+    { ok: true; exists: boolean } | { ok: false; reason: "unavailable" }
+  >;
+
   deleteAppUser(input: { userId: string }): Promise<DeleteAppUserOutcome>;
 
   /**

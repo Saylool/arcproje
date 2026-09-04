@@ -13,6 +13,15 @@ export type OperationalAuthenticationRuntime = Readonly<{
   readSession(): Promise<AuthenticationSession>;
   beginGoogleSignIn(): Promise<unknown>;
   endSession(): Promise<unknown>;
+  /**
+   * Oturumu YÖNLENDİRMEDEN kapatır.
+   *
+   * Hesap silme yanıtı bunu çağırır: kullanıcı sonucu görmeli, ana sayfaya
+   * fırlatılmamalı. Çerez adlarını burada elle üretmek yerine Auth.js'in
+   * kendisine temizletiriz — adlar ortama göre değişir
+   * (`__Secure-` öneki, parçalı çerezler) ve tahmin etmek kırılgandır.
+   */
+  endSessionWithoutRedirect(): Promise<unknown>;
 }>;
 
 export type AuthenticationRuntimeResolution =

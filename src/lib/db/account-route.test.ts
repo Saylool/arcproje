@@ -97,6 +97,7 @@ describe("kimlik OTURUMDAN gelir", () => {
       authenticate: authenticated,
       createRepository: emptyRepository,
       remove,
+      endSession: vi.fn(async () => undefined),
     });
 
     const response = await DELETE();
@@ -116,6 +117,7 @@ describe("kimlik OTURUMDAN gelir", () => {
       authenticate: authenticated,
       createRepository: emptyRepository,
       remove: vi.fn(async () => ({ ok: true as const, deleted: true })),
+      endSession: vi.fn(async () => undefined),
     });
     expect(DELETE.length).toBe(0);
   });
@@ -127,6 +129,7 @@ describe("sonuc dogru tasinir", () => {
       authenticate: authenticated,
       createRepository: emptyRepository,
       remove: vi.fn(async () => ({ ok: true as const, deleted: false })),
+      endSession: vi.fn(async () => undefined),
     });
 
     const response = await DELETE();
@@ -159,11 +162,78 @@ describe("sonuc dogru tasinir", () => {
       authenticate: authenticated,
       createRepository: emptyRepository,
       remove: vi.fn(async () => ({ ok: true as const, deleted: true })),
+      endSession: vi.fn(async () => undefined),
     });
 
     const response = await DELETE();
 
     expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+});
+
+/**
+ * OTURUM SILME ILE BIRLIKTE KAPANIR.
+ *
+ * Oturum bir JWT'dir ve 30 gun yasar. Cerez temizlenmezse, silinen hesap
+ * "Cikis yap"a basilmadigi surece istek gondermeye DEVAM eder.
+ */
+describe("silme, oturum cerezini de oldurur", () => {
+  it("basarili silmeden SONRA cerez temizlenir", async () => {
+    const endSession = vi.fn(async () => undefined);
+    const DELETE = createAccountDelete({
+      authenticate: authenticated,
+      createRepository: emptyRepository,
+      remove: vi.fn(async () => ({ ok: true as const, deleted: true })),
+      endSession,
+    });
+
+    expect((await DELETE()).status).toBe(200);
+    expect(endSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("silme DUSERSE cerez KORUNUR", async () => {
+    /*
+     * Ters sirada kullanici hem hesabini hem oturumunu kaybederdi: hesabi
+     * duruyor ama giris yapmasi gerekiyor olurdu.
+     */
+    const endSession = vi.fn(async () => undefined);
+    const DELETE = createAccountDelete({
+      authenticate: authenticated,
+      createRepository: emptyRepository,
+      remove: vi.fn(async () => ({
+        ok: false as const,
+        status: 503,
+        code: "SERVICE_UNAVAILABLE",
+        message: "olmadi",
+      })),
+      endSession,
+    });
+
+    expect((await DELETE()).status).toBe(503);
+    expect(endSession).not.toHaveBeenCalled();
+  });
+
+  it("oturum yoksa cerez temizligi de DENENMEZ", async () => {
+    const endSession = vi.fn(async () => undefined);
+    const DELETE = createAccountDelete({
+      authenticate: async () => ({ status: "signedOut" }),
+      createRepository: forbiddenRepository(),
+      remove: vi.fn(),
+      endSession,
+    });
+
+    expect((await DELETE()).status).toBe(401);
+    expect(endSession).not.toHaveBeenCalled();
+  });
+
+  it("cerez adlari ELLE uretilmez", () => {
+    /*
+     * Adlar ortama gore degisir (`__Secure-` oneki, parcali cerezler).
+     * Auth.js kendi cerezlerini temizler; burada isim gecmemeli.
+     */
+    const route = readFileSync("src/app/api/account/route.ts", "utf8");
+    expect(route).not.toContain("authjs.session-token");
+    expect(route).not.toContain("Set-Cookie");
   });
 });
 

@@ -14,9 +14,14 @@ import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-reposi
  * Parametre ALMAZ. Hangi hesabın silineceğini yalnızca sunucudaki oturum
  * belirler; istemci başka birinin kimliğini gösteremez.
  *
- * Oturumu bu uç KAPATMAZ. Silme başarılı olduktan sonra çıkışı istemci
- * yapar, çünkü oturum çerezi kimlik doğrulama katmanının elindedir. Sıra
- * önemlidir: önce kayıt gider, sonra çerez.
+ * OTURUM ÇEREZİ BURADA ÖLDÜRÜLÜR. Sıra önemlidir: önce kayıt gider, sonra
+ * çerez; ters sırada silme düşerse kullanıcı hem hesabını hem oturumunu
+ * kaybederdi.
+ *
+ * Bu yalnızca İSTEĞİ GÖNDEREN tarayıcıyı etkiler. Oturum bir JWT'dir ve
+ * sunucu onu iptal edemez; başka bir cihazdaki çerez süresi dolana kadar
+ * geçerli kalır. O yolu kapatan şey, para harcayan uçtaki "kullanıcı hâlâ
+ * var mı" kontrolüdür.
  */
 
 export const runtime = "nodejs";
@@ -67,6 +72,7 @@ type AccountDeleteDependencies = Readonly<{
   authenticate: AuthenticateRequest;
   createRepository: typeof createNeonSharedBillRepository;
   remove: typeof deleteAccount;
+  endSession: () => Promise<unknown>;
 }>;
 
 export function createAccountDelete(
@@ -77,6 +83,17 @@ export function createAccountDelete(
     createRepository:
       dependencies.createRepository ?? createNeonSharedBillRepository,
     remove: dependencies.remove ?? deleteAccount,
+    /*
+     * TEMBEL yüklenir. Auth.js'i modül düzeyinde içeri almak, bu rotayı
+     * test ortamında yüklenemez hâle getiriyor; testler zaten kendi
+     * sahtesini geçiyor.
+     */
+    endSession:
+      dependencies.endSession ??
+      (async () => {
+        const actions = await import("@/app/auth-actions");
+        await actions.endGoogleSessionWithoutRedirect();
+      }),
   };
   return () => accountDelete(resolved);
 }
@@ -104,6 +121,13 @@ async function accountDelete(dependencies: AccountDeleteDependencies) {
   if (!removed.ok) {
     return errorResponse(removed.status, removed.code, removed.message);
   }
+
+  /*
+   * Çerez, kayıt gittikten SONRA temizlenir. Çerez adları ortama göre değişir
+   * (`__Secure-` öneki, parçalı çerezler); adları elle üretmek yerine Auth.js
+   * kendi çerezlerini temizler.
+   */
+  await dependencies.endSession();
 
   return NextResponse.json(
     { deleted: removed.deleted },

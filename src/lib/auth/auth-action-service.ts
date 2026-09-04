@@ -14,5 +14,18 @@ export function createAuthenticationActions(
       if (resolved.status === "unavailable") return;
       await resolved.runtime.endSession();
     },
+    /**
+     * Hesap silindikten SONRA çağrılır: çerez o anda ölür, kullanıcı ana
+     * sayfaya fırlatılmaz ve sonucu görebilir.
+     *
+     * Bu YALNIZCA isteği gönderen tarayıcıyı etkiler. Başka bir cihazdaki
+     * oturum JWT'siyle çalışmaya devam eder; onu kapatan şey, analiz ucundaki
+     * "kullanıcı hâlâ var mı" kontrolüdür.
+     */
+    async endSessionWithoutRedirect() {
+      const resolved = resolveRuntime();
+      if (resolved.status === "unavailable") return;
+      await resolved.runtime.endSessionWithoutRedirect();
+    },
   };
 }

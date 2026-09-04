@@ -13,7 +13,10 @@ import {
   resolveImageMimeType,
   type ImageTypeResolution,
 } from "@/lib/receipt/image-type";
-import { consumeAnalysisQuota } from "@/lib/db/analysis-quota-service";
+import {
+  appUserStillExists,
+  consumeAnalysisQuota,
+} from "@/lib/db/analysis-quota-service";
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
 
 export const runtime = "nodejs";
@@ -77,6 +80,7 @@ type ReceiptRouteDependencies = Readonly<{
   extract: typeof extractReceipt;
   createRepository: typeof createNeonSharedBillRepository;
   consumeQuota: typeof consumeAnalysisQuota;
+  userExists: typeof appUserStillExists;
   now: () => number;
 }>;
 
@@ -90,6 +94,7 @@ export function createReceiptAnalyzePost(
     createRepository:
       dependencies.createRepository ?? createNeonSharedBillRepository,
     consumeQuota: dependencies.consumeQuota ?? consumeAnalysisQuota,
+    userExists: dependencies.userExists ?? appUserStillExists,
     now: dependencies.now ?? (() => Date.now()),
   };
   return (request: Request) => receiptAnalyzePost(request, resolved);
@@ -200,6 +205,36 @@ async function receiptAnalyzePost(
       "Analiz kotası okunamıyor. Sunucuda DATABASE_URL tanımlı değil.",
     );
   }
+  /*
+   * KULLANICI HÂLÂ VAR MI?
+   *
+   * Oturum bir JWT'dir ve sunucu onu iptal edemez: hesabını silen biri,
+   * çerezi duran BAŞKA bir cihazdan istek göndermeye devam edebilir. Yabancı
+   * anahtarı olan tablolarda bu kendiliğinden durur; kota tablosunun yabancı
+   * anahtarı YOKTUR, yani para harcayan yol tam da bu kontrolsüz kalan yoldu.
+   *
+   * Erişilememe "yok" ile karıştırılmaz: 401 dönmek, var olan hesabıyla
+   * gelen kullanıcıyı dışarı atardı.
+   */
+  const exists = await dependencies.userExists({
+    userId: authentication.user.id,
+    repository,
+  });
+  if (!exists.ok) {
+    return errorResponse(
+      503,
+      "SERVICE_UNAVAILABLE",
+      "Hesap doğrulanamıyor. Lütfen birazdan tekrar dene.",
+    );
+  }
+  if (!exists.exists) {
+    return errorResponse(
+      401,
+      "ACCOUNT_DELETED",
+      "Bu hesap silinmiş. Devam etmek için yeniden giriş yapman gerekiyor.",
+    );
+  }
+
   const quota = await dependencies.consumeQuota({
     userId: authentication.user.id,
     repository,

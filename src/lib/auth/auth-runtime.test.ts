@@ -28,6 +28,7 @@ function fakeRuntime(
     readSession: vi.fn(async () => session),
     beginGoogleSignIn: vi.fn(async () => undefined),
     endSession: vi.fn(async () => undefined),
+    endSessionWithoutRedirect: vi.fn(async () => undefined),
   };
 }
 
