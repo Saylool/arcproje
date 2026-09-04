@@ -6,10 +6,12 @@ import { DISCLOSED_HOSTS } from "@/lib/legal/privacy";
 
 import {
   BROWSER_CONNECT_HOSTS,
-  CONTENT_SECURITY_POLICY,
   CONTENT_SECURITY_POLICY_REPORT_ONLY,
   SECURITY_HEADERS,
 } from "./headers";
+
+/** Tek politika var ve simdilik yalnizca RAPORLANIYOR. */
+const POLICY = CONTENT_SECURITY_POLICY_REPORT_ONLY;
 
 /**
  * GUVENLIK BASLIKLARI.
@@ -33,7 +35,7 @@ function directive(policy: string, name: string): string {
 describe("yonergeler: acilan yuzeyler kapatilir", () => {
   it("sayfa CERCEVELENEMEZ", () => {
     /* Tiklama hirsizligi: odeme sayfasi bir iframe'e alinamamali. */
-    expect(directive(CONTENT_SECURITY_POLICY, "frame-ancestors")).toBe(
+    expect(directive(POLICY, "frame-ancestors")).toBe(
       "frame-ancestors 'none'",
     );
   });
@@ -46,23 +48,23 @@ describe("yonergeler: acilan yuzeyler kapatilir", () => {
   });
 
   it("taban etiketi ve eklentiler kapali", () => {
-    expect(directive(CONTENT_SECURITY_POLICY, "base-uri")).toBe(
+    expect(directive(POLICY, "base-uri")).toBe(
       "base-uri 'none'",
     );
-    expect(directive(CONTENT_SECURITY_POLICY, "object-src")).toBe(
+    expect(directive(POLICY, "object-src")).toBe(
       "object-src 'none'",
     );
   });
 
   it("form yalnizca KENDI adresimize gonderilebilir", () => {
     /* Aksi halde bir enjeksiyon, gonderimi baska bir sunucuya yollayabilirdi. */
-    expect(directive(CONTENT_SECURITY_POLICY, "form-action")).toBe(
+    expect(directive(POLICY, "form-action")).toBe(
       "form-action 'self'",
     );
   });
 
   it("varsayilan KISITLAYICIDIR", () => {
-    expect(directive(CONTENT_SECURITY_POLICY, "default-src")).toBe(
+    expect(directive(POLICY, "default-src")).toBe(
       "default-src 'self'",
     );
   });
@@ -88,7 +90,7 @@ describe("yonergeler: acilan yuzeyler kapatilir", () => {
 
 describe("baglantilar: yalnizca BILDIRILEN adresler", () => {
   it("cuzdan ve zincir icin gerekenler acik", () => {
-    const connect = directive(CONTENT_SECURITY_POLICY, "connect-src");
+    const connect = directive(POLICY, "connect-src");
     expect(connect).toContain("'self'");
     expect(connect).toContain("https://rpc.testnet.arc.io");
     /* WalletConnect rolesi WEBSOCKET kullanir; wss ayrica gerekir. */
@@ -112,39 +114,40 @@ describe("baglantilar: yalnizca BILDIRILEN adresler", () => {
      * OpenAI ve veritabanina SUNUCU baglanir. Bunlari connect-src'ye koymak,
      * gereksiz yere tarayiciya izin vermek olurdu.
      */
-    const connect = directive(CONTENT_SECURITY_POLICY, "connect-src");
+    const connect = directive(POLICY, "connect-src");
     expect(connect).not.toContain("api.openai.com");
     expect(connect).not.toContain("neon.tech");
   });
 });
 
-describe("script-src: bilinen eksik, gizlenmiyor", () => {
-  it("uygulanan politika satir ici script'e IZIN VERIR", () => {
+describe("CSP simdilik RAPORLAR, uygulanmaz", () => {
+  it("uygulanan bir CSP basligi GONDERILMEZ", () => {
     /*
-     * Olculdu: sayfa 10 satir ici script tasiyor (Next.js onyukleme ve tema
-     * script'i), hicbirinde nonce yok. Kaldirilirsa uygulama acilmaz.
-     * Bunu gizlemek yerine test olarak yaziyoruz.
+     * Sebep olculmus bir bilinmezlik: `@circle-fin/app-kit` tarayicida
+     * dinamik olarak yukleniyor ve transfer sirasinda nereye bagladigini
+     * gercek bir transfer yapmadan sayamayiz. Eksik bir `connect-src`, tam da
+     * uygulamanin asil isini -- parayi gondermeyi -- kirardi.
      */
-    expect(directive(CONTENT_SECURITY_POLICY, "script-src")).toContain(
-      "'unsafe-inline'",
-    );
-  });
-
-  it("RAPORLAYAN politika KATIDIR ve olcum icin vardir", () => {
-    /* Nonce'lu bir script-src'ye gecmeden once neyin kirilacagini olcer. */
-    expect(directive(CONTENT_SECURITY_POLICY_REPORT_ONLY, "script-src")).toBe(
-      "script-src 'self'",
-    );
-    expect(CONTENT_SECURITY_POLICY_REPORT_ONLY).not.toContain(
-      "script-src 'self' 'unsafe-inline'",
-    );
-  });
-
-  it("raporlayan politika UYGULANMAZ", () => {
     const keys = SECURITY_HEADERS.map((header) => header.key);
     expect(keys).toContain("Content-Security-Policy-Report-Only");
-    /* Ikisi AYRI basliktir; raporlayan olan uygulanani gölgelemez. */
-    expect(keys).toContain("Content-Security-Policy");
+    expect(keys).not.toContain("Content-Security-Policy");
+  });
+
+  it("cerceveleme korumasi CSP'yi BEKLEMEZ", () => {
+    /*
+     * Asil kazanc buydu ve AYRI bir baslikla bugun uygulaniyor; CSP'nin
+     * raporda kalmasi onu geciktirmiyor.
+     */
+    const byKey = new Map(SECURITY_HEADERS.map((h) => [h.key, h.value]));
+    expect(byKey.get("X-Frame-Options")).toBe("DENY");
+  });
+
+  it("satir ici script RAPORDA da serbesttir", () => {
+    /*
+     * Amac satir ici script gurultusu degil; `connect-src` gibi GERCEKTEN
+     * bilmedigimiz ihlalleri gorebilmek.
+     */
+    expect(directive(POLICY, "script-src")).toContain("'unsafe-inline'");
   });
 });
 

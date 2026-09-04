@@ -1131,12 +1131,22 @@ Başlıklar `src/lib/security/headers.ts` içinde VERİ olarak durur;
 `next.config.ts` yalnızca listeyi bağlar. Böylece testler gerçek değerleri
 okuyabiliyor.
 
-Kapatılan yüzeyler: `frame-ancestors 'none'` (+ eski tarayıcılar için
-`X-Frame-Options: DENY`), `base-uri 'none'`, `object-src 'none'`,
-`form-action 'self'`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`.
+**Bugün uygulananlar:** `X-Frame-Options: DENY`, `X-Content-Type-Options`,
+`Referrer-Policy`, `Permissions-Policy`. Hepsi CSP'den bağımsız çalışır ve
+hiçbir isteği kırma riski taşımaz.
 
 En somut kazanç çerçeveleme: ödeme sayfası daha önce **birinin sitesinde
-iframe'e alınabiliyordu**.
+iframe'e alınabiliyordu**. `X-Frame-Options` bunu bugün kapatıyor.
+
+**CSP şimdilik yalnızca raporluyor** (`Content-Security-Policy-Report-Only`),
+uygulanmıyor. Sebep ölçülmüş bir bilinmezlik: `@circle-fin/app-kit` tarayıcıda
+dinamik olarak yükleniyor ve transfer sırasında nereye bağlandığını gerçek bir
+transfer yapmadan sayamıyoruz. Eksik bir `connect-src`, tam da uygulamanın asıl
+işini — parayı göndermeyi — kırardı. Gerçek ihlal listesi görüldükten sonra
+ayrı bir adımda uygulanacak.
+
+Politikanın içeriği: `frame-ancestors 'none'`, `base-uri 'none'`,
+`object-src 'none'`, `form-action 'self'`, `default-src 'self'`.
 
 `connect-src`, tarayıcının bağlandığı adreslerle sınırlıdır ve bir test bu
 listeyi gizlilik politikasındaki `DISCLOSED_HOSTS` ile karşılaştırır — yeni bir

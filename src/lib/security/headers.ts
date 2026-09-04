@@ -30,16 +30,15 @@ export const BROWSER_CONNECT_HOSTS: readonly string[] = [
 const AVATAR_HOSTS = ["https://*.googleusercontent.com"] as const;
 
 /**
- * `script-src` BİLEREK gevşektir ve bu bir eksiktir, gizlenmez.
+ * `script-src` gevşektir ve bu bir eksiktir, gizlenmez.
  *
  * Ölçüldü: sayfa 10 satır içi script taşıyor (Next.js'in kendi önyükleme
  * script'leri ve temanın "yanıp sönmeyi" önleyen script'i) ve HİÇBİRİNDE
- * nonce yok. `'unsafe-inline'` kaldırılırsa uygulama açılmaz.
+ * nonce yok. `'unsafe-inline'` kaldırılırsa uygulama açılmaz. Sıkılaştırmak,
+ * her istekte nonce üreten bir middleware ister.
  *
- * Sıkılaştırmak, her istekte nonce üreten bir middleware ister — ayrı ve
- * açıkça istenmesi gereken bir iş. O gelene kadar `script-src`, bugünkü
- * durumdan DAHA KÖTÜ değildir; politikanın geri kalanı ise bugün hiç
- * olmayan korumaları getirir.
+ * Raporlayan politikada da gevşek BIRAKILIR: amaç satır içi script gürültüsü
+ * değil, `connect-src` gibi GERÇEKTEN bilmediğimiz ihlalleri görebilmek.
  */
 const SCRIPT_SRC = "'self' 'unsafe-inline'";
 
@@ -72,22 +71,25 @@ function directives(scriptSrc: string): string {
   ].join("; ");
 }
 
-/** Uygulanan politika. */
-export const CONTENT_SECURITY_POLICY = directives(SCRIPT_SRC);
-
 /**
- * YALNIZCA RAPORLAYAN katı politika.
+ * CSP ŞİMDİLİK YALNIZCA RAPORLAR, UYGULANMAZ.
  *
- * Uygulanmaz; ihlalleri tarayıcı konsoluna yazar. Amacı, nonce'lu bir
- * `script-src`'ye geçmeden önce neyin kırılacağını ÖLÇMEK — silme işinde
- * olduğu gibi, önce ölç sonra uygula.
+ * Sebebi ölçülmüş bir bilinmezlik: `@circle-fin/app-kit` tarayıcıda dinamik
+ * olarak yükleniyor (`send.ts`) ve transfer sırasında nereye bağlandığını
+ * gerçek bir transfer yapmadan SAYAMAYIZ. Eksik bir `connect-src`, tam da
+ * uygulamanın asıl işini — parayı göndermeyi — kırardı.
+ *
+ * Bu yüzden politika ihlalleri önce toplanır. Gerçek liste görüldükten sonra
+ * ayrı bir adımda uygulanır.
+ *
+ * Çerçeveleme koruması bunu BEKLEMEZ: `X-Frame-Options` ayrı bir başlıktır,
+ * bugün uygulanır ve asıl kazanç zaten oydu.
  */
-export const CONTENT_SECURITY_POLICY_REPORT_ONLY = directives("'self'");
+export const CONTENT_SECURITY_POLICY_REPORT_ONLY = directives(SCRIPT_SRC);
 
 export type SecurityHeader = Readonly<{ key: string; value: string }>;
 
 export const SECURITY_HEADERS: readonly SecurityHeader[] = [
-  { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
   {
     key: "Content-Security-Policy-Report-Only",
     value: CONTENT_SECURITY_POLICY_REPORT_ONLY,
