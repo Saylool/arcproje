@@ -8,6 +8,7 @@ import {
   normalizeCurrency,
   type Receipt,
 } from "./schema";
+import { sanitizeWarningCodes } from "./warnings";
 
 const DEFAULT_RECEIPT_MODEL = "gpt-5.6-luna";
 
@@ -47,7 +48,7 @@ How to decide:
 - If item line totals plus the amount equal the printed grand total, that amount is "separate".
 - In Turkey KDV is usually included in the displayed prices, but do NOT assume this blindly. Use the receipt's own arithmetic.
 - Apply the same reasoning to service charge and discount independently. They can differ from each other.
-- If the visible arithmetic does not settle it, return "unknown" and add a short Turkish note in warnings explaining what was ambiguous.
+- If the visible arithmetic does not settle it, return "unknown" and add the matching warning code (TAX_TREATMENT_UNCLEAR, SERVICE_TREATMENT_UNCLEAR or DISCOUNT_TREATMENT_UNCLEAR).
 - When an amount is 0 because the receipt has no such line, "included_in_items" or "unknown" are both acceptable; the value is 0 either way.
 
 Other fields:
@@ -55,9 +56,20 @@ Other fields:
 - taxMinor, serviceChargeMinor, discountMinor: use 0 when the receipt does not show that line.
 - currency: the ISO 4217 code (TRY, USD, EUR, ...). "TL" and the lira sign both mean TRY. Use "UNKNOWN" when it cannot be determined.
 - merchantName: the business name, or null when it is not legible.
-- warnings: short notes written in TURKISH about anything unreadable, ambiguous, or uncertain. Add a warning instead of guessing. Use an empty array when everything is clear.
+- warnings: codes only, chosen from this exact list. Never write prose here; the app renders each code in the reader's own language.
+    TOTAL_UNREADABLE           the printed grand total cannot be read
+    TOTALS_DO_NOT_MATCH        the item lines do not add up to the printed total
+    TAX_TREATMENT_UNCLEAR      cannot tell whether tax is included or added
+    SERVICE_TREATMENT_UNCLEAR  same, for the service charge
+    DISCOUNT_TREATMENT_UNCLEAR same, for the discount
+    ITEM_PRICE_UNCLEAR         at least one item price is not clearly legible
+    ITEM_NAME_UNCLEAR          at least one item name is not clearly legible
+    PARTIALLY_UNREADABLE       part of the image is unreadable, lines may be missing
+    CURRENCY_UNCLEAR           the currency cannot be determined
+  Add a code instead of guessing. Use an empty array when everything is clear.
+  Any value outside this list is discarded, so an inexact code is worse than none.
 
-If the image is not a receipt or is too unreadable to extract line items, return an empty items array, zeros for the amounts, and explain why in warnings.`;
+If the image is not a receipt or is too unreadable to extract line items, return an empty items array, zeros for the amounts, and PARTIALLY_UNREADABLE in warnings.`;
 
 const USER_PROMPT =
   "Bu fiş görselindeki verileri çıkar. Yalnızca görselde açıkça görünen bilgileri kullan.";
@@ -159,9 +171,13 @@ export async function extractReceipt(
     return { ok: false, code: "RECEIPT_NOT_READABLE" };
   }
 
-  const warnings = [...parsed.warnings];
-  if (parsed.totalMinor === 0) {
-    warnings.push("Fişteki genel toplam okunamadı; lütfen kontrol edip düzelt.");
+  /*
+   * Modelin döndürdüğü her şey kapalı listeye indirgenir; uydurulmuş bir
+   * etiket çeviri anahtarı olarak kullanılamaz.
+   */
+  const warnings = sanitizeWarningCodes(parsed.warnings);
+  if (parsed.totalMinor === 0 && !warnings.includes("TOTAL_UNREADABLE")) {
+    warnings.push("TOTAL_UNREADABLE");
   }
 
   // ID'ler modelden istenmez, burada güvenli biçimde eklenir.

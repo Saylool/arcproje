@@ -67,7 +67,7 @@ export function ArcNetworkParameters() {
       <button
         type="button"
         onClick={copyAll}
-        className="self-start rounded-full border border-warn-line-strong px-3 py-1 text-[11px] font-semibold text-warn-ink"
+        className="self-start rounded-full border border-warn-line-strong px-3 py-1 text-[11px] font-semibold text-warn-ink min-h-11"
       >
         {copied ? t("common.copied") : t("wallet.copyNetwork")}
       </button>

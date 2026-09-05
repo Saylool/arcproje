@@ -792,7 +792,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             type="button"
             onClick={scanWallets}
             disabled={busy}
-            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
+            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60 min-h-11"
           >
             {t("wallet.connect")}
           </button>
@@ -837,7 +837,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 type="button"
                 onClick={connect}
                 disabled={selectedWalletUuid === null || busy}
-                className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50 min-h-11"
               >
                 {t("wallet.connectAccount")}
               </button>
@@ -846,7 +846,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                   type="button"
                   onClick={switchNetwork}
                   disabled={busy}
-                  className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60"
+                  className="rounded-full bg-brand px-3.5 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-60 min-h-11"
                 >
                   {t("wallet.switchToArc")}
                 </button>
@@ -930,7 +930,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             type="button"
             onClick={estimate}
             disabled={!canEstimate}
-            className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50"
+            className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-50 min-h-11"
           >
             {status === "estimating" ? t("payer.estimating") : t("payer.estimate")}
           </button>
@@ -957,7 +957,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
                 type="button"
                 onClick={submit}
                 disabled={!confirmed || busy}
-                className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled"
+                className="self-start rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:bg-disabled min-h-11"
               >
                 {t("payer.confirmInWallet")}
               </button>
@@ -1105,7 +1105,7 @@ function AddressDisclosure({
         <button
           type="button"
           onClick={copy}
-          className="self-start rounded-full border border-line bg-card px-3 py-1 text-[11px] font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="self-start rounded-full border border-line bg-card px-3 py-1 text-[11px] font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {copyState === "copied" ? t("common.copied") : t("common.copyAddress")}
         </button>

@@ -23,7 +23,7 @@ function GoogleButtonContent() {
       type="submit"
       disabled={pending}
       aria-disabled={pending}
-      className="inline-flex min-h-9 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
+      className="inline-flex min-h-11 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
     >
       {pending ? t("auth.loading") : t("auth.continueWithGoogle")}
     </button>
@@ -41,7 +41,7 @@ export function GoogleSignInButton({
         type="button"
         disabled
         aria-disabled="true"
-        className="inline-flex min-h-9 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-faint opacity-60"
+        className="inline-flex min-h-11 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-faint opacity-60"
       >
         <UnavailableLabel />
       </button>
@@ -67,7 +67,7 @@ function SignOutButton() {
       type="submit"
       disabled={pending}
       aria-disabled={pending}
-      className="rounded-full px-2.5 py-1 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
+      className="rounded-full px-2.5 py-1 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60 min-h-11"
     >
       {pending ? t("auth.loading") : t("auth.signOut")}
     </button>

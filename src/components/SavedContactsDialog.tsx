@@ -102,7 +102,7 @@ export function SavedContactsDialog({
         <button
           type="button"
           onClick={close}
-          className="self-end rounded-full border border-line bg-card px-4 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="self-end rounded-full border border-line bg-card px-4 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {t("contacts.closeBook")}
         </button>

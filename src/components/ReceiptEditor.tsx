@@ -184,8 +184,13 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
             {t("editor.analysisNotes")}
           </p>
           <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-warn-ink-soft">
-            {receipt.warnings.map((warning, index) => (
-              <li key={`${index}-${warning}`}>{warning}</li>
+            {receipt.warnings.map((code) => (
+              /*
+               * Model artık KOD döndürüyor; cümle etkin dilde sözlükten
+               * geliyor. Eskiden modelin yazdığı Türkçe metin doğrudan
+               * basılıyordu ve İngilizce arayüzde Türkçe uyarı çıkıyordu.
+               */
+              <li key={code}>{t(`editor.analysisWarnings.${code}`)}</li>
             ))}
           </ul>
         </div>
@@ -231,7 +236,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                     type="button"
                     onClick={() => removeItem(item.id)}
                     aria-label={t("editor.itemDeleteLabel", { index: index + 1 })}
-                    className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    className="shrink-0 rounded-xl border border-transparent px-2.5 py-2 text-xs font-semibold text-ink-faint transition-colors hover:bg-danger-surface hover:text-danger-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11 inline-flex items-center"
                   >
                     {t("common.delete")}
                   </button>
@@ -244,7 +249,7 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
         <button
           type="button"
           onClick={addItem}
-          className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="self-start rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {t("editor.addItem")}
         </button>

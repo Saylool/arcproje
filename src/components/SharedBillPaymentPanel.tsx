@@ -527,7 +527,7 @@ export function SharedBillPaymentPanel({
           <button
             type="button"
             onClick={requestOffer}
-            className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
+            className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white min-h-11"
           >
             {t("sharedPay.getRate")}
           </button>
@@ -593,7 +593,7 @@ export function SharedBillPaymentPanel({
             <button
               type="button"
               onClick={() => estimate(phase.offer)}
-              className="self-start rounded-full border border-brand-line-soft bg-brand-soft px-4 py-2 text-sm font-semibold text-brand-ink"
+              className="self-start rounded-full border border-brand-line-soft bg-brand-soft px-4 py-2 text-sm font-semibold text-brand-ink min-h-11 inline-flex items-center"
             >
               {t("sharedPay.estimateButton")}
             </button>
@@ -609,7 +609,7 @@ export function SharedBillPaymentPanel({
               <button
                 type="button"
                 onClick={() => pay(phase.offer)}
-                className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white"
+                className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white min-h-11 inline-flex items-center"
               >
                 {t("sharedPay.payWithArc")}
               </button>

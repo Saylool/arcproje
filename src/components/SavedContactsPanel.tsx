@@ -183,7 +183,7 @@ export function SavedContactsPanel({
                 void run(() => deleteAllContactsOnServer());
               }
             }}
-            className="shrink-0 rounded-full border border-line bg-card px-3 py-1 text-xs font-semibold text-danger-ink transition-colors hover:border-danger-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60"
+            className="shrink-0 rounded-full border border-line bg-card px-3 py-1 text-xs font-semibold text-danger-ink transition-colors hover:border-danger-line-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60 min-h-11 inline-flex items-center"
           >
             {t("contacts.removeAll")}
           </button>
@@ -243,7 +243,7 @@ export function SavedContactsPanel({
                           if (ok) setEditing(null);
                         });
                       }}
-                      className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                      className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-white disabled:opacity-60 min-h-11 inline-flex items-center"
                     >
                       {t("contacts.saveChanges")}
                     </button>
@@ -253,7 +253,7 @@ export function SavedContactsPanel({
                         setEditing(null);
                         setErrorKey(null);
                       }}
-                      className="rounded-full px-3 py-1 text-xs font-semibold text-ink-faint"
+                      className="rounded-full px-3 py-1 text-xs font-semibold text-ink-faint min-h-11 inline-flex items-center"
                     >
                       {t("contacts.cancel")}
                     </button>
@@ -268,7 +268,7 @@ export function SavedContactsPanel({
                 <button
                   type="button"
                   onClick={() => onPick?.(contact)}
-                  className="flex flex-col gap-1 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  className="flex flex-col gap-1 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
                 >
                   <span className="text-sm font-semibold text-ink">
                     {contact.label}
@@ -297,7 +297,7 @@ export function SavedContactsPanel({
                         });
                         setErrorKey(null);
                       }}
-                      className="rounded-full border border-line px-3 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      className="rounded-full border border-line px-3 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11 inline-flex items-center"
                     >
                       {t("contacts.edit")}
                     </button>
@@ -309,7 +309,7 @@ export function SavedContactsPanel({
                           deleteContactOnServer(contact.contactId ?? ""),
                         )
                       }
-                      className="rounded-full px-3 py-1 text-xs font-semibold text-danger-ink transition-colors hover:bg-danger-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60"
+                      className="rounded-full px-3 py-1 text-xs font-semibold text-danger-ink transition-colors hover:bg-danger-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60 min-h-11 inline-flex items-center"
                     >
                       {t("contacts.remove")}
                     </button>
@@ -362,7 +362,7 @@ export function SavedContactsPanel({
                       }),
                     )
                   }
-                  className="self-start rounded-full border border-line px-3 py-1 text-xs font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60"
+                  className="self-start rounded-full border border-line px-3 py-1 text-xs font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:opacity-60 min-h-11 inline-flex items-center"
                 >
                   {t("contacts.save")}
                 </button>
@@ -409,7 +409,7 @@ export function SavedContactsPanel({
               if (ok) setDraft(EMPTY);
             });
           }}
-          className="self-start rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:bg-disabled disabled:text-disabled-ink"
+          className="self-start rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:bg-disabled disabled:text-disabled-ink min-h-11 inline-flex items-center"
         >
           {t("contacts.add")}
         </button>

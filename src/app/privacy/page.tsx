@@ -126,7 +126,7 @@ export default async function PrivacyPage() {
 
       <Link
         href="/"
-        className="self-start rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        className="self-start rounded-full border border-line px-4 py-2 text-sm font-semibold text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11 inline-flex items-center"
       >
         {translate(locale, "legal.backHome")}
       </Link>

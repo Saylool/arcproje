@@ -148,7 +148,7 @@ export function WalletConnectPanel({
           {deepLink !== null && (
             <a
               href={deepLink}
-              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white"
+              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white min-h-11 inline-flex items-center"
             >
               {t("wallet.walletConnectOpen")}
             </a>
@@ -156,7 +156,7 @@ export function WalletConnectPanel({
           <button
             type="button"
             onClick={cancel}
-            className="rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink-soft"
+            className="rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink-soft min-h-11"
           >
             {t("wallet.walletConnectCancel")}
           </button>
@@ -177,7 +177,7 @@ export function WalletConnectPanel({
         type="button"
         onClick={start}
         disabled={stage.status === "starting"}
-        className="self-start rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink-soft disabled:opacity-50"
+        className="self-start rounded-full border border-line px-4 py-1.5 text-sm font-semibold text-ink-soft disabled:opacity-50 min-h-11"
       >
         {stage.status === "starting"
           ? t("wallet.walletConnectWaiting")

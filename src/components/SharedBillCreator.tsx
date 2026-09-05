@@ -99,7 +99,7 @@ type GeneratedLink = {
 };
 
 const LINK_CLASS =
-  "underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "inline-flex min-h-11 items-center underline underline-offset-2 hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 const CARD_CLASS =
   "flex flex-col gap-4 rounded-3xl border border-line bg-card p-5 shadow-sm";
@@ -404,7 +404,7 @@ export function SharedBillCreator({
           <button
             type="button"
             onClick={scanWallets}
-            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 min-h-11"
           >
             {t("wallet.connect")}
           </button>
@@ -440,7 +440,7 @@ export function SharedBillCreator({
               type="button"
               onClick={connect}
               disabled={selectedWalletUuid === null}
-              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50 min-h-11"
             >
               {t("wallet.connectShort")}
             </button>
@@ -459,7 +459,7 @@ export function SharedBillCreator({
           <button
             type="button"
             onClick={switchNetwork}
-            className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink"
+            className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink min-h-11"
           >
             {t("wallet.switchTo", {
               network: ACTIVE_NETWORK_PROFILE.displayName,
@@ -542,7 +542,7 @@ export function SharedBillCreator({
           type="button"
           onClick={createLink}
           disabled={!canCreate}
-          className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50 min-h-11"
         >
           {busy ? t("sharedBill.signing") : t("sharedBill.signAndCreate")}
         </button>
@@ -571,14 +571,14 @@ export function SharedBillCreator({
             <button
               type="button"
               onClick={copyLink}
-              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft min-h-11"
             >
               {copied ? t("common.copied") : t("common.copy")}
             </button>
             <button
               type="button"
               onClick={shareLink}
-              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
+              className="rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft min-h-11"
             >
               {t("common.share")}
             </button>
@@ -613,7 +613,7 @@ export function SharedBillCreator({
       <button
         type="button"
         onClick={onBack}
-        className="self-start text-xs text-ink-faint underline underline-offset-2"
+        className="self-start text-xs text-ink-faint underline underline-offset-2 min-h-11"
       >
         {t("common.back")}
       </button>

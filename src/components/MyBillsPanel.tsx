@@ -132,13 +132,13 @@ function BillRow({
         <button
           type="button"
           onClick={copyLink}
-          className="inline-flex min-h-8 items-center rounded-full border border-line bg-card px-3 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex min-h-11 items-center rounded-full border border-line bg-card px-3 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           {copied ? t("myBills.copied") : t("myBills.copyLink")}
         </button>
         <a
           href={bill.path}
-          className="inline-flex min-h-8 items-center rounded-full px-3 text-xs font-semibold text-brand-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex min-h-11 items-center rounded-full px-3 text-xs font-semibold text-brand-ink underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
         >
           {t("myBills.openLink")}
         </a>
@@ -212,7 +212,7 @@ export function MyBillsPanel() {
           onClick={reload}
           disabled={state.kind === "loading"}
           aria-disabled={state.kind === "loading"}
-          className="shrink-0 rounded-full border border-line bg-card px-3 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
+          className="shrink-0 rounded-full border border-line bg-card px-3 py-1 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60 min-h-11"
         >
           {t("myBills.refresh")}
         </button>

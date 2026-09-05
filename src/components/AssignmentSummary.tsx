@@ -89,7 +89,7 @@ export function AssignmentSummaryView({
         <button
           type="button"
           onClick={onCalculate}
-          className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="inline-flex items-center justify-center rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white shadow-sm shadow-brand transition-colors hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {t("assignmentSummary.calculate")}
         </button>
@@ -105,7 +105,7 @@ export function AssignmentSummaryView({
             <button
               type="button"
               onClick={isReceiptProblem(error) ? onFixReceipt : onEdit}
-              className="self-start rounded-full border border-danger-line bg-card px-3.5 py-1.5 text-xs font-semibold text-danger-ink transition-colors hover:bg-danger-surface-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="self-start rounded-full border border-danger-line bg-card px-3.5 py-1.5 text-xs font-semibold text-danger-ink transition-colors hover:bg-danger-surface-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
             >
               {isReceiptProblem(error)
                 ? t("assignmentSummary.fixReceipt")
@@ -117,7 +117,7 @@ export function AssignmentSummaryView({
         <button
           type="button"
           onClick={onEdit}
-          className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="self-start rounded-full border border-line bg-card px-4 py-2 text-sm font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {t("assignmentSummary.editAssignments")}
         </button>

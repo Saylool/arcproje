@@ -134,7 +134,7 @@ export function ThemeToggle({ className }: { className?: string }) {
       aria-label={label}
       title={label}
       className={[
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+        "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full",
         "border border-line bg-card text-ink-soft",
         "transition-colors hover:bg-muted hover:text-ink",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",

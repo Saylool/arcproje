@@ -350,7 +350,7 @@ export function SharedBillDebtorView({ billId }: Props) {
           <button
             type="button"
             onClick={scanWallets}
-            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white"
+            className="self-start rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white min-h-11"
           >
             {t("wallet.connect")}
           </button>
@@ -386,7 +386,7 @@ export function SharedBillDebtorView({ billId }: Props) {
               type="button"
               onClick={connect}
               disabled={selectedWalletUuid === null}
-              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
+              className="rounded-full bg-brand px-4 py-1.5 text-sm font-semibold text-white disabled:opacity-50 min-h-11"
             >
               {t("wallet.connectShort")}
             </button>
@@ -405,7 +405,7 @@ export function SharedBillDebtorView({ billId }: Props) {
           <button
             type="button"
             onClick={switchNetwork}
-            className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink"
+            className="self-start rounded-full border border-warn-line-strong bg-warn-surface px-3 py-1.5 text-xs font-semibold text-warn-ink min-h-11"
           >
             {t("wallet.switchTo", {
               network: ACTIVE_NETWORK_PROFILE.displayName,
@@ -418,7 +418,7 @@ export function SharedBillDebtorView({ billId }: Props) {
             type="button"
             onClick={authenticate}
             disabled={stage.status === "working"}
-            className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            className="self-start rounded-full bg-brand px-5 py-2 text-sm font-semibold text-white disabled:opacity-50 min-h-11"
           >
             {stage.status === "working"
               ? resolveMessage(locale, stage.step)
@@ -464,7 +464,7 @@ export function SharedBillDebtorView({ billId }: Props) {
             <button
               type="button"
               onClick={copyRecipient}
-              className="self-start rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft"
+              className="self-start rounded-full border border-line px-4 py-1.5 text-xs font-semibold text-ink-soft min-h-11"
             >
               {copied ? t("common.copied") : t("common.copyAddress")}
             </button>
