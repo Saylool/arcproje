@@ -1370,18 +1370,30 @@ export async function createNeonSharedBillRepository(
       globalLimit: number;
       userLimit: number;
     }): Promise<ReserveQuotaOutcome> {
-      const parameters = [
-        input.globalKey,
-        input.userKey,
-        input.day,
+      /*
+       * İKİ AYRI PARAMETRE LİSTESİ — tek liste HATAYDI.
+       *
+       * İlk iki deyim satırları yalnızca ADRESLER: iki anahtar ve gün.
+       * Sınırları okuyan tek deyim üçüncüsüdür. Üçüne birden beşli listeyi
+       * vermek PostgreSQL'in Bind kuralını çiğner: bir deyime bildirdiğinden
+       * FAZLA parametre göndermek hatadır. Sürücü ilk deyimde reddedilir,
+       * işlemin tamamı düşer ve `catch` bunu "erişilemiyor"a çevirirdi —
+       * yani HER fiş analizi 503 dönerdi.
+       *
+       * Ortak önek TÜRETİLİR, elle tekrar yazılmaz; ikisi birbirinden
+       * ayrı düzenlenirse sessizce ayrışırlardı.
+       */
+      const rowParameters = [input.globalKey, input.userKey, input.day];
+      const reserveParameters = [
+        ...rowParameters,
         input.globalLimit,
         input.userLimit,
       ];
       try {
         const results = await sql.transaction((txn) => [
-          txn.query(SEED_QUOTA_ROWS, parameters),
-          txn.query(LOCK_QUOTA_ROWS, parameters),
-          txn.query(RESERVE_ANALYSIS_QUOTA, parameters),
+          txn.query(SEED_QUOTA_ROWS, rowParameters),
+          txn.query(LOCK_QUOTA_ROWS, rowParameters),
+          txn.query(RESERVE_ANALYSIS_QUOTA, reserveParameters),
         ]);
         const rows = results[results.length - 1] as {
           global_before: unknown;
