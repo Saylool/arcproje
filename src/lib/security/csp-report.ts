@@ -36,6 +36,33 @@ function asString(value: unknown): string | null {
 }
 
 /**
+ * GÜNLÜK ENJEKSİYONUNA KARŞI KAPALI DİLBİLGİSİ.
+ *
+ * Bu uçta kimlik doğrulaması YOKTUR ve olamaz — raporu tarayıcı, oturumdan
+ * bağımsız gönderir. Yani gövdeyi HERKES yazabilir. Alanlar doğrudan bir
+ * günlük satırına girdiği için, içinde satır sonu olan bir yönerge SAHTE BİR
+ * SATIR uydurabilirdi:
+ *
+ *     [csp] connect-src
+ *     [csp] script-src <- (saldirganin uydurdugu koken) (enforce)
+ *
+ * Çözüm kaçış karakteri DEĞİL: kaçış bir gün unutulur. Dilbilgisi kapatılır —
+ * beklenen biçime uymayan her şey en baştan reddedilir.
+ */
+
+/** CSP yönerge adı: yalnızca küçük harf ve tire. */
+const DIRECTIVE_GRAMMAR = /^[a-z][a-z-]{2,31}$/;
+
+/**
+ * Adres olmayan köken anahtarları (`inline`, `eval`, `data`, `blob`...).
+ * Tarayıcılar bunları küçük harfle üretir.
+ */
+const KEYWORD_ORIGIN_GRAMMAR = /^[a-z][a-z-]{2,31}$/;
+
+/** `şema://ana-makine[:port]` — `new URL().origin`in ürettiği biçim. */
+const URL_ORIGIN_GRAMMAR = /^[a-z][a-z0-9+.-]*:\/\/[a-z0-9.-]+(:\d{1,5})?$/;
+
+/**
  * Adresi KÖKENİNE indirger.
  *
  * `inline`, `eval`, `data` gibi anahtar kelimeler adres değildir ve kişisel
@@ -46,14 +73,20 @@ export function toOrigin(blocked: string | null): string | null {
   if (blocked === null) {
     return null;
   }
-  if (/^[a-z-]+$/.test(blocked)) {
+  if (KEYWORD_ORIGIN_GRAMMAR.test(blocked)) {
     return blocked;
   }
+  let origin: string;
   try {
-    return new URL(blocked).origin;
+    origin = new URL(blocked).origin;
   } catch {
     return null;
   }
+  /*
+   * `new URL()` çoğu şeyi güvenli hâle getirir ama `origin` bazı şemalarda
+   * `"null"` döner ya da beklenmedik biçimde gelir. Çıktı da denetlenir.
+   */
+  return URL_ORIGIN_GRAMMAR.test(origin) ? origin : null;
 }
 
 /**
@@ -82,18 +115,104 @@ export function parseCspReport(payload: unknown): CspReport | null {
     asString(body["blocked-uri"]) ?? asString(body.blockedURL);
   const origin = toOrigin(blocked);
 
-  if (directive === null || origin === null) {
+  /*
+   * Uzunluk sınırı TEK BAŞINA yetmez: kırpılmış bir dizge hâlâ satır sonu
+   * taşıyabilir. Biçimin kendisi doğrulanır.
+   */
+  if (
+    directive === null ||
+    origin === null ||
+    !DIRECTIVE_GRAMMAR.test(directive)
+  ) {
     return null;
   }
 
   const disposition = asString(body.disposition);
   return {
-    /* Uzun bir dizge günlüğü şişirmesin. */
-    directive: directive.slice(0, 64),
+    directive,
     origin: origin.slice(0, 128),
     disposition:
       disposition === "enforce" || disposition === "report"
         ? disposition
         : null,
   };
+}
+
+/**
+ * GÜNLÜK TAŞIRMAYA KARŞI SINIR.
+ *
+ * Uç kimlik doğrulaması YAPAMAZ, yani gönderim sayısı sınırsızdır. Tek bir
+ * ihlal gerçek bir oturumda onlarca kez tekrarlanır; kötü niyetli biri ise
+ * bunu istediği kadar çoğaltabilir. Vercel'de günlük hacmi hem para hem de
+ * gerçek sinyali gömme meselesidir.
+ *
+ * En küçük işe yarar çözüm: aynı `(yönerge, köken)` çifti pencere başına BİR
+ * kez yazılır. Tekrarlar sayılır ve pencere kapanınca tek bir özet satırıyla
+ * bildirilir. Böylece "bu ihlal 400 kez oldu" bilgisi de KAYBOLMAZ.
+ *
+ * Sayaç ÖRNEK BAŞINADIR. Sunucusuz ortamda birden çok örnek olabilir, yani
+ * bu bir üst sınır değil; hacmi büyüklük mertebesinde düşürür ve bu, tanısal
+ * bir uç için yeterlidir. Süreç durumu kalıcı değildir; kaybolması zararsızdır.
+ */
+export const REPORT_WINDOW_MS = 60_000;
+
+/** Bir pencerede kaç FARKLI çift yazılır. Sözlüğün sınırsız büyümesini önler. */
+export const REPORT_DISTINCT_LIMIT = 20;
+
+type Throttle = {
+  windowStartedAt: number;
+  seen: Map<string, number>;
+  dropped: number;
+};
+
+export function createReportThrottle(): Throttle {
+  return { windowStartedAt: 0, seen: new Map(), dropped: 0 };
+}
+
+export type ThrottleDecision =
+  /** Satır yazılır. */
+  | { kind: "log" }
+  /** Yazılmaz; yalnızca sayılır. */
+  | { kind: "skip" }
+  /** Pencere kapandı: önce özet, sonra bu satır. */
+  | { kind: "summary"; suppressed: number; distinct: number };
+
+/**
+ * Bu raporun günlüğe yazılıp yazılmayacağı.
+ *
+ * Pencere kapandığında, bastırılmış sayı SIFIRDAN büyükse özet döner; sıfırsa
+ * gereksiz bir satır yazılmaz.
+ */
+export function decideReportLogging(
+  throttle: Throttle,
+  report: CspReport,
+  nowMs: number,
+): ThrottleDecision {
+  const key = `${report.directive}|${report.origin}`;
+
+  if (nowMs - throttle.windowStartedAt >= REPORT_WINDOW_MS) {
+    const suppressed = throttle.dropped;
+    const distinct = throttle.seen.size;
+    throttle.windowStartedAt = nowMs;
+    throttle.seen = new Map([[key, 1]]);
+    throttle.dropped = 0;
+    return suppressed > 0
+      ? { kind: "summary", suppressed, distinct }
+      : { kind: "log" };
+  }
+
+  const count = throttle.seen.get(key);
+  if (count !== undefined) {
+    throttle.seen.set(key, count + 1);
+    throttle.dropped += 1;
+    return { kind: "skip" };
+  }
+
+  if (throttle.seen.size >= REPORT_DISTINCT_LIMIT) {
+    throttle.dropped += 1;
+    return { kind: "skip" };
+  }
+
+  throttle.seen.set(key, 1);
+  return { kind: "log" };
 }

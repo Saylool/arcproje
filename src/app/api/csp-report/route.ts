@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { readBoundedBody } from "@/lib/http/bounded-body";
-import { parseCspReport } from "@/lib/security/csp-report";
+import {
+  createReportThrottle,
+  decideReportLogging,
+  parseCspReport,
+} from "@/lib/security/csp-report";
 
 /**
  * `POST /api/csp-report` — tarayıcının bildirdiği CSP ihlallerini günlüğe yazar.
@@ -29,6 +33,7 @@ const BODY_READ_DEADLINE_MS = 2000;
 type CspReportDependencies = Readonly<{
   readBody: typeof readBoundedBody;
   log: (line: string) => void;
+  now: () => number;
 }>;
 
 export function createCspReportPost(
@@ -37,13 +42,20 @@ export function createCspReportPost(
   const resolved: CspReportDependencies = {
     readBody: dependencies.readBody ?? readBoundedBody,
     log: dependencies.log ?? ((line) => console.log(line)),
+    now: dependencies.now ?? (() => Date.now()),
   };
-  return (request: Request) => cspReportPost(request, resolved);
+  /*
+   * Kısıtlayıcı ÖRNEK BAŞINADIR ve her uç için ayrı yaratılır; testler kendi
+   * yalıtılmış durumunu alır.
+   */
+  const throttle = createReportThrottle();
+  return (request: Request) => cspReportPost(request, resolved, throttle);
 }
 
 async function cspReportPost(
   request: Request,
   dependencies: CspReportDependencies,
+  throttle: ReturnType<typeof createReportThrottle>,
 ) {
   /*
    * HER yolda 204 döner. Tarayıcıya durum bildirmenin bir faydası yok ve
@@ -73,6 +85,22 @@ async function cspReportPost(
   const report = parseCspReport(payload);
   if (report === null) {
     return noContent;
+  }
+
+  /*
+   * TAŞIRMA SINIRI. Aynı ihlal gerçek bir oturumda onlarca kez tekrarlanır ve
+   * uç kimlik doğrulayamadığı için kötü niyetli biri bunu istediği kadar
+   * çoğaltabilir. Tekrarlar sayılır, pencere kapanınca özetlenir; sayı
+   * kaybolmaz, satır sayısı kaybolur.
+   */
+  const decision = decideReportLogging(throttle, report, dependencies.now());
+  if (decision.kind === "skip") {
+    return noContent;
+  }
+  if (decision.kind === "summary") {
+    dependencies.log(
+      `[csp] onceki pencerede ${decision.suppressed} tekrar bastirildi (${decision.distinct} farkli ihlal)`,
+    );
   }
 
   /*

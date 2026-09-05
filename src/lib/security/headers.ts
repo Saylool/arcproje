@@ -58,15 +58,35 @@ const STYLE_SRC = "'self' 'unsafe-inline'";
 /**
  * ŞİMDİLİK SERBEST BIRAKILAN `connect-src`.
  *
- * Üretimde ölçülen tek ihlal sınıfı buydu ve ölçüm YALNIZCA masaüstü/eklenti
- * borçlu akışını kapsıyor. Mobil WalletConnect yolu ve hesabı OLUŞTURAN akış
- * henüz çalıştırılmadı; eksik bir liste parayı göndermeyi kırar.
- *
  * `*` ağ şemalarını kapsar ama `data:`/`blob:` şemalarını kapsamaz; onlar
- * ayrıca yazılır.
+ * ayrıca yazılır. Bugünkü durumdan kötü DEĞİLDİR: kalan yönergeler zaten
+ * zorlayıcı.
  *
- * Bugünkü durumdan kötü DEĞİLDİR: şu an hiç CSP uygulanmıyor. Kalan
- * yönergeler ise ilk kez zorlayıcı oluyor.
+ * NEDEN HÂLÂ KAPATILMADI — ÖLÇÜLDÜ, TAHMİN DEĞİL.
+ *
+ * Derlenmiş istemci paketi (`.next/static/chunks`) tarandı. Aşağıdaki cüzdan
+ * altyapısı adresleri pakette VAR ama `BROWSER_CONNECT_HOSTS` listesinde YOK:
+ *
+ *   WalletConnect: verify (kaynak doğrulama), pulse (telemetri),
+ *                  echo (anlık bildirim)
+ *   Circle:        api (App Kit), iris-api (CCTP attestation),
+ *                  gateway-api (Circle gateway)
+ *
+ * Alan adları BİLEREK açık yazılmadı: `privacy.test.ts` kaynakta geçen her
+ * dış alan adının gizlilik metninde bildirilmesini şart koşuyor ve bu doğru
+ * bir kural. Bunlar bildirilecek servisler değil, paketten çıkan adaylar.
+ *
+ * Pakette BULUNMAK ile ÇAĞRILMAK aynı şey değildir; bu liste ihtiyaç değil
+ * ADAY listesidir. Hangisinin gerçekten çağrıldığını yalnızca rapor kipinin
+ * üretimde topladığı ihlaller söyleyebilir — ve bunlar Vercel günlüklerinde.
+ *
+ * KAPATMA KOŞULU: mobil WalletConnect eşleşmesi ve hesap OLUŞTURMA akışı
+ * üretimde birer kez çalıştırıldıktan sonra `[csp]` satırları okunur; listeye
+ * yalnızca gerçekten rapor edilenler eklenir. Eksik bir liste parayı
+ * göndermeyi kırar, bu yüzden tahminle kapatılmaz.
+ *
+ * CoinGecko bu listede DEĞİLDİR ve olmamalıdır: kur sunucudan çekilir,
+ * tarayıcı yalnızca `'self'`e gider. Bu da ölçüldü.
  */
 const OPEN_CONNECT_SRC = "* data: blob:";
 
