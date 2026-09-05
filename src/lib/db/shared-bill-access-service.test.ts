@@ -545,11 +545,32 @@ describe("/me — YALNIZCA kendi satiri", () => {
 
     for (const other of seeded.debts) {
       if (other.debtor.toLowerCase() === debtor.address.toLowerCase()) continue;
+      /*
+       * Bunlar YUKSEK ENTROPILI: adres 42 karakter, etiket ve anahtar da
+       * onaltilik olmayan ayirt edici metinler. Rastgele carpisma olasiligi
+       * pratikte sifir.
+       */
       expect(serialized).not.toContain(other.debtor);
       expect(serialized).not.toContain(other.debtorLabel);
       expect(serialized).not.toContain(other.debtKey);
-      expect(serialized).not.toContain(other.tryMinor);
     }
+
+    /*
+     * TUTAR ALT DIZGE ILE ARANMAZ.
+     *
+     * Once oyle yaziliydi ve SEYREK bir flake uretiyordu: tutarlar 1000/1001/
+     * 1002, yanit ise rastgele uretilmis adresler ve bir imza tasiyor. Bir
+     * onaltilik dizgenin icinde "1001" gecmesi tek adres icin %0,2; imzayla
+     * birlikte kosu basina yaklasik %1. Yani "baska borclunun verisi sizdi"
+     * demeden, RASTGELE kirmiziya donuyordu.
+     *
+     * Dogru soru zaten yapisal: yanitta KAC borc var ve kimin?
+     */
+    expect(view.debt.debtor.toLowerCase()).toBe(debtor.address.toLowerCase());
+    const own = seeded.debts.find(
+      (d) => d.debtor.toLowerCase() === debtor.address.toLowerCase(),
+    );
+    expect(view.debt.tryMinor).toBe(own?.tryMinor);
     // Ham oturum jetonu da yanitta yer almaz.
     expect(serialized).not.toContain(token);
   });
