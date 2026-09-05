@@ -1320,12 +1320,44 @@ incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
   `tr.ts` `Dictionary` tipinin kaynağıdır, `send.ts`'e dokunulmaz. Satır
   sayısı için yeniden düzenleme, kullanıcıya hiçbir şey kazandırmadan gerileme
   riski taşır.
-- **`npm audit` bulguları düzeltilmedi**, takip ediliyor. 23 bulgu **3 kök
-  uyarıdan** geliyor ve üçü de `@circle-fin/adapter-viem-v2` zincirinden:
-  `elliptic` (ethers v5 içi), `stream-json` ve `uuid` (ikisi de
-  `@solana/web3.js` → `jayson` üzerinden). Bu uygulama **Solana'ya hiç
-  dokunmuyor** ve imzalama yolu viem + cüzdandır. Yani üçü de çalıştırılmayan
-  kod yollarında. `npm audit fix` otomatik çalıştırılmaz.
+- **`npm audit` bulguları düzeltilmedi**, takip ediliyor. Aşağıdaki tablo
+  ölçümdür, tahmin değil: derlenmiş istemci ve sunucu paketleri tarandı.
+
+  24 bulgu **5 kök uyarıdan** ve **4 paketten** geliyor; dördü de
+  `@circle-fin/app-kit` / `@circle-fin/adapter-viem-v2` zincirinden.
+
+  | Paket | Şiddet | İstemci paketinde | Sunucu paketinde | Uygulama yolunda | Güvenilmeyen girdi |
+  | --- | --- | --- | --- | --- | --- |
+  | `toml` | high ×2 | hayır | **evet** | hayır | hayır |
+  | `stream-json` | moderate | hayır | hayır | hayır | hayır |
+  | `elliptic` | low | **evet** | evet | dolaylı | hayır |
+  | `uuid` | moderate | evet | evet | **hayır** | hayır |
+
+  Ayrıntılar:
+
+  - **`toml`** (`@coral-xyz/anchor` → app-kit). Uyarılar güvenilmeyen TOML
+    ayrıştırmakla ilgili. Sunucu paketinde bulunuyor ama çağıran kod,
+    Anchor'ın Solana çalışma alanı yükleyicisi: girdisi
+    `readFileSync("Anchor.toml")`, yani **yerel bir dosya**, kullanıcı girdisi
+    değil. Bu uygulamanın kaynağında `anchor`/`solana` **hiç geçmiyor** ve
+    dağıtımda böyle bir dosya yok.
+  - **`stream-json`** (`@solana/web3.js` → `jayson`). **Hiçbir pakette yok.**
+  - **`elliptic`** (ethers v5 → `@ethersproject/signing-key`). İstemci
+    paketinde var. Ama uygulamanın kaynağında `ethers` **hiç geçmiyor**;
+    imzayı kullanıcının cüzdanı atar. Ayrıca **yamalı sürüm yok**: kurulu
+    6.6.1, npm'deki en son sürüm de 6.6.1.
+  - **`uuid`**. Uyarı `v3/v5/v6`yı `buf` argümanıyla çağırmayı gerektiriyor.
+    Uygulama `uuid` paketini **hiç kullanmıyor**; kimlikler `node:crypto`
+    `randomUUID`'den geliyor.
+
+  **npm'in önerdiği tek çare, dördü için de `@circle-fin/app-kit`'i
+  1.12.1'den 1.8.1'e DÜŞÜRMEK.** Çalıştırılmayan kod yollarındaki uyarılar
+  için ödeme kütüphanesini geri almak kötü bir takas; bu yüzden yapılmadı.
+  Ne `npm audit fix` ne de `--force` çalıştırılır.
+
+  **Yeniden bakma koşulu:** app-kit yükseltildiğinde ya da `elliptic` için
+  yamalı bir sürüm çıktığında tablo yeniden ölçülür. Tarama komutu:
+  `npm audit --omit=dev --json`, sonra derlenmiş paketlerde paket izleri.
 
 ## Sınırlar ve bilinen eksikler
 
