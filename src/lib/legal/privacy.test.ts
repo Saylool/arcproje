@@ -6,7 +6,11 @@ import { describe, expect, it } from "vitest";
 
 import { SHARED_BILL_ACCESS_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill-access";
 import { SHARED_BILL_MAX_LIFETIME_MS } from "@/lib/arc/shared-bill";
-import { BILL_RETENTION_DAYS } from "@/lib/db/retention";
+import {
+  BILL_RETENTION_DAYS,
+  QUOTA_RETENTION_DAYS,
+  isQuotaRowExpired,
+} from "@/lib/db/retention";
 import { SHARED_BILL_SESSION_LIFETIME_MS } from "@/lib/db/shared-bill-access-service";
 import { LOCALE_COOKIE_MAX_AGE_SECONDS, LOCALES } from "@/lib/i18n/locale";
 import { QUOTE_LIFETIME_MS } from "@/lib/rates/quote";
@@ -323,5 +327,102 @@ describe("sayfa ve altbilgi", () => {
 
   it("altbilgi her sayfada çizilir", () => {
     expect(readFileSync("src/app/layout.tsx", "utf8")).toContain("<SiteFooter />");
+  });
+});
+
+describe("SÜRE sözleri koda bağlı", () => {
+  /*
+   * "Süresi doldu" ile "silindi" AYNI AN DEĞİLDİR ve politika bir zamanlar
+   * ikisini aynı şeymiş gibi yazıyordu. Aşağıdaki testler her düzeltmeyi
+   * dayandığı KODA bağlar: davranış değişirse metin sessizce yanlış kalamaz.
+   */
+  const neon = readFileSync(
+    "src/lib/db/neon-shared-bill-repository.ts",
+    "utf8",
+  );
+
+  /**
+   * Tablodaki BİR satırın saklama hücresi.
+   *
+   * Bütün metinde aramak yetmez: aynı cümle başka bir satırda da geçebilir ve
+   * iddia, düzeltilmesi gereken satır eski hâline dönse bile geçer. Mutasyonla
+   * denendi, tam olarak öyle oldu.
+   */
+  function retentionCell(policy: PrivacyPolicy, rowLabel: string): string {
+    for (const block of allBlocks(policy)) {
+      if (block.kind !== "table") continue;
+      for (const row of block.rows) {
+        if (row[0].includes(rowLabel)) return row[row.length - 1];
+      }
+    }
+    throw new Error(`satır bulunamadı: ${rowLabel}`);
+  }
+
+  it("kod ve oturum satırları FIRSATÇI temizlenir, metin bunu söyler", () => {
+    /*
+     * Temizlik bir isteğin yan yolunda, her seferinde sınırlı sayıda çalışır
+     * — bir zamanlayıcıyla değil. "Süresi dolunca otomatik SİLİNİR" demek bu
+     * yüzden yanlıştı: süre dolunca satır İŞE YARAMAZ hâle gelir, silinmesi
+     * başka birinin o yoldan geçmesine bağlıdır.
+     */
+    expect(neon).toContain("void sql.query(CLEANUP_NONCES");
+    expect(neon).toContain("void sql.query(CLEANUP_SESSIONS");
+
+    const cell = retentionCell(PRIVACY_POLICY.tr, "tek kullanımlık");
+    expect(cell).toContain("GEÇERSİZ olur");
+    expect(cell).toContain("sonraki temizlikte silinir");
+    /* Eski, fazla iddialı ifade geri gelmemeli. */
+    expect(cell).not.toContain("otomatik SİLİNİR");
+    expect(
+      retentionCell(PRIVACY_POLICY.en, "One-time authentication"),
+    ).toContain("STOPS WORKING");
+  });
+
+  it("KULLANILMIŞ teklif kısa temizliğe girmez, metin bunu söyler", () => {
+    /*
+     * Temizlik yalnızca `consumed_at IS NULL` satırları alır. Kullanılmış bir
+     * teklif ödeme kanıtıdır ve hesabın saklama süresi boyunca durur; bunu
+     * söylememek, kullanıcıya olduğundan kısa bir süre vaat etmekti.
+     */
+    expect(neon).toContain("WHERE consumed_at IS NULL");
+    const cell = retentionCell(PRIVACY_POLICY.tr, "Kur teklifi");
+    expect(cell).toContain("KULLANILAN teklif");
+    expect(cell).not.toContain("otomatik SİLİNİR");
+    expect(retentionCell(PRIVACY_POLICY.en, "Rate quotes")).toContain(
+      "a USED one is kept",
+    );
+  });
+
+  it("kota satırı sınırın KENDİ gününde değil, ERTESİNDE uygun olur", () => {
+    /*
+     * Ölçüldü: sınır günü hâlâ pencerenin içindedir, satır bir gün DAHA
+     * yaşar. "En fazla 7 gün" bu yüzden kesin bir üst sınır değildi.
+     */
+    const noon = Date.parse("2026-09-01T12:00:00Z");
+    const at = (days: number) => noon + days * 24 * 60 * 60 * 1000;
+    expect(isQuotaRowExpired("2026-09-01", at(QUOTA_RETENTION_DAYS))).toBe(
+      false,
+    );
+    expect(isQuotaRowExpired("2026-09-01", at(QUOTA_RETENTION_DAYS + 1))).toBe(
+      true,
+    );
+
+    const cell = retentionCell(PRIVACY_POLICY.tr, "Günlük analiz sayacı");
+    expect(cell).not.toContain(`En fazla ${QUOTA_RETENTION_DAYS} gün`);
+    expect(cell).toContain("silinmeye uygun");
+    expect(retentionCell(PRIVACY_POLICY.en, "Daily analysis counter")).toContain(
+      "eligible for deletion",
+    );
+  });
+
+  it("ÜÇ AN metinde AYRI AYRI anlatılır", () => {
+    /*
+     * İşe yaramama, silinmeye uygun olma ve gerçekten kaldırılma. Üçü tek
+     * cümleye sıkıştırıldığında kullanıcı hangisinin ne zaman olduğunu
+     * ayırt edemiyordu.
+     */
+    const tr = policyText(PRIVACY_POLICY.tr);
+    expect(tr).toContain("ÜÇ AYRI AN");
+    expect(policyText(PRIVACY_POLICY.en)).toContain("THREE DISTINCT MOMENTS");
   });
 });

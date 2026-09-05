@@ -14,6 +14,12 @@
  *
  * KURAL: istemci kalan hakkı ASLA hesaplamaz. Yalnızca sunucunun açıkça
  * söylediğini yansıtır; söylemediği yerde bilinen son değeri korur.
+ *
+ * SONRADAN EKLENEN ÜÇÜNCÜ HÂL: sunucu hata yanıtında sayıyı BİLDİREBİLİR.
+ * Kota düşüldükten sonra sağlayıcı hata verirse hak gerçekten yanmıştır;
+ * o durumda ekranda eski (yüksek) sayı kalıyordu — 24 yazarken sunucuda 23
+ * oluyordu. Bildirilen sayı, durum kodundan yapılan HER çıkarımı geçersiz
+ * kılar: biri ölçüm, öteki tahmindir.
  */
 
 /** Kişinin kendi günlük hakkının bittiğini bildiren tek kod. */
@@ -23,6 +29,8 @@ export const PERSONAL_LIMIT_CODE = "DAILY_LIMIT_REACHED";
 export const SERVICE_BUSY_CODE = "SERVICE_BUSY";
 
 export type QuotaDisplayAction =
+  /** Sunucu sayıyı AÇIKÇA bildirdi; olduğu gibi gösterilir. */
+  | { kind: "showReported"; remaining: number }
   /** Kalan hak sıfıra çekilir; sunucu kişisel tükenmeyi doğruladı. */
   | { kind: "showExhausted" }
   /** Bilinen değer KORUNUR; sunucu kişisel hak hakkında bir şey söylemedi. */
@@ -37,7 +45,16 @@ export type QuotaDisplayAction =
 export function quotaDisplayAfterFailure(
   status: number,
   code: string | null,
+  /** Sunucunun yanıtta bildirdiği kalan hak; bildirmediyse `null`. */
+  reported: number | null,
 ): QuotaDisplayAction {
+  /*
+   * ÖNCE BİLDİRİLEN SAYI. Durum kodundan yapılan çıkarım en iyi ihtimalle
+   * tahmindir; sunucu konuştuysa tahmine yer yoktur.
+   */
+  if (reported !== null) {
+    return { kind: "showReported", remaining: reported };
+  }
   if (status === 429 && code === PERSONAL_LIMIT_CODE) {
     return { kind: "showExhausted" };
   }

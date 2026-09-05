@@ -97,10 +97,17 @@ bakılacak yer burasıdır.
 
 ### Marka işareti ve ikonlar
 
-İşaret (`₺`) **yalnızca geometriyle** çizilir ve hiçbir fonta bağlı değildir:
+İşaret **yalnızca geometriyle** çizilir ve hiçbir fonta bağlı değildir:
 kaynağı `src/lib/brand/mark.ts`, başlıktaki işaret ile uygulama ikonları aynı
-yollardan üretilir. Daha önce başlıktaki `₺` bir metin düğümüydü, yani her
-cihazda o cihazın fontuyla çiziliyordu.
+yollardan üretilir. Daha önce bir metin düğümüydü, yani her cihazda o cihazın
+fontuyla çiziliyordu.
+
+İşaret bir **para birimi simgesi taşımaz**. Eskiden Türk lirası simgesiydi; bu
+hem uygulamayı tek bir ülkeye bağlıyordu hem de yanlıştı — ödemeler lirayla
+değil, Arc Testnet üzerindeki test USDC'siyle yapılıyor. Yerine yan yana duran,
+biri diğerinden kısa iki fiş kondu: hangi dil konuşulursa konuşulsun aynı şeyi
+anlatır — bir hesap, iki pay. Tutar satırları boya değil **deliktir**, bu yüzden
+işaret hangi zemine basılırsa basılsın doğru görünür.
 
 İkonlar depoya işlenmiştir; çalışma zamanında hiçbir şey yeniden çizilmez.
 Geometri değişirse yeniden üretmek gerekir:
@@ -164,13 +171,25 @@ sayılır.
 | Kişisel bilgi → Ad | Evet | Hayır | Hayır | Google girişi seçilirse | Hesap yönetimi |
 | Fotoğraf ve video → Fotoğraflar | Evet | **Evet (OpenAI)** | **Evet** | Fiş yüklenirse | Uygulama işlevi |
 | Finansal bilgi → Diğer finansal bilgi (cüzdan adresi, borç tutarı) | Evet | **Evet (herkese açık blok zinciri)** | Hayır | Evet | Uygulama işlevi |
-| Uygulama etkinliği | Hayır | — | — | — | İzleme yoktur |
+| Uygulama etkinliği → Uygulama içi etkileşimler | **Evet** | Hayır | Hayır | Giriş yapıldıysa | Günlük analiz sınırı, kötüye kullanımın önlenmesi |
 | Cihaz veya diğer kimlikler | Hayır | — | — | — | Reklam kimliği kullanılmaz |
-| Kilitlenme kayıtları / tanılama | Hayır | — | — | — | Toplanmaz |
+| Uygulama bilgileri ve performansı → Tanılama | **Evet** | Hayır | Hayır | Hayır | CSP ihlal raporları |
 
-En sık yanlış işaretlenen iki satır kalın olanlardır: **fiş fotoğrafı OpenAI'ye
-gider**, yani "paylaşılır"; ve **cüzdan adresleriyle işlemler herkese açık bir
-zincire yazılır**, yani orası da bir paylaşımdır.
+En sık yanlış işaretlenen satırlar kalın olanlardır:
+
+- **Fiş fotoğrafı OpenAI'ye gider**, yani "paylaşılır".
+- **Cüzdan adresleriyle işlemler herkese açık bir zincire yazılır**, yani orası
+  da bir paylaşımdır.
+- **Günlük analiz sayacı toplanır.** Reklam ya da izleme olmaması "etkinlik
+  toplanmıyor" demek değildir: sayaç `(hesap kimliği, gün, adet)` olarak
+  veritabanında durur ve Play'in "uygulama içi etkileşimler" tanımına girer.
+- **CSP ihlal raporları sunucu günlüğüne yazılır.** Rapor kullanıcı kimliği ya
+  da sayfa adresi TAŞIMAZ — yalnızca ihlal edilen yönerge ve kaynağın kökeni —
+  ama cihazdan çıkıp sunucuda saklandığı için "toplanmıyor" denemez.
+
+> Son iki madde bu rehbere sonradan eklendi. **Play Console'daki gönderilmiş
+> form bu iki satır için gözden geçirilmelidir**; rehberi düzeltmek formu
+> düzeltmez.
 
 Güvenlik uygulamaları bölümü:
 
@@ -1366,8 +1385,9 @@ incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
 - **Sunucu veritabanı bir akıllı sözleşme değildir**: rezervasyon yalnızca
   uygulama üzerinden yinelenen denemeyi engeller, kullanıcının uygulama
   dışından ikinci bir transfer göndermesini engelleyemez.
-- **Kullanıcı hesabı / oturum sistemi yoktur**: kimlik doğrulama yalnızca
-  cüzdan sahipliği kanıtıdır, KYC değildir.
+- **Google oturumu KYC değildir**: hesap yalnızca fiş analizi kotasını kişiye
+  bağlamak içindir. Ortak hesapta borçlunun kimliği hâlâ **cüzdan sahipliği
+  kanıtıyla** belirlenir; oturum açmış olmak bir borcu görme hakkı vermez.
 - **Kur servisinde örnekler arası kota koruması yoktur**; oran sınırlama bir
   dağıtım gereksinimidir (Vercel Firewall ile karşılanır).
 - Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
