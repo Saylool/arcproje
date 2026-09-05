@@ -8,6 +8,7 @@ import {
   checkAssignmentsComplete,
   checkReceiptReadyForSplit,
   checkSplitReady,
+  findParticipantByName,
   createInitialAssignmentState,
   findParticipantNameIssues,
   getAssignedParticipantIds,
@@ -540,6 +541,97 @@ describe("checkSplitReady", () => {
     const receipt = buildReceipt();
     expect(checkSplitReady(receipt, [itemAmountField("silinmis-urun")])).toEqual({
       ok: true,
+    });
+  });
+});
+
+describe("findParticipantByName", () => {
+  /*
+   * TÜRKÇE `İ/i` VE `I/ı`.
+   *
+   * Kusur bir AYRIŞMAYDI: bileşen kayıtlı kişiyi ararken düz `toLowerCase`,
+   * kütüphane ise Türkçe kuralını kullanıyordu. Mevcut kişi "İpek", seçilen
+   * kayıtlı kişi "ipek" olduğunda bileşen "başka biri" diyor, `addParticipant`
+   * "aynı kişi" diyordu. Sonuç: kişi eklenmedi, cüzdan bağlanmadı ve
+   * kullanıcıya "zaten var" dendi — yapabileceği hiçbir şey yokken.
+   *
+   * Düz kural "I"yı da "i"ye indirir; Türkçede "Irmak" ile "ırmak" aynı,
+   * "Ipek" ile "ipek" ise AYRI kişilerdir. Fark iki yönlüdür, mesele
+   * "daha hoşgörülü olmak" değil DOĞRU kuralı TEK yerden uygulamaktır.
+   */
+  const people = [
+    { id: "p1", name: "İpek" },
+    { id: "p2", name: "Irmak" },
+  ];
+
+  it("BUYUK I noktali, kucuk i ile eslesir", () => {
+    expect(findParticipantByName(people, "ipek")?.id).toBe("p1");
+  });
+
+  it("BUYUK I noktasiz, kucuk noktasiz i ile eslesir", () => {
+    expect(findParticipantByName(people, "ırmak")?.id).toBe("p2");
+  });
+
+  it("noktasiz ile noktali AYRI kisilerdir", () => {
+    // Duz `toLowerCase` burada YANLIS eslesme uretirdi.
+    expect(findParticipantByName(people, "Ipek")).toBeUndefined();
+    expect(findParticipantByName(people, "irmak")).toBeUndefined();
+  });
+
+  it("bosluklar ONEMSIZ", () => {
+    expect(findParticipantByName(people, "  İPEK  ")?.id).toBe("p1");
+  });
+
+  it("excludeId verilen kisi ATLANIR", () => {
+    // Yeniden adlandirmada kisinin kendi adi yinelenme sayilmamali.
+    expect(findParticipantByName(people, "İpek", "p1")).toBeUndefined();
+  });
+
+  it("BULAMAZSA undefined", () => {
+    expect(findParticipantByName(people, "Deniz")).toBeUndefined();
+  });
+});
+
+describe("ad eslestirmesi TEK kapidan", () => {
+  it("findParticipantByName ile validateParticipantName ASLA ayrismaz", () => {
+    /*
+     * Asıl koruma bu. İki fonksiyon ayrı yazılsaydı biri Türkçe kuralını,
+     * öteki düz kuralı kullanabilirdi — kusurun tam olarak doğduğu yer.
+     * Burada aynı girdi kümesinde iki cevabın örtüştüğü ölçülür.
+     */
+    const people = [
+      { id: "p1", name: "İpek" },
+      { id: "p2", name: "Irmak" },
+      { id: "p3", name: "Ada" },
+    ];
+    const probes = [
+      "ipek", "İpek", "IPEK", "Ipek", "ıpek",
+      "irmak", "ırmak", "IRMAK", "Irmak",
+      "ada", "ADA", "Ada", "  ada  ",
+      "deniz", "İ", "ı", "i", "I",
+    ];
+    for (const probe of probes) {
+      const found = findParticipantByName(people, probe) !== undefined;
+      const duplicate = validateParticipantName(probe, people) === "duplicate";
+      expect(duplicate, probe).toBe(found);
+    }
+  });
+
+  it("kayitli kisi secmek MEVCUT kisiyi bulur", () => {
+    /*
+     * Bileşenin sorduğu asıl soru bu. Eskiden bileşen kendi
+     * karşılaştırmasını yazıyordu; artık aynı kapıdan geçiyor.
+     */
+    const state = buildState({
+      participants: [{ id: "p1", name: "İpek" }],
+      payerId: "p1",
+    });
+    const picked = findParticipantByName(state.participants, "ipek");
+    expect(picked?.id).toBe("p1");
+    // Eklemeye kalkilsaydi reddedilirdi; iki cevap ayni yone bakar.
+    expect(addParticipant(state, "ipek")).toEqual({
+      ok: false,
+      error: "duplicate",
     });
   });
 });

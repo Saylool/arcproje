@@ -68,9 +68,33 @@ export function createInitialAssignmentState(
  * ("İ" -> "i", "I" -> "ı") ve ARAYÜZ DİLİNE GÖRE DEĞİŞMEZ. Değişseydi aynı
  * kişi listesi bir dilde geçerli, ötekinde yinelenmiş sayılabilirdi; yinelenen
  * ad denetimi belirlenimci kalmalıdır.
+ *
+ * DIŞARI AÇILMAZ. Çağıranın ihtiyacı anahtar değil CEVAPTIR; anahtarı
+ * paylaşmak, herkesin kendi karşılaştırmasını yazmasına kapı açardı — ve
+ * tam olarak bu oldu: bir bileşen aynı soruyu düz `toLowerCase` ile sordu.
+ * "İpek" ile "ipek" ona farklı, buraya aynı göründü; kişi de eklenmedi,
+ * cüzdan da bağlanmadı, kullanıcıya "zaten var" dendi.
  */
 function toNameKey(name: string): string {
   return name.trim().toLocaleLowerCase("tr");
+}
+
+/**
+ * Bu adı TAŞIYAN kişi — varsa.
+ *
+ * Ad eşleştirmesinin TEK kapısı. `validateParticipantName` de bunun
+ * üzerinden cevap verir; ikisi ayrı yazılsaydı yine ayrışabilirlerdi.
+ */
+export function findParticipantByName(
+  participants: readonly Participant[],
+  name: string,
+  excludeId?: string,
+): Participant | undefined {
+  const key = toNameKey(name);
+  return participants.find(
+    (participant) =>
+      participant.id !== excludeId && toNameKey(participant.name) === key,
+  );
 }
 
 export type ParticipantNameError = "empty" | "duplicate";
@@ -97,12 +121,13 @@ export function validateParticipantName(
   if (name.trim() === "") {
     return "empty";
   }
-  const key = toNameKey(name);
-  const clashes = participants.some(
-    (participant) =>
-      participant.id !== excludeId && toNameKey(participant.name) === key,
-  );
-  return clashes ? "duplicate" : null;
+  /*
+   * "Yinelenen mi?" ile "hangisi?" AYNI sorudur ve tek yerden cevaplanır.
+   * Ayrı yazılsalardı biri Türkçe kuralını, öteki düz kuralı kullanabilirdi.
+   */
+  return findParticipantByName(participants, name, excludeId) === undefined
+    ? null
+    : "duplicate";
 }
 
 export type ParticipantMutation =
