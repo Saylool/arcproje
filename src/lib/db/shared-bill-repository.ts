@@ -138,6 +138,13 @@ export type ReserveQuotaOutcome =
   | { ok: false; reason: "userExhausted" }
   /** Genel tavan dolu; kullanıcının hakkına DOKUNULMADI. */
   | { ok: false; reason: "globalExhausted" }
+  /**
+   * Hesap AYIRMA ANINDA yoktu; hiçbir satır yazılmadı.
+   *
+   * Ayrı bir sebep olmasının nedeni: "tükendi" ile karıştırılırsa kullanıcıya
+   * yarın gelmesi söylenirdi. Oysa dönecek bir hesap yok.
+   */
+  | { ok: false; reason: "userMissing" }
   | { ok: false; reason: "unavailable" };
 
 /** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */

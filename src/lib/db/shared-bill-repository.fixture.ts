@@ -477,6 +477,15 @@ export function createFakeSharedBillRepository(
        * davranması, gerçek sorgudaki bir kaymayı gizlerdi — kısmi tüketim
        * tam da burada görünmez olurdu.
        */
+      /*
+       * HESAP VARLIĞI AYIRMANIN İÇİNDE. Gerçek sorguda `app_users` satırı
+       * kilitlenip varlığı aynı işlemde sınanır; burada da ilk bakılan şey
+       * odur. Sahte depo bunu atlasaydı, silinmiş bir hesap adına satır
+       * yaratılması yalnızca üretimde görünürdü.
+       */
+      if (!appUsers.has(input.userKey)) {
+        return { ok: false, reason: "userMissing" };
+      }
       const globalCell = `${input.globalKey}|${input.day}`;
       const userCell = `${input.userKey}|${input.day}`;
       const globalUsed = analysisQuota.get(globalCell) ?? 0;

@@ -123,7 +123,7 @@ describe("kota ayirma istegi PostgreSQL'in kabul edecegi bicimde", () => {
   it("HER deyim bildirdigi KADAR parametre alir", async () => {
     await reserve();
     const statements = traffic.requests[0];
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
     for (const [index, statement] of statements.entries()) {
       expect(statement.params.length, `deyim ${index + 1}`).toBe(
         declaredParameters(statement.query),
@@ -133,7 +133,15 @@ describe("kota ayirma istegi PostgreSQL'in kabul edecegi bicimde", () => {
 
   it("SINIRLAR yalnizca ayirma deyimine gider", async () => {
     await reserve();
-    const [seed, lock, reserveStatement] = traffic.requests[0];
+    const [lockUser, seed, lock, reserveStatement] = traffic.requests[0];
+    /*
+     * ÖNCE hesap satırı kilitlenir. Varlık kontrolü ayrı bir istekteyken
+     * arada hesap silinebiliyordu; o aralıkta silinmiş bir hesap adına satır
+     * yaratılıp sağlayıcıya para harcatılabiliyordu.
+     */
+    expect(lockUser.query).toContain("FROM app_users");
+    expect(lockUser.query).toContain("FOR KEY SHARE");
+    expect(lockUser.params).toEqual([RESERVE_INPUT.userKey]);
     /*
      * Ilk iki deyim satirlari yalnizca ADRESLER. Sinirlari da almalari
      * zararsiz gorunur ama tam olarak bu, uretimi kiran seydi.
@@ -161,6 +169,73 @@ describe("kota ayirma istegi PostgreSQL'in kabul edecegi bicimde", () => {
      * birakilirdi.
      */
     expect(traffic.requests).toHaveLength(1);
+  });
+
+  it("hesap YOKSA userMissing doner, tukenme DEGIL", async () => {
+    /*
+     * Gerçek Neon kodunun bu dalı başka hiçbir yerde çalışmıyor: sahte depo
+     * kendi kuralını uygular, SQL metni ise yalnızca okunur. Burada asıl
+     * uygulama, sunucunun döndüreceği satırla besleniyor.
+     *
+     * Boş bir kümede `max(used)` NULL döner ve sıfır olarak okunur; bu yüzden
+     * "hiçbir sınır dolmamış" görünür. `user_present` bakılmasaydı sonuç
+     * "erişilemiyor" olurdu ve kullanıcı silinmiş hesabıyla bekletilirdi.
+     */
+    globalThis.fetch = (async (_url: unknown, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { queries: Statement[] };
+      return new Response(
+        JSON.stringify({
+          results: body.queries.map(() => ({
+            command: "SELECT",
+            fields: [
+              ...RESERVE_COLUMNS.map((name) => ({ name, dataTypeID: 23 })),
+              { name: "user_present", dataTypeID: 23 },
+            ],
+            /* global_before, user_before, bumped_rows, user_after, user_present */
+            rows: [[0, 0, 0, null, 0]],
+            rowCount: 1,
+          })),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await expect(reserve()).resolves.toEqual({
+      ok: false,
+      reason: "userMissing",
+    });
+  });
+
+  it("hesap YOKKEN genel tavan doluysa yine userMissing doner", async () => {
+    /*
+     * SIRA ONEMLI. Genel satir kullaniciya bagli degildir ve baskalari onu
+     * doldurmus olabilir; hesap silinmis olsa bile `global_before` sinirda
+     * gorunur. Tukenme once bakilsaydi kullaniciya "yarin gel" denirdi —
+     * oysa donecek bir hesap yok. Bu test tam olarak o sirayi sabitler.
+     */
+    globalThis.fetch = (async (_url: unknown, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { queries: Statement[] };
+      return new Response(
+        JSON.stringify({
+          results: body.queries.map(() => ({
+            command: "SELECT",
+            fields: [
+              ...RESERVE_COLUMNS.map((name) => ({ name, dataTypeID: 23 })),
+              { name: "user_present", dataTypeID: 23 },
+            ],
+            /* Genel sayac TAM sinirda, hesap ise YOK. */
+            rows: [[RESERVE_INPUT.globalLimit, 0, 0, null, 0]],
+            rowCount: 1,
+          })),
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as unknown as typeof fetch;
+
+    await expect(reserve()).resolves.toEqual({
+      ok: false,
+      reason: "userMissing",
+    });
   });
 
   it("SURUCU HATASI erisilememe olarak doner, sizmaz", async () => {

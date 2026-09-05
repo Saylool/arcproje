@@ -389,9 +389,33 @@ WHERE expires_at < to_timestamp($1 / 1000.0)
  * araya giren bir yazıcı değeri değiştiremez. Kilitler işlem sonuna kadar
  * durur.
  */
+/**
+ * HESAP SATIRINI KİLİTLER — ve var olduğunu kanıtlar.
+ *
+ * Varlık kontrolü ayrı bir istekte yapılıyordu; arada hesap silinebiliyordu.
+ * O aralıkta silinen bir hesap adına kota satırı YENİDEN yaratılıyor ve —
+ * daha kötüsü — o istek sağlayıcıya gidip PARA HARCIYORDU.
+ *
+ * `FOR KEY SHARE` en zayıf yeterli kilittir: eşzamanlı `DELETE`i bu işlem
+ * bitene kadar bekletir, ama başka kullanıcıların (ve aynı kullanıcının
+ * paralel isteklerinin) birbirini beklemesine yol açmaz.
+ *
+ * SIRA ÖNEMLİ: hem burada hem hesap silmede ÖNCE `app_users`, SONRA kota
+ * satırları kilitlenir. Ters sırada kilitlenselerdi iki işlem birbirini
+ * bekleyip kilitlenirdi (deadlock).
+ */
+const LOCK_APP_USER = `
+SELECT user_id
+FROM app_users
+WHERE user_id = $1
+FOR KEY SHARE
+`;
+
 const SEED_QUOTA_ROWS = `
 INSERT INTO receipt_analysis_quota (quota_key, day, used)
-VALUES ($1, $3::date, 0), ($2, $3::date, 0)
+SELECT candidate, $3::date, 0
+FROM (VALUES ($1), ($2)) AS keys(candidate)
+WHERE EXISTS (SELECT 1 FROM app_users WHERE user_id = $2)
 ON CONFLICT (quota_key, day) DO NOTHING
 `;
 
@@ -427,13 +451,17 @@ bumped AS (
     AND q.quota_key IN ($1, $2)
     AND b.global_used < $4
     AND b.user_used < $5
+    -- Hesap ayırma anında yoksa HİÇBİR sayaç artmaz.
+    AND EXISTS (SELECT 1 FROM app_users WHERE user_id = $2)
   RETURNING q.quota_key, q.used
 )
 SELECT
   (SELECT global_used FROM before)::int AS global_before,
   (SELECT user_used FROM before)::int AS user_before,
   (SELECT count(*) FROM bumped)::int AS bumped_rows,
-  (SELECT used FROM bumped WHERE quota_key = $2)::int AS user_after
+  (SELECT used FROM bumped WHERE quota_key = $2)::int AS user_after,
+  /* Sıfır satır "tükendi" mi "hesap yok" mu — ayırt eden budur. */
+  (SELECT count(*) FROM app_users WHERE user_id = $2)::int AS user_present
 `;
 
 const COUNT_ALL_BILLS = `
@@ -1390,7 +1418,13 @@ export async function createNeonSharedBillRepository(
         input.userLimit,
       ];
       try {
+        /*
+         * SIRA: ÖNCE hesap satırı kilitlenir, SONRA kota satırları. Hesap
+         * silme de aynı sırayı izler; ters sırada iki işlem birbirini
+         * bekleyip kilitlenirdi.
+         */
         const results = await sql.transaction((txn) => [
+          txn.query(LOCK_APP_USER, [input.userKey]),
           txn.query(SEED_QUOTA_ROWS, rowParameters),
           txn.query(LOCK_QUOTA_ROWS, rowParameters),
           txn.query(RESERVE_ANALYSIS_QUOTA, reserveParameters),
@@ -1400,6 +1434,7 @@ export async function createNeonSharedBillRepository(
           user_before: unknown;
           bumped_rows: unknown;
           user_after: unknown;
+          user_present: unknown;
         }[];
         const row = rows[0];
         if (row === undefined) {
@@ -1416,6 +1451,15 @@ export async function createNeonSharedBillRepository(
           return { ok: false, reason: "unavailable" };
         }
         if (bumped === 0) {
+          /*
+           * ÖNCE "hesap var mı". Boş bir kümede `max(used)` NULL döner ve
+           * sıfır olarak okunur; hesap yokken önce sınırlara bakılsaydı
+           * "hiçbir sınır dolmamış" görünür ve kullanıcıya erişilememe
+           * denirdi. Oysa dönecek bir hesap yok.
+           */
+          if (toInt(row.user_present) === 0) {
+            return { ok: false, reason: "userMissing" };
+          }
           /*
            * Hangi sınırın engellediği KULLANICIYA farklı şey söyler: genel
            * tavan dolduğunda kişinin kendi hakkı durur. Genel önce bakılır,
@@ -1514,10 +1558,17 @@ export async function createNeonSharedBillRepository(
          * silinmiş bir hesabın sayacı geride kalırdı. İkisi de yarım sonuç.
          */
         const results = await sql.transaction((txn) => [
-          txn.query(DELETE_USER_QUOTA_ROWS, [input.userId]),
           txn.query(DELETE_APP_USER, [input.userId]),
+          txn.query(DELETE_USER_QUOTA_ROWS, [input.userId]),
         ]);
-        const removed = results[results.length - 1];
+        /*
+         * HESAP SATIRI ÖNCE SİLİNİR — atomiklik için değil, KİLİT SIRASI
+         * için. Kota ayırma da önce `app_users`ı kilitler; ters sırada
+         * silseydik iki işlem birbirini bekleyip kilitlenebilirdi.
+         *
+         * Sonuç ilk deyimden okunur: `RETURNING` olan odur.
+         */
+        const removed = results[0];
         return {
           ok: true,
           deleted: Array.isArray(removed) && removed.length > 0,

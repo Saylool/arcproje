@@ -215,3 +215,40 @@ describe("hata yanitlari kalan hakki bildirir", () => {
     expect("remainingAnalyses" in body).toBe(false);
   });
 });
+
+describe("varlik kontrolunden SONRA silinen hesap", () => {
+  /*
+   * ASIL ZARAR PARA. Varlik kontrolu ile kota ayirma ayri iki istekti; arada
+   * hesap silinirse istek yoluna DEVAM EDIYOR ve saglayiciya gidiyordu. Yani
+   * silinmis bir hesap bir analiz daha yaptirabiliyordu.
+   *
+   * Burada varlik kontrolu BILEREK "var" der: yarisin gerceklestigi durum
+   * budur. Kararin ayirmadan gelmesi ve saglayiciya HIC gidilmemesi olculur.
+   */
+  it("401 doner ve SAGLAYICIYA GIDILMEZ", async () => {
+    const extract = vi.fn();
+    const response = await createReceiptAnalyzePost({
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: "app-user", name: null, image: null },
+      }),
+      configured: () => true,
+      createRepository: async () => ({}) as never,
+      /* Kontrol aninda hesap DURUYORDU. */
+      userExists: async () => ({ ok: true as const, exists: true }),
+      /* Ayirma anina gelindiginde silinmisti. */
+      consumeQuota: async () => ({
+        ok: false as const,
+        status: 401,
+        code: "ACCOUNT_DELETED",
+        message: "Bu hesap silinmiş.",
+        remaining: null,
+      }),
+      extract,
+    })(multipartRequest());
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("ACCOUNT_DELETED");
+    expect(extract, "silinmis hesap icin para harcanmamali").not.toHaveBeenCalled();
+  });
+});
