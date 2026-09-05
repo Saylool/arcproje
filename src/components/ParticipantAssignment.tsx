@@ -20,6 +20,7 @@ import {
   addParticipant,
   checkAssignmentsComplete,
   describeParticipantNameError,
+  findParticipantByName,
   findParticipantNameIssues,
   getAssignedParticipantIds,
   removeParticipant,
@@ -322,10 +323,9 @@ export function ParticipantAssignment({
            * eklenmez ama VAR OLAN satıra cüzdan bağlanır — istenen sonuç
            * yine elde edilir.
            */
-          const existing = state.participants.find(
-            (person) =>
-              person.name.trim().toLowerCase() ===
-              contact.label.trim().toLowerCase(),
+          const existing = findParticipantByName(
+            state.participants,
+            contact.label,
           );
           if (existing !== undefined) {
             onLinkAddress(existing.id, contact.address);
