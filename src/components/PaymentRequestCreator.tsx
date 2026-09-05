@@ -532,7 +532,7 @@ export function PaymentRequestCreator({
                 )}
                 <div className="flex flex-wrap gap-2">
                   {wallets.map((wallet) => (
-                    <label key={wallet.uuid} className="cursor-pointer">
+                    <label key={wallet.uuid} className="inline-flex cursor-pointer items-center min-h-11">
                       <input
                         type="radio"
                         name="creator-wallet"
@@ -715,7 +715,7 @@ export function PaymentRequestCreator({
                         selected ? "border-brand-line bg-brand-soft/40" : "border-line"
                       }`}
                     >
-                      <label className="flex cursor-pointer items-center gap-2">
+                      <label className="flex min-h-11 cursor-pointer items-center gap-2">
                         <input
                           type="radio"
                           name="creator-debt"

@@ -244,7 +244,7 @@ export function ReceiptUploader({
         ) : (
           <label
             htmlFor={inputId}
-            className={`flex cursor-pointer flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-colors peer-focus-visible:border-brand-line peer-focus-visible:bg-brand-soft sm:px-6 sm:py-12 ${
+            className={`flex min-h-11 cursor-pointer flex-col items-center gap-4 rounded-2xl border-2 border-dashed px-4 py-9 text-center transition-colors peer-focus-visible:border-brand-line peer-focus-visible:bg-brand-soft sm:px-6 sm:py-12 ${
               isDragging
                 ? "border-brand-line bg-brand-soft"
                 : "border-line bg-muted/70 hover:border-brand-line hover:bg-brand-soft/60"

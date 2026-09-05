@@ -812,7 +812,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
             )}
             <div className="flex flex-wrap gap-2">
               {wallets.map((wallet) => (
-                <label key={wallet.uuid} className="cursor-pointer">
+                <label key={wallet.uuid} className="inline-flex cursor-pointer items-center min-h-11">
                   <input
                     type="radio"
                     name="payer-wallet"
@@ -943,7 +943,7 @@ function RequestSession({ encoded }: { encoded: string | null }) {
 
           {status === "review" && (
             <div className="flex flex-col gap-2 rounded-2xl border border-brand-line-soft bg-brand-soft p-3">
-              <label className="flex items-start gap-2 text-[11px] leading-relaxed text-brand-ink">
+              <label className="flex min-h-11 items-start gap-2 text-[11px] leading-relaxed text-brand-ink">
                 <input
                   type="checkbox"
                   checked={confirmed}
