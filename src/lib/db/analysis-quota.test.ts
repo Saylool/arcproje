@@ -42,6 +42,23 @@ const NOW = Date.UTC(2026, 8, 4, 12, 0, 0);
 
 type Repo = ReturnType<typeof createFakeSharedBillRepository>;
 
+/**
+ * Hesabı OLAN bir depo.
+ *
+ * Kota ayırma artık hesabın VARLIĞINI da sınar ve bunu ayırmayla AYNI işlemde
+ * yapar. Eskiden varlık ayrı bir istekte bakılıyordu; arada hesap silinirse
+ * silinmiş hesap adına satır yaratılıyor ve o istek sağlayıcıya gidip para
+ * harcatıyordu. Hesapsız çağrının `userMissing` dönmesi artık DOĞRU
+ * davranıştır, bu yüzden testler hesabı açıkça kurar.
+ */
+function repositoryWith(...userIds: string[]): Repo {
+  const fake = createFakeSharedBillRepository();
+  for (const userId of userIds) {
+    fake.appUsers.add(userId);
+  }
+  return fake;
+}
+
 async function spend(
   repository: Repo,
   times: number,
@@ -64,7 +81,7 @@ async function spend(
 
 describe("sinir tutar", () => {
   it("sinira kadar gecer, sonrasinda 429 doner", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
 
     const results = await spend(repository, 4);
 
@@ -76,7 +93,7 @@ describe("sinir tutar", () => {
   });
 
   it("KALAN hak dogru sayilir", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
 
     const results = await spend(repository, 3);
 
@@ -88,7 +105,7 @@ describe("sinir tutar", () => {
      * Aksi halde sinira carpan biri, tekrar denedikce kilitli kalirdi ve
      * ertesi gune kadar hicbir hakki geri gelmezdi.
      */
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     await spend(repository, 3);
     const before = repository.analysisQuota.get(`${USER}|${quotaDay(NOW)}`);
 
@@ -100,7 +117,7 @@ describe("sinir tutar", () => {
   });
 
   it("BASKA kullanicinin hakki etkilenmez", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     await spend(repository, 3);
 
     const other = await spend(repository, 1, { userId: OTHER });
@@ -115,7 +132,7 @@ describe("iki sayac, iki farkli is", () => {
      * Kullanicinin kendi hakki bitmemistir; mesaj bunu dogru soylemeli,
      * yoksa kisi kendi hakkini harcadigini saniyor.
      */
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
 
     const results = await spend(repository, 3, { totalLimit: 2 });
 
@@ -126,7 +143,7 @@ describe("iki sayac, iki farkli is", () => {
   });
 
   it("genel tavan dolunca KULLANICININ hakkina dokunulmaz", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     await spend(repository, 2, { totalLimit: 2 });
     const own = repository.analysisQuota.get(`${USER}|${quotaDay(NOW)}`);
 
@@ -136,7 +153,7 @@ describe("iki sayac, iki farkli is", () => {
   });
 
   it("genel sayac TUM kullanicilari toplar", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
 
     await spend(repository, 2, { userId: USER });
     await spend(repository, 2, { userId: OTHER });
@@ -164,7 +181,7 @@ describe("gun UTC'dir", () => {
   });
 
   it("ertesi gun hak YENILENIR", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     await spend(repository, 3);
 
     const tomorrow = await consumeAnalysisQuota({
@@ -181,7 +198,7 @@ describe("gun UTC'dir", () => {
 
 describe("sinirlar", () => {
   it("gecersiz kullanici kimligiyle hicbir hak harcanmaz", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
 
     for (const bad of ["", "  ", "not-a-uuid", GLOBAL_QUOTA_KEY]) {
       const result = await consumeAnalysisQuota({
@@ -250,7 +267,8 @@ describe("kota SQL'i sahte depoyla AYNI seyi yapar", () => {
 
   it("iki satiri da SAYAC ARTIRMADAN var eder", () => {
     /* Tohumlama artirsaydi, reddedilen istek bile hak yakardi. */
-    expect(seed).toContain("VALUES ($1, $3::date, 0), ($2, $3::date, 0)");
+    expect(seed).toContain("SELECT candidate, $3::date, 0");
+    expect(seed).toContain("FROM (VALUES ($1), ($2)) AS keys(candidate)");
     expect(seed).toContain("ON CONFLICT (quota_key, day) DO NOTHING");
     expect(seed).not.toContain("used + 1");
   });
@@ -615,7 +633,7 @@ describe("REDDEDILEN istek baska kullanicinin hakkini YIYEMEZ", () => {
   const TOTAL = 8;
 
   it("hakki dolan kullanici GENEL tavani tuketemez", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     const spend = (userId: string) =>
       consumeAnalysisQuota({
         userId,
@@ -643,7 +661,7 @@ describe("REDDEDILEN istek baska kullanicinin hakkini YIYEMEZ", () => {
   });
 
   it("hakki dolan kullanicidan sonra BASKA kullanici hala analiz yapabilir", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(USER, OTHER);
     const spend = (userId: string) =>
       consumeAnalysisQuota({
         userId,
@@ -676,7 +694,7 @@ describe("BASARISIZ ayirma hicbir sayaci kirletmez", () => {
     });
 
   it("GENEL tavan dolduysa kullanicinin hakkina DOKUNULMAZ", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(WHO);
     /* Genel tavani baska kullanicilar doldurmus olsun. */
     repository.analysisQuota.set(`${GLOBAL_QUOTA_KEY}|${day}`, 5);
 
@@ -689,7 +707,7 @@ describe("BASARISIZ ayirma hicbir sayaci kirletmez", () => {
   });
 
   it("KISISEL hak dolduysa genel tavana DOKUNULMAZ", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(WHO);
     repository.analysisQuota.set(`${WHO}|${day}`, 2);
     repository.analysisQuota.set(`${GLOBAL_QUOTA_KEY}|${day}`, 2);
 
@@ -711,7 +729,7 @@ describe("BASARISIZ ayirma hicbir sayaci kirletmez", () => {
   });
 
   it("BASARILI ayirma iki sayaci da TAM BIR kez artirir", async () => {
-    const repository = createFakeSharedBillRepository();
+    const repository = repositoryWith(WHO);
     const outcome = await spend(repository, [10, 50]);
     expect(outcome.ok).toBe(true);
     expect(repository.analysisQuota.get(`${WHO}|${day}`)).toBe(1);
@@ -846,5 +864,165 @@ describe("temizlik SQL'i sahte depoyla AYNI seyi yapar", () => {
     expect(deleteUser).toContain("sql.transaction((txn) => [");
     expect(deleteUser).toContain("txn.query(DELETE_USER_QUOTA_ROWS");
     expect(deleteUser).toContain("txn.query(DELETE_APP_USER");
+  });
+});
+
+describe("HESAP SILME ile es zamanli analiz", () => {
+  /*
+   * YARIS BUYDU:
+   *
+   *   1. Analiz istegi "kullanici var mi" diye SORAR   -> evet
+   *   2. Baska bir sekmede hesap silme TAMAMLANIR
+   *   3. Ilk istek devam eder ve silinmis kullanicinin kimligiyle kota
+   *      satirini YENIDEN yaratir
+   *
+   * Iki islem ayriydi, arada bir aralik vardi. Asil zarar orfan satir degil:
+   * o istek saglayiciya gider ve SILINMIS bir hesap adina PARA harcatirdi.
+   *
+   * Kontrol artik ayirmanin ICINDE. Sahte depo da ayni kurali uygular; bu
+   * testler o kurali olcer. ES ZAMANLILIGIN KENDISI burada olculemez —
+   * kilitlenme davranisi gercek bir PostgreSQL ister ve bu depoda yok.
+   */
+  const WHO = "55555555-5555-4555-8555-555555555555";
+  const AT = Date.UTC(2026, 8, 6, 12, 0, 0);
+
+  const reserve = (repository: SharedBillRepository) =>
+    consumeAnalysisQuota({
+      userId: WHO,
+      repository,
+      nowMs: AT,
+      perUserLimit: 3,
+      totalLimit: 100,
+    });
+
+  it("VARLIK KONTROLUNDEN SONRA silinen hesap ayirma YAPAMAZ", async () => {
+    const repository = repositoryWith(WHO);
+
+    /* 1. adim: istek varligi sorar ve olumlu cevap alir. */
+    expect(await appUserStillExists({ userId: WHO, repository })).toEqual({
+      ok: true,
+      exists: true,
+    });
+
+    /* 2. adim: hesap silinir. */
+    await repository.deleteAppUser({ userId: WHO });
+
+    /* 3. adim: ayni istek devam eder. Eskiden buradan GECIYORDU. */
+    const outcome = await reserve(repository);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.status).toBe(401);
+    expect(outcome.ok === false && outcome.code).toBe("ACCOUNT_DELETED");
+  });
+
+  it("silinmis hesap adina SATIR YARATILMAZ", async () => {
+    /*
+     * "Reddedildi" demek yetmez: satirin gercekten yaratilmadigi olculur.
+     * Yaratilsaydi, silinen hesaba bagli veri silmeden SONRA geri gelirdi.
+     */
+    const repository = repositoryWith(WHO);
+    await repository.deleteAppUser({ userId: WHO });
+
+    await reserve(repository);
+
+    expect(repository.analysisQuota.size).toBe(0);
+  });
+
+  it("GENEL sayac da kirlenmez", async () => {
+    /*
+     * Genel satir kullaniciya bagli degildir; yine de yaratilmamali —
+     * yaratilsaydi silinmis bir hesabin istegi herkesin tavanindan yerdi.
+     */
+    const repository = repositoryWith(WHO);
+    await repository.deleteAppUser({ userId: WHO });
+
+    await reserve(repository);
+
+    expect(
+      repository.analysisQuota.has(`${GLOBAL_QUOTA_KEY}|${quotaDay(AT)}`),
+    ).toBe(false);
+  });
+
+  it("TUKENME ile KARISTIRILMAZ", async () => {
+    /*
+     * Ikisi de "ayirma olmadi" der ama kullaniciya BASKA sey soyler.
+     * "Yarin gel" demek burada yanlis olurdu: donecek bir hesap yok.
+     */
+    const missing = repositoryWith();
+    const exhausted = repositoryWith(WHO);
+    exhausted.analysisQuota.set(`${WHO}|${quotaDay(AT)}`, 3);
+
+    const a = await reserve(missing);
+    const b = await reserve(exhausted);
+    expect(a.ok === false && a.code).toBe("ACCOUNT_DELETED");
+    expect(b.ok === false && b.code).toBe("DAILY_LIMIT_REACHED");
+    expect(a).not.toEqual(b);
+  });
+
+  it("hesabi DURAN kullanici etkilenmez", async () => {
+    // Kontrol fazla genis olsaydi herkesi keserdi.
+    const repository = repositoryWith(WHO);
+    expect((await reserve(repository)).ok).toBe(true);
+  });
+});
+
+describe("yaris SQL'de de kapali", () => {
+  const neon = readFileSync(
+    "src/lib/db/neon-shared-bill-repository.ts",
+    "utf8",
+  );
+  const between = (from: string, to: string) =>
+    neon.slice(neon.indexOf(from), neon.indexOf(to, neon.indexOf(from)));
+
+  it("hesap satiri KILITLENIR", () => {
+    /*
+     * `EXISTS` tek basina yetmez: READ COMMITTED'da kilit almaz ve es zamanli
+     * `DELETE` araya girebilir. `FOR KEY SHARE` silmeyi bu islem bitene kadar
+     * bekletir; en zayif yeterli kilittir, baska kullanicilari bekletmez.
+     */
+    const lock = between("const LOCK_APP_USER = `", "`;");
+    expect(lock).toContain("FROM app_users");
+    expect(lock).toContain("FOR KEY SHARE");
+  });
+
+  it("hesap yoksa HICBIR satir yazilmaz", () => {
+    const seed = between("const SEED_QUOTA_ROWS = `", "`;");
+    const reserve = between("const RESERVE_ANALYSIS_QUOTA = `", "`;");
+    expect(seed).toContain("WHERE EXISTS (SELECT 1 FROM app_users");
+    expect(reserve).toContain("AND EXISTS (SELECT 1 FROM app_users");
+  });
+
+  it("SIFIR SATIR sebebi ayirt edilebilir", () => {
+    /* Yoksa "hesap yok" ile "tavan doldu" ayni gorunurdu. */
+    const reserve = between("const RESERVE_ANALYSIS_QUOTA = `", "`;");
+    /*
+     * Takma adı aramak YETMEZ: sabit bir değere `AS user_present` demek de
+     * o iddiayı geçerdi ve alan hep aynı şeyi söylerdi. Mutasyonla denendi,
+     * tam olarak öyle oldu. Sayımın kendisi aranır.
+     */
+    expect(reserve).toContain(
+      "(SELECT count(*) FROM app_users WHERE user_id = $2)::int AS user_present",
+    );
+  });
+
+  it("KILIT SIRASI iki islemde de AYNI", () => {
+    /*
+     * Ayirma once `app_users`i kilitler. Hesap silme ters sirada silseydi
+     * (once kota, sonra hesap) iki islem birbirini bekleyip KILITLENIRDI.
+     * Sira burada sabitlenir.
+     */
+    const reserveImpl = between(
+      "async reserveAnalysisQuota(",
+      "async countAllBills(",
+    );
+    expect(
+      reserveImpl.indexOf("LOCK_APP_USER"),
+      "ayirmada once hesap kilitlenmeli",
+    ).toBeLessThan(reserveImpl.indexOf("SEED_QUOTA_ROWS"));
+
+    const deleteImpl = between("async deleteAppUser(", "async listRecentDebtorsFor(");
+    expect(
+      deleteImpl.indexOf("DELETE_APP_USER"),
+      "silmede de once hesap gitmeli",
+    ).toBeLessThan(deleteImpl.indexOf("DELETE_USER_QUOTA_ROWS"));
   });
 });

@@ -56,6 +56,24 @@ const UNAVAILABLE = {
   remaining: null,
 };
 
+/**
+ * Hesap AYIRMA ANINDA yoktu.
+ *
+ * Varlık kontrolü ayrı bir istekte yapılıyordu ve arada hesap silinebiliyordu.
+ * O aralıkta silinmiş bir hesap adına kota satırı yaratılıyor ve — asıl zararı
+ * bu — istek sağlayıcıya gidip PARA harcatıyordu. Kontrol artık ayırmanın
+ * içinde; bu kod o yarışın kapandığı yerdir.
+ *
+ * 429 DEĞİL 401: "yarın gel" demek yanlış olurdu, dönecek bir hesap yok.
+ */
+const ACCOUNT_DELETED = {
+  ok: false as const,
+  status: 401,
+  code: "ACCOUNT_DELETED",
+  message: "Bu hesap silinmiş. Devam etmek için yeniden giriş yapman gerekiyor.",
+  remaining: null,
+};
+
 const USER_EXHAUSTED = {
   ok: false as const,
   status: 429,
@@ -101,6 +119,9 @@ export async function consumeAnalysisQuota(input: {
   });
 
   if (!reserved.ok) {
+    if (reserved.reason === "userMissing") {
+      return ACCOUNT_DELETED;
+    }
     if (reserved.reason === "globalExhausted") {
       return GLOBAL_EXHAUSTED;
     }

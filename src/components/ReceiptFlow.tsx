@@ -305,10 +305,19 @@ export function ReceiptFlow({
          * uydurmak yerine bilinen değer KORUNUR.
          */
         const failureCode = readApiErrorCode(payload);
-        if (
-          quotaDisplayAfterFailure(response.status, failureCode).kind ===
-          "showExhausted"
-        ) {
+        /*
+         * Sunucu hata yanıtında sayıyı bildirebilir: kota düşüldükten sonra
+         * sağlayıcı hata verirse hak gerçekten yanmıştır. Bildirilen sayı
+         * durum kodundan yapılan çıkarımı geçersiz kılar.
+         */
+        const quotaAction = quotaDisplayAfterFailure(
+          response.status,
+          failureCode,
+          readRemainingAnalyses(payload),
+        );
+        if (quotaAction.kind === "showReported") {
+          setRemainingAnalyses(quotaAction.remaining);
+        } else if (quotaAction.kind === "showExhausted") {
           setRemainingAnalyses(0);
         }
         if (response.status === 413) {

@@ -58,9 +58,28 @@ const NO_STORE_HEADERS = {
   "cache-control": "no-store, private, max-age=0",
 } as const;
 
-function errorResponse(status: number, code: string, message: string) {
+/**
+ * Hata yanıtı — ve BİLİNİYORSA kalan hak.
+ *
+ * Kota düşüldükten SONRA bir hata olursa sayaç gerçekten azalmıştır. Sayıyı
+ * yanıta koymamak, istemciyi eski (yüksek) değeri göstermeye bırakırdı:
+ * ekranda 24 yazarken sunucuda 23 olurdu. İstemci hakları saymaz, yalnızca
+ * söyleneni yansıtır; söylemezsek yanlış olanı yansıtır.
+ *
+ * `remainingAnalyses` YALNIZCA sunucunun gerçekten bildiği yerde verilir.
+ * Bilinmiyorsa (kota okunamadı, genel tavan doldu) alan HİÇ konmaz —
+ * uydurulmuş bir sayı, eski sayıdan daha kötüdür.
+ */
+function errorResponse(
+  status: number,
+  code: string,
+  message: string,
+  remainingAnalyses: number | null = null,
+) {
   return NextResponse.json(
-    { error: { code, message } },
+    remainingAnalyses === null
+      ? { error: { code, message } }
+      : { error: { code, message }, remainingAnalyses },
     { status, headers: NO_STORE_HEADERS },
   );
 }
@@ -241,7 +260,17 @@ async function receiptAnalyzePost(
     nowMs: dependencies.now(),
   });
   if (!quota.ok) {
-    return errorResponse(quota.status, quota.code, quota.message);
+    /*
+     * Kişisel hak dolduğunda karar sıfırı BİLİR; genel tavan dolduğunda
+     * kişinin hakkına dokunulmamıştır ve sayı bilinmez. İkisi `remaining`
+     * alanında zaten ayrılmış; yanıt onu olduğu gibi taşır.
+     */
+    return errorResponse(
+      quota.status,
+      quota.code,
+      quota.message,
+      quota.remaining,
+    );
   }
 
   // Görsel yalnızca bellekte tutulur; diske yazılmaz, veritabanına kaydedilmez.
@@ -250,8 +279,17 @@ async function receiptAnalyzePost(
   try {
     const result = await dependencies.extract(imageDataUrl);
     if (!result.ok) {
+      /*
+       * HAK YANDI. Sağlayıcıya ulaşan deneme sayılır — bu bilinçli ve
+       * değişmeyen ürün kararı. Kullanıcıya en azından DOĞRU sayı söylenir.
+       */
       const failure = FAILURE_RESPONSES[result.code];
-      return errorResponse(failure.status, result.code, failure.message);
+      return errorResponse(
+        failure.status,
+        result.code,
+        failure.message,
+        quota.remaining,
+      );
     }
     /* Kalan hak yanıtta döner ki kullanıcı kaç analizi kaldığını görsün. */
     return NextResponse.json(
@@ -267,6 +305,7 @@ async function receiptAnalyzePost(
       500,
       "INTERNAL_ERROR",
       "Beklenmeyen bir hata oluştu. Lütfen tekrar dene.",
+      quota.remaining,
     );
   }
 }

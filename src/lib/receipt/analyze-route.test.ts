@@ -110,3 +110,145 @@ describe("fis analizi Google oturum kapisi", () => {
     expect(extract.mock.calls[0]?.[0]).toMatch(/^data:image\/jpeg;base64,/);
   });
 });
+
+/**
+ * KOTA DÜŞÜLDÜKTEN SONRAKİ HATALARDA KALAN HAK.
+ *
+ * Sağlayıcıya ulaşan her deneme hakkı yakar — bilinçli ürün kararı. Ama hata
+ * yanıtı sayıyı taşımayınca istemci eski (yüksek) değeri göstermeye devam
+ * ediyordu: ekranda 24 yazarken sunucuda 23 oluyordu. Kusur hakkın yanması
+ * değil, kullanıcıya YANLIŞ sayı söylenmesiydi.
+ */
+describe("hata yanitlari kalan hakki bildirir", () => {
+  function routeWith(overrides: Parameters<typeof createReceiptAnalyzePost>[0]) {
+    return createReceiptAnalyzePost({
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: "app-user", name: null, image: null },
+      }),
+      configured: () => true,
+      createRepository: async () => ({}) as never,
+      userExists: async () => ({ ok: true as const, exists: true }),
+      ...overrides,
+    });
+  }
+
+  it("SAGLAYICI hatasinda gercek sayi doner", async () => {
+    const response = await routeWith({
+      consumeQuota: async () => ({ ok: true as const, remaining: 23 }),
+      extract: async () => ({
+        ok: false as const,
+        code: "RECEIPT_NOT_READABLE" as const,
+      }),
+    })(multipartRequest());
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      error: { code: "RECEIPT_NOT_READABLE" },
+      remainingAnalyses: 23,
+    });
+  });
+
+  it("BEKLENMEYEN hatada da doner", async () => {
+    const response = await routeWith({
+      consumeQuota: async () => ({ ok: true as const, remaining: 5 }),
+      extract: async () => {
+        throw new Error("saglayici coktu");
+      },
+    })(multipartRequest());
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      error: { code: "INTERNAL_ERROR" },
+      remainingAnalyses: 5,
+    });
+  });
+
+  it("SIFIR da bildirilir, atlanmaz", async () => {
+    /*
+     * `0` yanlış (falsy) bir değerdir. Alan "doğruysa ekle" diye konsaydı
+     * sıfır sessizce düşer ve hakkı bitmiş kullanıcı hakkı varmış gibi
+     * görünürdü — düzeltmenin en çok gerektiği durumda çalışmazdı.
+     */
+    const response = await routeWith({
+      consumeQuota: async () => ({
+        ok: false as const,
+        status: 429,
+        code: "DAILY_LIMIT_REACHED",
+        message: "Bugünlük analiz hakkın doldu.",
+        remaining: 0,
+      }),
+      extract: async () => {
+        throw new Error("buraya gelinmemeli");
+      },
+    })(multipartRequest());
+
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({
+      error: { code: "DAILY_LIMIT_REACHED" },
+      remainingAnalyses: 0,
+    });
+  });
+
+  it("BILINMIYORSA alan HIC konmaz", async () => {
+    /*
+     * Genel tavan dolduğunda kişinin hakkına dokunulmamıştır ve sunucu sayıyı
+     * BİLMEZ. Uydurulmuş bir sayı, eski sayıdan daha kötüdür; alan hiç
+     * konmaz ve istemci bilinen değeri korur.
+     */
+    const response = await routeWith({
+      consumeQuota: async () => ({
+        ok: false as const,
+        status: 429,
+        code: "SERVICE_BUSY",
+        message: "Bugün toplam analiz sınırına ulaşıldı.",
+        remaining: null,
+      }),
+      extract: async () => {
+        throw new Error("buraya gelinmemeli");
+      },
+    })(multipartRequest());
+
+    expect(response.status).toBe(429);
+    const body = await response.json();
+    expect(body.error.code).toBe("SERVICE_BUSY");
+    expect("remainingAnalyses" in body).toBe(false);
+  });
+});
+
+describe("varlik kontrolunden SONRA silinen hesap", () => {
+  /*
+   * ASIL ZARAR PARA. Varlik kontrolu ile kota ayirma ayri iki istekti; arada
+   * hesap silinirse istek yoluna DEVAM EDIYOR ve saglayiciya gidiyordu. Yani
+   * silinmis bir hesap bir analiz daha yaptirabiliyordu.
+   *
+   * Burada varlik kontrolu BILEREK "var" der: yarisin gerceklestigi durum
+   * budur. Kararin ayirmadan gelmesi ve saglayiciya HIC gidilmemesi olculur.
+   */
+  it("401 doner ve SAGLAYICIYA GIDILMEZ", async () => {
+    const extract = vi.fn();
+    const response = await createReceiptAnalyzePost({
+      authenticate: async () => ({
+        status: "authenticated",
+        user: { id: "app-user", name: null, image: null },
+      }),
+      configured: () => true,
+      createRepository: async () => ({}) as never,
+      /* Kontrol aninda hesap DURUYORDU. */
+      userExists: async () => ({ ok: true as const, exists: true }),
+      /* Ayirma anina gelindiginde silinmisti. */
+      consumeQuota: async () => ({
+        ok: false as const,
+        status: 401,
+        code: "ACCOUNT_DELETED",
+        message: "Bu hesap silinmiş.",
+        remaining: null,
+      }),
+      extract,
+    })(multipartRequest());
+
+    expect(response.status).toBe(401);
+    expect((await response.json()).error.code).toBe("ACCOUNT_DELETED");
+    expect(extract, "silinmis hesap icin para harcanmamali").not.toHaveBeenCalled();
+  });
+});
