@@ -225,7 +225,7 @@ export function ReceiptUploader({
                     type="button"
                     onClick={openFilePicker}
                     disabled={disabled}
-                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-line bg-card px-3.5 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
                   >
                     {t("common.change")}
                   </button>
@@ -233,7 +233,7 @@ export function ReceiptUploader({
                     type="button"
                     onClick={removeReceipt}
                     disabled={disabled}
-                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    className="disabled:cursor-not-allowed disabled:opacity-50 rounded-full border border-transparent px-3.5 py-1.5 text-xs font-semibold text-ink-faint transition-colors hover:bg-muted-strong hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
                   >
                     {t("common.remove")}
                   </button>

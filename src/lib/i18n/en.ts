@@ -258,6 +258,27 @@ export const en: Dictionary = {
     unknownMerchant: "Merchant name could not be read",
     currencyLine: "Currency: {currency} · Review the analysis result and correct it.",
     unknownCurrency: "could not be determined",
+    /* The model returns CODES; the sentence is chosen here. Receipt content is never translated. */
+    analysisWarnings: {
+      TOTAL_UNREADABLE:
+        "The grand total on the receipt could not be read; please check and correct it.",
+      TOTALS_DO_NOT_MATCH:
+        "The item lines do not add up to the printed total; review the amounts.",
+      TAX_TREATMENT_UNCLEAR:
+        "It was unclear whether tax is included in the prices or added separately; check the setting.",
+      SERVICE_TREATMENT_UNCLEAR:
+        "It was unclear whether the service charge is included or added separately; check the setting.",
+      DISCOUNT_TREATMENT_UNCLEAR:
+        "It was unclear whether the discount is included or applied separately; check the setting.",
+      ITEM_PRICE_UNCLEAR:
+        "At least one item price was not clearly legible; compare the prices.",
+      ITEM_NAME_UNCLEAR:
+        "At least one item name was not clearly legible; you can correct the names.",
+      PARTIALLY_UNREADABLE:
+        "Part of the receipt could not be read; some lines may be missing.",
+      CURRENCY_UNCLEAR:
+        "The currency could not be determined from the receipt; make sure it is right.",
+    },
     analysisNotes: "Analysis notes",
     items: "Items",
     emptyItems: "The item list is empty. You can add items below.",

@@ -1241,14 +1241,29 @@ harcıyor. Üst sınırı olmayan tek maliyet buydu.
 Kullanıcı başına kota tek başına faturayı korumaz: Google hesabı açmak bedava
 ve sınırsızdır. Genel tavan bunun içindir.
 
-**Atomiklik.** Koşul sorgunun İÇİNDEDİR (`ON CONFLICT ... DO UPDATE ... WHERE
-q.used < $3 RETURNING`); okuyup sonra yazan bir yol yoktur, iki eşzamanlı
-istek son hakkı birlikte kullanamaz. Sınıra ulaşılmışsa hiçbir sayaç artmaz —
-**reddedilen istek hak tüketmez**.
+**Atomiklik — iki sayaç, TEK işlem.** Genel tavan ve kullanıcı hakkı birlikte
+ayrılır: ya ikisi de düşülür ya da hiçbiri. Üç deyim tek işlemde çalışır —
+iki satırı sayaç artırmadan var et, `quota_key` sırasına göre kilitle
+(`FOR UPDATE`), sonra ikisini de oku ve ikisi de sınırın altındaysa tek
+`UPDATE` ile ikisini birden artır. Sınır kontrolü **yazan** değil **okuyan**
+CTE'ye dayanır; kardeş CTE'ler birbirinin yazdığını görmez.
 
-**Sıra.** Önce genel tavan, sonra kullanıcı. İkisi ayrı ayrı atomiktir ama
-birlikte tek işlem değildir; genel geçip kullanıcı takılırsa genel sayaç bir
-fazla saymış olur. Bu, gereğinden **az** harcamaya yol açar — güvenli yön.
+> **Düzeltilen kusur.** Eskiden ikisi ayrı ayrı düşülüyordu ve burada sıranın
+> "güvenli yöne saptığı" yazıyordu. Yanlıştı: genel tavan ÖNCE düşüldüğü için
+> hakkı dolmuş bir kullanıcının **reddedilen** her isteği genel sayacı
+> artırıyordu. O kullanıcı tek başına genel tavanı tüketip diğer herkesi
+> kilitleyebiliyordu — hiç OpenAI çağrısı yapmadan. Sırayı ters çevirmek
+> çözüm değildi; o zaman da genel tavan dolduğunda kullanıcı hakkı boşuna
+> yanardı.
+
+**Reddedilen istek hak tüketmez.** Hangi sınıra takılırsa takılsın hiçbir
+sayaç artmaz. Sağlayıcı hatası ise ayrı: kabul edilmiş bir istek OpenAI
+tarafında düşerse hak **geri verilmez**, bu bilinçli bir üründür kararıdır.
+
+**Arayüz iki sınırı ayırır.** `DAILY_LIMIT_REACHED` kişinin kendi hakkının
+bittiğini söyler ve kalan sıfıra çekilir; `SERVICE_BUSY` genel tavanın
+dolduğunu söyler ve kişisel hakka **dokunulmaz**. Karar
+`src/lib/receipt/quota-feedback.ts` içinde saf bir fonksiyondur.
 
 **Ne zaman düşülür.** Bütün doğrulamalardan sonra, OpenAI'ye gitmeden önce.
 Bozuk bir dosya yüzünden hak yanmaz; sağlayıcıya ulaşan her deneme sayılır.

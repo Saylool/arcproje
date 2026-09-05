@@ -23,7 +23,7 @@ export default async function AuthenticationErrorPage() {
         </p>
         <Link
           href="/"
-          className="mt-4 inline-flex rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+          className="mt-4 inline-flex rounded-full bg-brand px-4 py-2 text-sm font-semibold text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
         >
           {translate(locale, "auth.backHome")}
         </Link>

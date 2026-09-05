@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { RECEIPT_WARNING_CODES } from "./warnings";
+
 /** Para birimi belirlenemediğinde kullanılan değer. */
 export const UNKNOWN_CURRENCY = "UNKNOWN";
 
@@ -53,6 +55,12 @@ export const ReceiptExtractionSchema = z.object({
   discountMinor: z.number().int(),
   discountTreatment: AdjustmentTreatmentSchema,
   totalMinor: z.number().int(),
+  /*
+   * Serbest metin DEĞİL kod. Model kapalı listeden seçer; cümle sözlükten
+   * etkin dilde gelir. Şema burada gevşek tutulur (`string`), çünkü tanınmayan
+   * kodu reddetmek yerine `sanitizeWarningCodes` sessizce atar — tek bir
+   * uydurma etiket yüzünden okunabilir bir fişin tamamı çöpe gitmemeli.
+   */
   warnings: z.array(z.string()),
 });
 
@@ -66,6 +74,9 @@ export const MinorUnitSchema = z
   .number()
   .int("Para değeri minor unit cinsinden tam sayı olmalı.")
   .nonnegative("Para değeri negatif olamaz.");
+
+/** Sözlükte karşılığı olan kodlar. Başkası uygulamanın içine giremez. */
+export const ReceiptWarningCodeSchema = z.enum(RECEIPT_WARNING_CODES);
 
 export const ReceiptItemSchema = z.object({
   id: z.string().min(1),
@@ -84,7 +95,8 @@ export const ReceiptSchema = z.object({
   discountMinor: MinorUnitSchema,
   discountTreatment: AdjustmentTreatmentSchema,
   totalMinor: MinorUnitSchema,
-  warnings: z.array(z.string()),
+  /* Uygulamanın içinde artık YALNIZCA geçerli kodlar dolaşır. */
+  warnings: z.array(ReceiptWarningCodeSchema),
 });
 
 export type Receipt = z.infer<typeof ReceiptSchema>;

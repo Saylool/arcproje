@@ -61,7 +61,7 @@ export function AccountDeletionPanel() {
         <form action={endGoogleSession}>
           <button
             type="submit"
-            className="inline-flex min-h-9 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
           >
             {t("auth.signOut")}
           </button>
@@ -121,14 +121,14 @@ export function AccountDeletionPanel() {
             <button
               type="button"
               onClick={() => void remove()}
-              className="inline-flex min-h-9 items-center justify-center rounded-full bg-warn-ink px-3 py-1.5 text-xs font-semibold text-card transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex min-h-11 items-center justify-center rounded-full bg-warn-ink px-3 py-1.5 text-xs font-semibold text-card transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               {t("account.confirmButton")}
             </button>
             <button
               type="button"
               onClick={() => setPhase({ status: "idle" })}
-              className="inline-flex min-h-9 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex min-h-11 items-center justify-center rounded-full border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-soft transition-colors hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               {t("account.cancelButton")}
             </button>
@@ -141,7 +141,7 @@ export function AccountDeletionPanel() {
             disabled={phase.status === "working"}
             aria-disabled={phase.status === "working"}
             onClick={() => setPhase({ status: "confirming" })}
-            className="inline-flex min-h-9 items-center justify-center rounded-full border border-warn-line bg-card px-3 py-1.5 text-xs font-semibold text-warn-ink transition-colors hover:bg-warn-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
+            className="inline-flex min-h-11 items-center justify-center rounded-full border border-warn-line bg-card px-3 py-1.5 text-xs font-semibold text-warn-ink transition-colors hover:bg-warn-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-wait disabled:opacity-60"
           >
             {phase.status === "working"
               ? t("account.working")

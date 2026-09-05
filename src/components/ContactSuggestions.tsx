@@ -184,7 +184,7 @@ export function ContactSuggestions({
                     })}`
               }
               aria-label={t("contacts.useAddress", { label: contact.label })}
-              className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-line bg-card px-2.5 text-[11px] text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="inline-flex min-h-11 items-center gap-1.5 rounded-full border border-line bg-card px-2.5 text-[11px] text-ink-soft transition-colors hover:border-brand-line hover:text-brand-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             >
               <span className="font-medium">{contact.label}</span>
               <span className="font-mono text-ink-faint">
@@ -213,7 +213,7 @@ export function ContactSuggestions({
               <button
                 type="button"
                 onClick={() => onSave(contact)}
-                className="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                className="ml-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-brand-ink transition-colors hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11 inline-flex items-center"
               >
                 {t("contacts.save")}
               </button>

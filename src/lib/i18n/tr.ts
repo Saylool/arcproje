@@ -288,6 +288,27 @@ export const tr = {
     unknownMerchant: "Satıcı adı okunamadı",
     currencyLine: "Para birimi: {currency} · Analiz sonucunu kontrol edip düzeltebilirsin.",
     unknownCurrency: "belirlenemedi",
+    /* Model KOD döndürür; cümle burada seçilir. Fişin kendi içeriği çevrilmez. */
+    analysisWarnings: {
+      TOTAL_UNREADABLE:
+        "Fişteki genel toplam okunamadı; lütfen kontrol edip düzelt.",
+      TOTALS_DO_NOT_MATCH:
+        "Ürünlerin toplamı fişteki genel toplamı tutmuyor; tutarları gözden geçir.",
+      TAX_TREATMENT_UNCLEAR:
+        "Verginin fiyatlara dahil mi yoksa ayrı mı olduğu anlaşılamadı; seçimi kontrol et.",
+      SERVICE_TREATMENT_UNCLEAR:
+        "Servis bedelinin fiyatlara dahil mi yoksa ayrı mı olduğu anlaşılamadı; seçimi kontrol et.",
+      DISCOUNT_TREATMENT_UNCLEAR:
+        "İndirimin fiyatlara dahil mi yoksa ayrı mı olduğu anlaşılamadı; seçimi kontrol et.",
+      ITEM_PRICE_UNCLEAR:
+        "En az bir ürünün fiyatı net okunamadı; fiyatları karşılaştır.",
+      ITEM_NAME_UNCLEAR:
+        "En az bir ürünün adı net okunamadı; adları düzeltebilirsin.",
+      PARTIALLY_UNREADABLE:
+        "Fişin bir kısmı okunamadı; eksik satır olabilir.",
+      CURRENCY_UNCLEAR:
+        "Para birimi fişten anlaşılamadı; doğru olduğundan emin ol.",
+    },
     analysisNotes: "Analiz notları",
     items: "Ürünler",
     emptyItems: "Ürün listesi boş. Aşağıdan ürün ekleyebilirsin.",

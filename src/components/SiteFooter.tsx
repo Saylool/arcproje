@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useTranslator } from "@/lib/i18n/context";
 
 const LINK_CLASS =
-  "rounded-full px-2 py-1 text-xs text-ink-faint underline underline-offset-4 hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "inline-flex min-h-11 items-center rounded-full px-2 py-1 text-xs text-ink-faint underline underline-offset-4 hover:text-ink-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 /**
  * Altbilgi.
