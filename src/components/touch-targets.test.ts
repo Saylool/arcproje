@@ -16,7 +16,29 @@ import { describe, expect, it } from "vitest";
  * Bu test KAYNAK düzeyinde çalışır, çünkü depoda bileşen testi altyapısı
  * yok. Gerçek yükseklikler tarayıcıda ayrıca ölçüldü; buradaki amaç yeni bir
  * kontrolün ölçüsüz eklenmesini engellemek.
+ *
+ * İLK YAZIMDA BÜYÜK BİR KÖR NOKTA VARDI: tarama yalnızca `button`, `a` ve
+ * `Link` etiketlerine bakıyordu. Oysa ödeyen seçimi, ürüne kişi atama, cüzdan
+ * seçimi ve onay kutuları `<label>` içine sarılmış radio/checkbox
+ * kontrolleridir — hiçbiri taranmıyordu. Tarayıcıda ölçüldüklerinde 16 ile
+ * 36 piksel arasında çıktılar; yani test "hepsi geçti" derken sayfadaki EN
+ * KÜÇÜK hedefler denetimin tamamen dışındaydı.
+ *
+ * Bu yüzden aşağıda iki koruma var: etiketler de taranır VE her
+ * radio/checkbox girdisinin bir hedef etiketin içinde olduğu SAYILARAK
+ * kanıtlanır. İkincisi olmadan tarama yine sessizce daralabilirdi.
  */
+
+/**
+ * Dosyanın YORUMSUZ kaynağı.
+ *
+ * Yorumlar atılır: `LanguageSelect` içindeki bir JSDoc satırı `<label>`
+ * yazısını içeriyor ve tarama onu gerçek bir etiket sanıyordu. Sahte eşleşme
+ * sayımları bozar, sayımlar da buradaki asıl korumadır.
+ */
+function sourceOf(file: string): string {
+  return readFileSync(file, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+}
 
 /** `globSync` bu @types/node sürümünde tipli değil; dizin okuması taşınabilir. */
 function tsxFilesUnder(root: string): string[] {
@@ -100,18 +122,24 @@ function classNameOf(
 
 type Control = { file: string; tag: string; className: string };
 
+/** Dosyadaki `const SABIT = "..."` tanimlari; `className={SABIT}` bunlardan cozulur. */
+function classConstants(source: string): Map<string, string> {
+  const constants = new Map<string, string>();
+  for (const match of source.matchAll(
+    /const\s+([A-Z_][A-Z0-9_]*)\s*=\s*\n?\s*"([^"]*)"/g,
+  )) {
+    constants.set(match[1], match[2]);
+  }
+  return constants;
+}
+
 function interactiveControls(): { controls: Control[]; tags: number } {
   const controls: Control[] = [];
   let tags = 0;
   for (const file of FILES) {
     if (file.endsWith(".test.tsx")) continue;
-    const source = readFileSync(file, "utf8");
-    const constants = new Map<string, string>();
-    for (const m of source.matchAll(
-      /const\s+([A-Z_][A-Z0-9_]*)\s*=\s*\n?\s*"([^"]*)"/g,
-    )) {
-      constants.set(m[1], m[2]);
-    }
+    const source = sourceOf(file);
+    const constants = classConstants(source);
     for (const m of source.matchAll(/<(button|a|Link)\b/g)) {
       tags += 1;
       const attrs = source.slice(m.index, tagEnd(source, m.index));
@@ -124,12 +152,185 @@ function interactiveControls(): { controls: Control[]; tags: number } {
   return { controls, tags };
 }
 
+/**
+ * ETİKETE SARILMIŞ KONTROLLER.
+ *
+ * `<label>` içine konmuş bir radio ya da checkbox'ta dokunma hedefi görünen
+ * hap DEĞİL, ETİKETİN KENDİSİDİR: etiketin her yeri girdiyi tetikler. Bu
+ * yüzden yükseklik etikette aranır. Ölçü hapın kendisinde aransaydı, hedefi
+ * hapın dışına taşıyarak büyütmek "küçük" görünürdü.
+ */
+type LabelKind = "screenReader" | "toggle" | "linked" | "field";
+
+/**
+ * `<label ...>` açılışından `</label>`a kadar olan kaynak. Etiketler iç içe
+ * geçemez, bu yüzden BİR SONRAKİ kapanış doğru sınırdır.
+ *
+ * Kapanış yoksa `null` döner — dosyanın sonuna kadar okumak yerine. Sessizce
+ * sona kadar okusaydı, ilerideki herhangi bir radio/checkbox bu etikete ait
+ * sanılır ve sınıflandırma yanlış olurdu. `null` sayılır ve iddia edilir.
+ */
+function labelBody(source: string, from: number): string | null {
+  const end = source.indexOf("</label>", from);
+  return end === -1 ? null : source.slice(from, end);
+}
+
+const TOGGLE_INPUT = /type="(radio|checkbox)"/;
+
+function classifyLabel(
+  attrs: string,
+  body: string | null,
+  className: string | null,
+): LabelKind {
+  /* Ekran okuyucu etiketi GÖRÜNMEZ; ona 44 piksel dayatmak anlamsız olurdu. */
+  if (className !== null && className.includes("sr-only")) return "screenReader";
+  /* Sınırı bilinmeyen etiket TAHMİN EDİLMEZ; hedef sayılıp denetlenir. */
+  if (body === null) return "linked";
+  if (TOGGLE_INPUT.test(body)) return "toggle";
+  /* `htmlFor` etiketi de tıklanabilir bir hedeftir (yükleme alanı böyledir). */
+  if (/htmlFor=/.test(attrs)) return "linked";
+  /*
+   * Geriye metin alanını saran etiketler kalır. Hedef orada ETİKET değil
+   * girdinin kendisidir; metin alanlarının ölçüsü bu testin kapsamı dışında
+   * ve ayrıca ölçüldü.
+   */
+  return "field";
+}
+
+type LabelTarget = Control & { kind: LabelKind };
+
+type LabelScan = {
+  targets: LabelTarget[];
+  open: number;
+  close: number;
+  named: number;
+  toggles: number;
+  toggleInputs: number;
+  /** `</label>` bulunamayan açılış etiketi sayısı. */
+  unterminated: number;
+  /** Gövdesi BAŞKA bir `<label` içeren etiket sayısı; sınır kaymış demektir. */
+  overlapping: number;
+};
+
+function labelControls(): LabelScan {
+  const targets: LabelTarget[] = [];
+  let open = 0;
+  let close = 0;
+  let named = 0;
+  let toggles = 0;
+  let toggleInputs = 0;
+  let unterminated = 0;
+  let overlapping = 0;
+  for (const file of FILES) {
+    if (file.endsWith(".test.tsx")) continue;
+    const source = sourceOf(file);
+    const constants = classConstants(source);
+    open += [...source.matchAll(/<label\b/g)].length;
+    close += [...source.matchAll(/<\/label>/g)].length;
+    /*
+     * BAĞIMSIZ SAYIM. Bu, `TOGGLE_INPUT`u KULLANMAZ ve kullanmamalı: iki
+     * taraf aynı düzenli ifadeye dayansaydı, onu daraltan bir değişiklik iki
+     * sayıyı BİRLİKTE değiştirir ve karşılaştırma totolojiye dönerdi.
+     * Mutasyonla denendi: tam olarak öyle oluyordu.
+     */
+    toggleInputs += [...source.matchAll(/type="(radio|checkbox)"/g)].length;
+    for (const match of source.matchAll(/<label\b/g)) {
+      const attrs = source.slice(match.index, tagEnd(source, match.index));
+      const body = labelBody(source, match.index);
+      if (body === null) unterminated += 1;
+      /*
+       * Etiketler iç içe geçemez. Bir gövde başka bir `<label` içeriyorsa
+       * sınır kaymıştır ve ilerideki kontroller bu etikete ait sanılır.
+       */
+      if (body !== null && /<label\b/.test(body.slice("<label".length))) {
+        overlapping += 1;
+      }
+      const className = classNameOf(attrs, constants);
+      if (className !== null) named += 1;
+      const kind = classifyLabel(attrs, body, className);
+      if (kind === "toggle") toggles += 1;
+      if ((kind === "toggle" || kind === "linked") && className !== null) {
+        targets.push({ file, tag: "label", className, kind });
+      }
+    }
+  }
+  return {
+    targets,
+    open,
+    close,
+    named,
+    toggles,
+    toggleInputs,
+    unterminated,
+    overlapping,
+  };
+}
+
 describe("dokunmatik hedefler", () => {
-  const { controls, tags } = interactiveControls();
+  const { controls: tagControls, tags } = interactiveControls();
+  const labels = labelControls();
+  /* Yükseklik kuralları HER İKİ tarama için de AYNI. */
+  const controls = [...tagControls, ...labels.targets];
 
   it("taranacak kontrol BULUNUR", () => {
     // Tarama bozulursa test sessizce "hepsi geçti" derdi.
-    expect(controls.length).toBeGreaterThan(30);
+    expect(tagControls.length).toBeGreaterThan(30);
+  });
+
+  it("ETIKETE sarilmis kontroller de BULUNUR", () => {
+    /*
+     * İlk yazımda buradaki sayı sıfırdı ve kimse fark etmedi: sayfanın en
+     * küçük hedefleri tam olarak bunlardı.
+     */
+    expect(labels.targets.length).toBeGreaterThan(0);
+    /*
+     * İKİ AYRI hedef biçimi var ve ikisi de denetlenmeli: girdiyi SARAN
+     * etiket (rozetler, onay kutuları) ve `htmlFor` ile girdiye BAĞLANAN
+     * etiket (fiş yükleme alanı). Yalnızca sayıya bakan bir iddia, ikinci
+     * biçim sessizce denetim dışına çıkarılsa bile geçerdi.
+     */
+    expect(new Set(labels.targets.map((target) => target.kind))).toEqual(
+      new Set(["toggle", "linked"]),
+    );
+    /*
+     * Ve gerçekten YÜKSEKLİK DENETİMİNE giriyorlar. Bu iddia olmadan
+     * etiketleri denetlenen kümeden çıkarmak hiçbir testi kırmazdı: yükseklik
+     * iddiaları yalnızca bir ihlal varken konuşur, hepsi düzeltilmişken
+     * sessiz kalırdı. Sessizlik, kapsamın kanıtı değildir.
+     */
+    expect(controls.length).toBe(tagControls.length + labels.targets.length);
+  });
+
+  it("HER radio/checkbox bir HEDEF etiketin ICINDE", () => {
+    /*
+     * ASIL KORUMA BU. İki taraf AYRI hesaplardan gelir: sol taraf etiketleri
+     * gezip sınıflandırır, sağ taraf dosyadaki girdileri kendi düzenli
+     * ifadesiyle sayar. Ortak bir sabite dayansalardı — ilk yazımda öyleydi —
+     * onu daraltan bir değişiklik ikisini birlikte kaydırır ve iddia hiçbir
+     * şey ölçmezdi. Mutasyonla denendi: aynen öyle oluyordu.
+     */
+    expect(labels.toggles).toBe(labels.toggleInputs);
+    expect(labels.toggleInputs).toBeGreaterThan(0);
+  });
+
+  it("etiket ayristirmasi TUTARLI", () => {
+    /* Açılış ve kapanış eşit değilse `labelBody` yanlış aralığı okur. */
+    expect(labels.open).toBe(labels.close);
+    /*
+     * Kapanışı bulunamayan bir etiket, gövdesi dosyanın SONUNA kadar uzamış
+     * demektir; o zaman ilerideki herhangi bir radio/checkbox o etikete ait
+     * sanılır. Bu depoda şu an sonucu değiştirmiyor, ama sessizce yanlış
+     * sınıflandırmanın kapısı budur.
+     */
+    expect(labels.unterminated).toBe(0);
+    /*
+     * Sınır dosyanın sonuna kaydığında `unterminated` YAKALAMAZ — kapanış
+     * yine bulunur, yalnızca yanlış yerde biter. Örtüşme sayısı bunu görür:
+     * aynı dosyadaki ikinci bir etiket birincinin gövdesine düşerdi.
+     */
+    expect(labels.overlapping).toBe(0);
+    // className okunamayan etiket, sınıflandırmadan sessizce düşerdi.
+    expect(labels.named).toBe(labels.open);
   });
 
   it("HICBIR kontrol taramanin disinda kalmaz", () => {
@@ -138,7 +339,7 @@ describe("dokunmatik hedefler", () => {
      * fonksiyonu içeren etiketler sessizce atlanmıştı; test ölçmediği
      * dosyaları "geçti" sayıyordu. Kapsam artık sayılarak kanıtlanır.
      */
-    expect(controls.length).toBe(tags);
+    expect(tagControls.length).toBe(tags);
   });
 
   it("her kontrol yuksekligini BILDIRIR", () => {
