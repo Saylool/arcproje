@@ -362,7 +362,7 @@ export function ParticipantAssignment({
             {state.participants.map((participant) => (
               <label
                 key={participant.id}
-                className="cursor-pointer"
+                className="inline-flex cursor-pointer items-center min-h-11"
                 title={participant.name}
               >
                 <input
@@ -428,7 +428,7 @@ export function ParticipantAssignment({
                       {state.participants.map((participant) => (
                         <label
                           key={participant.id}
-                          className="cursor-pointer"
+                          className="inline-flex cursor-pointer items-center min-h-11"
                           title={participant.name}
                         >
                           <input
