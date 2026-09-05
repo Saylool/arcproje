@@ -125,11 +125,19 @@ export type CountExpiredBillsOutcome =
   | { ok: true; count: number }
   | { ok: false; reason: "unavailable" };
 
-export type ConsumeQuotaOutcome =
-  /** Hak düşüldü. `used`, düşüldükten SONRAKİ değerdir. */
-  | { ok: true; used: number }
-  /** Sınıra ulaşıldı; HİÇBİR sayaç artmadı. */
-  | { ok: false; reason: "exhausted" }
+/**
+ * İKİ sayacın BİRLİKTE ayrılması.
+ *
+ * Başarısız her sonuçta HİÇBİR sayaç artmamıştır. Bu, tipin taşıdığı asıl
+ * sözleşmedir: kısmi tüketim yoktur.
+ */
+export type ReserveQuotaOutcome =
+  /** İkisi de düşüldü. `userUsed`, düşüldükten SONRAKİ kullanıcı değeridir. */
+  | { ok: true; userUsed: number }
+  /** Kullanıcının kendi hakkı dolu; genel tavana DOKUNULMADI. */
+  | { ok: false; reason: "userExhausted" }
+  /** Genel tavan dolu; kullanıcının hakkına DOKUNULMADI. */
+  | { ok: false; reason: "globalExhausted" }
   | { ok: false; reason: "unavailable" };
 
 export type DeleteExpiredBillsOutcome =
@@ -388,11 +396,20 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * `day` çağırandan gelir ve UTC'dir: sınırın hangi anda sıfırlandığı
    * veritabanının saat dilimine bırakılmaz.
    */
-  consumeAnalysisQuota(input: {
-    quotaKey: string;
+  /**
+   * Genel tavanı ve kullanıcının günlük hakkını TEK İŞLEMDE ayırır.
+   *
+   * Ya ikisi birden düşülür ya da hiçbiri. İki ayrı çağrı bu sözleşmeyi
+   * veremez: aradaki bir başarısızlık genel sayacı artmış bırakırdı ve hakkı
+   * dolmuş bir kullanıcı, reddedilen isteklerle herkesin hakkını tüketirdi.
+   */
+  reserveAnalysisQuota(input: {
+    globalKey: string;
+    userKey: string;
     day: string;
-    limit: number;
-  }): Promise<ConsumeQuotaOutcome>;
+    globalLimit: number;
+    userLimit: number;
+  }): Promise<ReserveQuotaOutcome>;
 
   /**
    * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.
