@@ -14,6 +14,11 @@ import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
 import { GoogleSignInButton } from "@/components/AuthControl";
 import { readApiErrorCode } from "@/lib/i18n/api-errors";
+import {
+  amountFieldDomId,
+  updateInvalidAmountFields,
+  type AmountFieldId,
+} from "@/lib/receipt/amount-fields";
 import { quotaDisplayAfterFailure } from "@/lib/receipt/quota-feedback";
 import { useTranslator } from "@/lib/i18n/context";
 import type { TranslationKey } from "@/lib/i18n/dictionary";
@@ -32,11 +37,11 @@ import {
   type DebtCalculationSuccess,
 } from "@/lib/split/debts";
 import {
-  checkReceiptReadyForSplit,
+  checkSplitReady,
   createInitialAssignmentState,
   normalizeAssignments,
   type AssignmentState,
-  type ReceiptSplitBlockReason,
+  type SplitBlockReason,
 } from "@/lib/split/participants";
 
 type AnalysisStatus = "idle" | "analyzing" | "error" | "ready";
@@ -60,10 +65,11 @@ const SCREEN_HEADINGS: Record<
 };
 
 /** Fis ekranina gecisi engelleyen neden -> sozluk anahtari. */
-const SPLIT_BLOCK_KEYS: Record<ReceiptSplitBlockReason, TranslationKey> = {
+const SPLIT_BLOCK_KEYS: Record<SplitBlockReason, TranslationKey> = {
   invalidReceipt: "participants.receiptInvalid",
   noItems: "participants.receiptNoItems",
   emptyItemName: "participants.receiptEmptyNames",
+  invalidAmount: "participants.receiptInvalidAmount",
 };
 
 /**
@@ -125,8 +131,15 @@ export function ReceiptFlow({
   const [assignment, setAssignment] = useState<AssignmentState>(() =>
     createInitialAssignmentState(t("participants.defaultName")),
   );
-  const [splitError, setSplitError] =
-    useState<ReceiptSplitBlockReason | null>(null);
+  const [splitError, setSplitError] = useState<SplitBlockReason | null>(null);
+  /*
+   * OKUNAMAYAN tutar alanlari. Kimlikler burada tutulur, `ReceiptEditor`de
+   * degil: karari veren yer burasi ve alanin silinmesi durumu kendiliginden
+   * cozer — `blockingAmountFields` her okumada YASAYAN alanlarla kesisir.
+   */
+  const [invalidAmountFields, setInvalidAmountFields] = useState<
+    ReadonlySet<AmountFieldId>
+  >(() => new Set());
   const [debtResult, setDebtResult] = useState<DebtCalculationSuccess | null>(
     null,
   );
@@ -329,6 +342,9 @@ export function ReceiptFlow({
 
       setReceipt(parsed.data);
       setAnalysisKey((key) => key + 1);
+      /* Yeni fisin alanlari bastan gecerli; eski kimlikler tasinmaz. */
+      setInvalidAmountFields(new Set<AmountFieldId>());
+      setSplitError(null);
       setStatus("ready");
       // Yeni fiş, yeni atama.
       setScreen("receipt");
@@ -348,13 +364,30 @@ export function ReceiptFlow({
     }
   };
 
+  const handleAmountValidity = useCallback(
+    (fieldId: AmountFieldId, valid: boolean) => {
+      setInvalidAmountFields((current) =>
+        updateInvalidAmountFields(current, fieldId, valid),
+      );
+    },
+    [],
+  );
+
   const goToParticipants = () => {
     if (receipt === null) {
       return;
     }
-    const readiness = checkReceiptReadyForSplit(receipt);
-    if (!readiness.ok) {
-      setSplitError(readiness.reason);
+    const gate = checkSplitReady(receipt, invalidAmountFields);
+    if (!gate.ok) {
+      setSplitError(gate.reason);
+      /*
+       * Uzun bir fiste bozuk alan ekranin disinda kalabilir; "bir yerde hata
+       * var" deyip kullaniciyi aramaya birakmak engellemenin faydasini
+       * goturur. Odak ilk bozuk alana tasinir, tarayici da oraya kaydirir.
+       */
+      if (gate.focusField !== null) {
+        document.getElementById(amountFieldDomId(gate.focusField))?.focus();
+      }
       return;
     }
     setSplitError(null);
@@ -473,6 +506,7 @@ export function ReceiptFlow({
                 key={analysisKey}
                 receipt={receipt}
                 onChange={handleReceiptChange}
+                onAmountValidityChange={handleAmountValidity}
               />
 
               <div className="flex flex-col gap-2 rounded-3xl border border-line bg-card p-4 shadow-card">

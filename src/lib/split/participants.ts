@@ -1,3 +1,7 @@
+import {
+  checkAmountsReadable,
+  type AmountFieldId,
+} from "../receipt/amount-fields";
 import { ReceiptSchema, type Receipt } from "../receipt/schema";
 import { translate } from "../i18n/dictionary";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
@@ -441,6 +445,57 @@ export function checkAssignmentsComplete(
         unassignedItemIds.length,
       ),
     };
+  }
+
+  return { ok: true };
+}
+
+/**
+ * Kişi adımına geçişi engelleyen NEDENLERİN TAMAMI.
+ *
+ * `invalidAmount` ötekilerden ayrı bir kaynaktan gelir: `Receipt`e bakarak
+ * anlaşılamaz. Okunamayan metin fişe hiç işlenmez, fiş son geçerli sayıda
+ * kalır ve tam da bu yüzden kusursuz görünür.
+ */
+export type SplitBlockReason = ReceiptSplitBlockReason | "invalidAmount";
+
+export type SplitGate =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: SplitBlockReason;
+      /** Yalnızca okunamayan tutarda doludur; odak oraya taşınır. */
+      focusField: AmountFieldId | null;
+    };
+
+/**
+ * Kişi adımına geçilebilir mi? TEK karar noktası.
+ *
+ * İki kontrolün ayrı ayrı çağrılması, birinin çağrılmayı unutulmasına açıktı
+ * — ve unutulan tam olarak tutar kontrolüydü. Burada tek fonksiyon var:
+ * sırayı ve kapsamı test sabitler, bileşene karar bırakılmaz.
+ *
+ * TUTAR ÖNCE bakılır. Okunamayan bir tutar varken başka bir engeli
+ * göstermek, kullanıcıyı asıl sorunun uzağına yollar: öteki engeller
+ * görünür verinin sorunudur, bu ise görünen ile hesaplanan arasındaki
+ * SESSİZ ayrışmadır.
+ */
+export function checkSplitReady(
+  receipt: Receipt,
+  invalidAmountFields: Iterable<AmountFieldId>,
+): SplitGate {
+  const readable = checkAmountsReadable(invalidAmountFields, receipt);
+  if (!readable.ok) {
+    return {
+      ok: false,
+      reason: "invalidAmount",
+      focusField: readable.focusField,
+    };
+  }
+
+  const readiness = checkReceiptReadyForSplit(receipt);
+  if (!readiness.ok) {
+    return { ok: false, reason: readiness.reason, focusField: null };
   }
 
   return { ok: true };
