@@ -371,6 +371,8 @@ export const tr = {
     receiptInvalid: "Fiş verisi geçerli değil. Tutarları kontrol edip tekrar dene.",
     receiptNoItems: "Fişte hiç ürün yok. Kişilere dağıtmadan önce en az bir ürün ekle.",
     receiptEmptyNames: "Bazı ürünlerin adı boş. Devam etmeden önce her ürüne bir ad ver.",
+    receiptInvalidAmount:
+      "Bir tutar okunamıyor. Kırmızı alanı düzeltmeden devam edersen borçlar ekranda gördüğünden başka bir tutardan hesaplanır.",
     namesInvalid: "Kişi isimleri boş olamaz ve birbirinin aynısı olamaz.",
   },
 

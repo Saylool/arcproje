@@ -7,6 +7,7 @@ import {
   addParticipant,
   checkAssignmentsComplete,
   checkReceiptReadyForSplit,
+  checkSplitReady,
   createInitialAssignmentState,
   findParticipantNameIssues,
   getAssignedParticipantIds,
@@ -20,6 +21,11 @@ import {
   validateParticipantName,
   type AssignmentState,
 } from "./participants";
+
+import {
+  TOTAL_AMOUNT_FIELD,
+  itemAmountField,
+} from "../receipt/amount-fields";
 
 const ITEMS = [{ id: "i1" }, { id: "i2" }, { id: "i3" }];
 
@@ -468,5 +474,72 @@ describe("checkAssignmentsComplete", () => {
       expect(result.reason).toBe("unassignedItems");
       expect(result.message).toContain("2");
     }
+  });
+});
+
+describe("checkSplitReady", () => {
+  /*
+   * TEK KARAR NOKTASI.
+   *
+   * Kusur, tutar kontrolünün hiç yapılmamasıydı: `999,999` yazan biri
+   * kırmızı bir alan görüyor, "devam"a basıyor ve borçlar EKRANDA
+   * GÖRDÜĞÜNDEN başka bir tutardan hesaplanıyordu. Fiş doğrulaması bunu
+   * göremez — okunamayan metin fişe hiç işlenmediği için fiş kusursuz
+   * görünür.
+   *
+   * İki kontrol ayrı ayrı çağrılabilir olsaydı, biri yine unutulabilirdi.
+   * Burada tek fonksiyon var ve kapsamı testle sabit.
+   */
+  it("her sey duzgunse GECER", () => {
+    expect(checkSplitReady(buildReceipt(), [])).toEqual({ ok: true });
+  });
+
+  it("okunamayan tutar ILERLEMEYI DURDURUR", () => {
+    const receipt = buildReceipt();
+    const result = checkSplitReady(receipt, [itemAmountField(receipt.items[0].id)]);
+    expect(result).toEqual({
+      ok: false,
+      reason: "invalidAmount",
+      focusField: itemAmountField(receipt.items[0].id),
+    });
+  });
+
+  it("okunamayan tutar, fis kendi basina GECERLIYKEN de durdurur", () => {
+    /*
+     * Asıl tuzak burada: fiş geçerli, çünkü eski sayı duruyor. Tutar
+     * kontrolü kaldırılırsa bu test — ve yalnızca bu — kırmızıya döner.
+     */
+    const receipt = buildReceipt();
+    expect(checkReceiptReadyForSplit(receipt)).toEqual({ ok: true });
+    expect(checkSplitReady(receipt, [TOTAL_AMOUNT_FIELD]).ok).toBe(false);
+  });
+
+  it("tutar hatasi DIGER engellerden ONCE gosterilir", () => {
+    /*
+     * Öteki engeller görünür verinin sorunudur; bu ise görünen ile
+     * hesaplanan arasındaki SESSİZ ayrışma. Kullanıcı önce onu görmeli.
+     */
+    const broken = buildReceipt({ items: [{ id: "i1", name: "  ", totalMinor: 100 }] });
+    expect(checkReceiptReadyForSplit(broken)).toMatchObject({
+      ok: false,
+      reason: "emptyItemName",
+    });
+    expect(checkSplitReady(broken, [TOTAL_AMOUNT_FIELD])).toMatchObject({
+      reason: "invalidAmount",
+    });
+  });
+
+  it("tutarlar duzgunse DIGER engeller yine calisir", () => {
+    // Tutar kontrolu otekileri golgelememeli.
+    const result = checkSplitReady(buildReceipt({ items: [] }), []);
+    expect(result).toEqual({ ok: false, reason: "noItems", focusField: null });
+  });
+
+  it("SILINEN urunun bozuk tutari akisi KILITLEMEZ", () => {
+    /* Aksi halde kullanicinin duzeltemeyecegi gorunmez bir engel kalirdi. */
+    const receipt = buildReceipt();
+    expect(checkSplitReady(receipt, [itemAmountField("silinmis-urun")])).toEqual({
+      ok: true,
+    });
   });
 });

@@ -11,6 +11,15 @@ import {
   parseMoneyToMinor,
 } from "@/lib/receipt/money";
 import {
+  DISCOUNT_AMOUNT_FIELD,
+  SERVICE_AMOUNT_FIELD,
+  TAX_AMOUNT_FIELD,
+  TOTAL_AMOUNT_FIELD,
+  amountFieldDomId,
+  itemAmountField,
+  type AmountFieldId,
+} from "@/lib/receipt/amount-fields";
+import {
   ADJUSTMENT_TREATMENTS,
   UNKNOWN_CURRENCY,
   createItemId,
@@ -36,12 +45,20 @@ const ADJUSTMENT_KEYS: Record<AdjustmentKind, "editor.adjustmentTax" | "editor.a
 type ReceiptEditorProps = {
   receipt: Receipt;
   onChange: (receipt: Receipt) => void;
+  /**
+   * Bir tutar alanı okunabilir olmaktan çıktığında ya da düzeldiğinde haber
+   * verir. Akış bunu ilerlemeyi engellemek için kullanır: geçersiz metin
+   * `receipt`e YAZILAMAZ, dolayısıyla fişe bakarak anlaşılamaz.
+   */
+  onAmountValidityChange: (fieldId: AmountFieldId, valid: boolean) => void;
 };
 
 type MoneyInputProps = {
   minor: number;
   ariaLabel: string;
+  fieldId: AmountFieldId;
   onValidChange: (minor: number) => void;
+  onValidityChange: (fieldId: AmountFieldId, valid: boolean) => void;
   className?: string;
 };
 
@@ -53,7 +70,9 @@ type MoneyInputProps = {
 function MoneyInput({
   minor,
   ariaLabel,
+  fieldId,
   onValidChange,
+  onValidityChange,
   className,
 }: MoneyInputProps) {
   const { locale } = useTranslator();
@@ -93,15 +112,24 @@ function MoneyInput({
     const result = parseMoneyToMinor(value);
     if (result.ok) {
       setError(null);
+      onValidityChange(fieldId, true);
       onValidChange(result.minor);
       return;
     }
+    /*
+     * Hata YALNIZCA burada görünürdü. `onValidChange` çağrılmadığı için fiş
+     * son geçerli sayıda kalır — bu doğru, ama sessiz kalırsa kullanıcı
+     * düzeltmediği tutarla ilerleyebilir. Geçersizlik bu yüzden yukarı da
+     * bildirilir.
+     */
     setError(describeMoneyParseFailure(result.reason, locale));
+    onValidityChange(fieldId, false);
   };
 
   return (
     <div className={className}>
       <input
+        id={amountFieldDomId(fieldId)}
         type="text"
         inputMode="decimal"
         value={text}
@@ -124,7 +152,11 @@ function MoneyInput({
   );
 }
 
-export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
+export function ReceiptEditor({
+  receipt,
+  onChange,
+  onAmountValidityChange,
+}: ReceiptEditorProps) {
   const { t, locale } = useTranslator();
   const totals = checkTotals(receipt);
   /** Para birimi KODU veridir; yalnizca "bilinmiyor" durumu cevrilir. */
@@ -227,9 +259,11 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
                   <MoneyInput
                     minor={item.totalMinor}
                     ariaLabel={t("editor.itemAmountLabel", { index: index + 1 })}
+                    fieldId={itemAmountField(item.id)}
                     onValidChange={(minor) =>
                       updateItem(item.id, { totalMinor: minor })
                     }
+                    onValidityChange={onAmountValidityChange}
                     className="w-32 shrink-0"
                   />
                   <button
@@ -271,7 +305,9 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           onTreatmentChange={(taxTreatment) =>
             onChange({ ...receipt, taxTreatment })
           }
+          fieldId={TAX_AMOUNT_FIELD}
           onValidChange={(taxMinor) => onChange({ ...receipt, taxMinor })}
+          onValidityChange={onAmountValidityChange}
         />
         <SummaryRow
           label={t("editor.serviceCharge")}
@@ -281,9 +317,11 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           onTreatmentChange={(serviceChargeTreatment) =>
             onChange({ ...receipt, serviceChargeTreatment })
           }
+          fieldId={SERVICE_AMOUNT_FIELD}
           onValidChange={(serviceChargeMinor) =>
             onChange({ ...receipt, serviceChargeMinor })
           }
+          onValidityChange={onAmountValidityChange}
         />
         <SummaryRow
           label={t("editor.discount")}
@@ -293,15 +331,19 @@ export function ReceiptEditor({ receipt, onChange }: ReceiptEditorProps) {
           onTreatmentChange={(discountTreatment) =>
             onChange({ ...receipt, discountTreatment })
           }
+          fieldId={DISCOUNT_AMOUNT_FIELD}
           onValidChange={(discountMinor) =>
             onChange({ ...receipt, discountMinor })
           }
+          onValidityChange={onAmountValidityChange}
         />
         <SummaryRow
           label={t("editor.total")}
           minor={receipt.totalMinor}
           emphasized
+          fieldId={TOTAL_AMOUNT_FIELD}
           onValidChange={(totalMinor) => onChange({ ...receipt, totalMinor })}
+          onValidityChange={onAmountValidityChange}
         />
       </div>
 
@@ -348,7 +390,9 @@ type SummaryRowProps = {
   treatment?: AdjustmentTreatment;
   treatmentHint?: string;
   onTreatmentChange?: (treatment: AdjustmentTreatment) => void;
+  fieldId: AmountFieldId;
   onValidChange: (minor: number) => void;
+  onValidityChange: (fieldId: AmountFieldId, valid: boolean) => void;
 };
 
 function SummaryRow({
@@ -358,7 +402,9 @@ function SummaryRow({
   treatment,
   treatmentHint,
   onTreatmentChange,
+  fieldId,
   onValidChange,
+  onValidityChange,
 }: SummaryRowProps) {
   const { t } = useTranslator();
   return (
@@ -398,6 +444,8 @@ function SummaryRow({
 
         <MoneyInput
           minor={minor}
+          fieldId={fieldId}
+          onValidityChange={onValidityChange}
           ariaLabel={label}
           onValidChange={onValidChange}
           className="w-28 shrink-0 sm:w-32"

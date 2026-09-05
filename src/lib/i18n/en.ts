@@ -341,6 +341,8 @@ export const en: Dictionary = {
       "The receipt has no items. Add at least one item before sharing it among participants.",
     receiptEmptyNames:
       "Some items have no name. Give every item a name before continuing.",
+    receiptInvalidAmount:
+      "An amount cannot be read. If you continue without fixing the field marked in red, the debts are calculated from a different amount than the one on screen.",
     namesInvalid: "Participant names cannot be empty and cannot repeat.",
   },
 
