@@ -4,6 +4,7 @@ import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { LOCALE_COOKIE_MAX_AGE_SECONDS, type Locale } from "@/lib/i18n/locale";
 import {
   BILL_RETENTION_AFTER_EXPIRY_MS,
+  QUOTA_RETENTION_DAYS,
   BILL_RETENTION_DAYS,
 } from "@/lib/db/retention";
 import { QUOTE_LIFETIME_MS } from "@/lib/rates/quote";
@@ -53,6 +54,8 @@ export const POLICY_DURATIONS = {
 } as const;
 
 const BILL_DAYS = POLICY_DURATIONS.billDays;
+/** Kota sayaçlarının saklama süresi; tek kaynak . */
+const QUOTA_DAYS = QUOTA_RETENTION_DAYS;
 
 /*
  * Saklama süreleri KODDAN türer, elle yazılmaz. Temizlik görevi bu sayıları
@@ -177,11 +180,17 @@ const tr: PrivacyPolicy = {
               "Meşru menfaat (bütünlük) — KVKK m. 5/2-f, GDPR m. 6/1-f",
               `Teklif ${QUOTE_MINUTES} dakika geçerlidir; süresi dolunca otomatik SİLİNİR`,
             ],
+            [
+              "Günlük analiz sayacı: hesap kimliğin, gün ve o gün yaptığın analiz adedi",
+              "Günlük analiz sınırını uygulamak; bir kişinin diğerlerinin hakkını tüketmesini engellemek",
+              "Meşru menfaat (kötüye kullanımın önlenmesi ve maliyet sınırı) — KVKK m. 5/2-f, GDPR m. 6/1-f",
+              `En fazla ${QUOTA_DAYS} gün; hesabını silersen bu satırlar da SİLİNİR`,
+            ],
           ],
         },
         {
           kind: "warning",
-          text: `Süresi dolan ortak hesap kayıtları otomatik olarak silinir. ${BILL_DAYS} gün sonra hesap artık açılamaz ve ödenemez; kayıt bundan ${BILL_RETENTION_AFTER_EXPIRY_DAYS} gün daha durur, sonra günlük çalışan bir temizlikle borç satırlarıyla birlikte veritabanından kaldırılır. Daha erken silinmesini istiyorsan yukarıdaki adrese yazabilirsin.`,
+          text: `Süresi dolan ortak hesap kayıtları otomatik olarak silinir. ${BILL_DAYS} gün sonra hesap artık açılamaz ve ödenemez; kayıt bundan ${BILL_RETENTION_AFTER_EXPIRY_DAYS} gün daha durur, sonra günlük çalışan bir temizlikle borç satırlarıyla birlikte veritabanından kaldırılır. Aynı temizlik ${QUOTA_DAYS} günden eski analiz sayaçlarını da kaldırır. Erişimin sona ermesi ile kaydın silinmesi AYNI ŞEY DEĞİLDİR: kayıt, temizliğin bir sonraki başarılı çalışmasında gider. Daha erken silinmesini istiyorsan yukarıdaki adrese yazabilirsin.`,
         },
       ],
     },
@@ -444,11 +453,17 @@ const en: PrivacyPolicy = {
               "Legitimate interest (integrity) — KVKK art. 5/2-f, GDPR art. 6(1)(f)",
               `A quote is valid for ${QUOTE_MINUTES} minutes; DELETED automatically once expired`,
             ],
+            [
+              "Daily analysis counter: your account id, the day, and how many analyses you ran that day",
+              "Enforcing the daily analysis limit, so one person cannot use up everyone else's allowance",
+              "Legitimate interest (abuse prevention and cost control) — KVKK art. 5/2-f, GDPR art. 6(1)(f)",
+              `At most ${QUOTA_DAYS} days; these rows are DELETED when you delete your account`,
+            ],
           ],
         },
         {
           kind: "warning",
-          text: `Expired shared bills are deleted automatically. After ${BILL_DAYS} days the bill can no longer be opened or paid; the record is kept for a further ${BILL_RETENTION_AFTER_EXPIRY_DAYS} days and is then removed from the database, together with its debt rows, by a daily cleanup. If you want it gone sooner, you can write to the address above.`,
+          text: `Expired shared bills are deleted automatically. After ${BILL_DAYS} days the bill can no longer be opened or paid; the record is kept for a further ${BILL_RETENTION_AFTER_EXPIRY_DAYS} days and is then removed from the database, together with its debt rows, by a daily cleanup. The same cleanup removes analysis counters older than ${QUOTA_DAYS} days. Access expiring and a record being deleted are NOT the same thing: the record goes on the cleanup's next successful run. If you want it gone sooner, you can write to the address above.`,
         },
       ],
     },

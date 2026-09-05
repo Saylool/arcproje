@@ -50,8 +50,21 @@ const request = (authorization?: string) =>
 
 function repositoryOf(
   count: number,
-  options: { deleted?: number; total?: number } = {},
+  options: {
+    deleted?: number;
+    total?: number;
+    quotaDeleted?: number;
+    quotaFails?: boolean;
+  } = {},
 ) {
+  const deleteQuotaRowsPastRetention = vi.fn(
+    async (input: { cutoffDay: string; limit: number }) => {
+      void input;
+      return options.quotaFails === true
+        ? { ok: false as const, reason: "unavailable" as const }
+        : { ok: true as const, deleted: options.quotaDeleted ?? 0 };
+    },
+  );
   const deleteBillsPastRetention = vi.fn(
     async (input: { cutoffMs: number; limit: number }) => {
       void input;
@@ -70,9 +83,13 @@ function repositoryOf(
           count: options.total ?? count,
         })),
         deleteBillsPastRetention,
+        deleteQuotaRowsPastRetention,
       }) as unknown as SharedBillRepository,
   );
-  return Object.assign(factory, { deleteBillsPastRetention });
+  return Object.assign(factory, {
+    deleteBillsPastRetention,
+    deleteQuotaRowsPastRetention,
+  });
 }
 
 /**
@@ -329,6 +346,10 @@ describe("once sayar, sonra siler", () => {
               reason: "unavailable" as const,
             })),
             deleteBillsPastRetention: vi.fn(),
+            deleteQuotaRowsPastRetention: vi.fn(async () => ({
+              ok: true as const,
+              deleted: 0,
+            })),
           }) as unknown as SharedBillRepository,
       ),
       readSecret: () => SECRET,

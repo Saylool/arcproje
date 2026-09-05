@@ -8,6 +8,7 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  DeleteQuotaRowsOutcome,
   ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
@@ -497,6 +498,41 @@ SELECT 1 AS present
 FROM app_users
 WHERE user_id = $1
 LIMIT 1
+`;
+
+/**
+ * Hesap silinirken o kullanıcının kota satırları da gider.
+ *
+ * Kota tablosunun yabancı anahtarı YOKTUR (genel satır yüzünden), yani
+ * cascade bunu kendiliğinden yapmaz. Silinmezse "hesabını silersen sana ait
+ * veriler silinir" sözü, kimliğine bağlı bir sayaç geride kaldığı için tam
+ * doğru olmazdı.
+ *
+ * GENEL SATIRA DOKUNULMAZ: `@global` kimseye ait değildir ve silinmesi
+ * herkesin günlük tavanını sıfırlardı.
+ */
+/**
+ * Saklama süresi dolmuş kota satırları.
+ *
+ * `day < $1` KATI küçüktür: sınır günün satırı hâlâ pencerenin içindedir ve
+ * bugünün satırına asla dokunulmaz. Sıra belirlenimcidir; sınırlı bir
+ * çalışma her seferinde aynı kümeyi seçer, en eskiden başlayarak.
+ */
+const DELETE_EXPIRED_QUOTA_ROWS = `
+DELETE FROM receipt_analysis_quota
+WHERE (quota_key, day) IN (
+  SELECT quota_key, day
+  FROM receipt_analysis_quota
+  WHERE day < $1::date
+  ORDER BY day ASC, quota_key ASC
+  LIMIT $2
+)
+RETURNING quota_key
+`;
+
+const DELETE_USER_QUOTA_ROWS = `
+DELETE FROM receipt_analysis_quota
+WHERE quota_key = $1
 `;
 
 const DELETE_APP_USER = `
@@ -1312,6 +1348,21 @@ export async function createNeonSharedBillRepository(
       }
     },
 
+    async deleteQuotaRowsPastRetention(input: {
+      cutoffDay: string;
+      limit: number;
+    }): Promise<DeleteQuotaRowsOutcome> {
+      try {
+        const rows = await sql.query(DELETE_EXPIRED_QUOTA_ROWS, [
+          input.cutoffDay,
+          input.limit,
+        ]);
+        return { ok: true, deleted: Array.isArray(rows) ? rows.length : 0 };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
     async reserveAnalysisQuota(input: {
       globalKey: string;
       userKey: string;
@@ -1445,8 +1496,20 @@ export async function createNeonSharedBillRepository(
       userId: string;
     }): Promise<DeleteAppUserOutcome> {
       try {
-        const result = await sql.query(DELETE_APP_USER, [input.userId]);
-        return { ok: true, deleted: Array.isArray(result) && result.length > 0 };
+        /*
+         * TEK İŞLEM. Kota satırları silinip hesap silme düşerse, kimliği hâlâ
+         * duran bir kullanıcının sayacı sıfırlanmış olurdu; tersi olursa
+         * silinmiş bir hesabın sayacı geride kalırdı. İkisi de yarım sonuç.
+         */
+        const results = await sql.transaction((txn) => [
+          txn.query(DELETE_USER_QUOTA_ROWS, [input.userId]),
+          txn.query(DELETE_APP_USER, [input.userId]),
+        ]);
+        const removed = results[results.length - 1];
+        return {
+          ok: true,
+          deleted: Array.isArray(removed) && removed.length > 0,
+        };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

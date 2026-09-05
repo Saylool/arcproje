@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-repository";
 import {
   BILL_RETENTION_DAYS,
+  QUOTA_RETENTION_DAYS,
   RETENTION_BATCH_LIMIT,
+  quotaCutoffDay,
   retentionCutoffMs,
 } from "@/lib/db/retention";
 
@@ -134,11 +136,25 @@ async function retentionGet(
   }
 
   /*
+   * KOTA SAYAÇLARI ayrı temizlenir ve hesap temizliğini ENGELLEMEZ.
+   *
+   * İkisinin sınırı farklıdır (biri gün, biri an) ve biri düşerse diğerinin
+   * de durması için bir sebep yok. Kota temizliği başarısız olursa sayı
+   * `null` raporlanır; sessizce sıfır demek, hiç satır olmadığıyla
+   * karıştırılırdı.
+   */
+  const cutoffDay = quotaCutoffDay(dependencies.now());
+  const quota = await repository.deleteQuotaRowsPastRetention({
+    cutoffDay,
+    limit: RETENTION_BATCH_LIMIT,
+  });
+
+  /*
    * Günlüğe yazılır: sayıları görmek için kimsenin sırrı elle taşıması
    * gerekmesin. Kayıt kimliği, adres ya da etiket YAZILMAZ — yalnızca sayı.
    */
   console.log(
-    `[retention] uygun ${counted.count}, silinen ${deleted}, tablodaki toplam ${total.ok ? total.count : "okunamadi"} (sınır ${new Date(cutoffMs).toISOString()}, saklama ${BILL_RETENTION_DAYS} gün)`,
+    `[retention] uygun ${counted.count}, silinen ${deleted}, tablodaki toplam ${total.ok ? total.count : "okunamadi"} (sınır ${new Date(cutoffMs).toISOString()}, saklama ${BILL_RETENTION_DAYS} gün) | kota silinen ${quota.ok ? quota.deleted : "basarisiz"} (sınır ${cutoffDay}, saklama ${QUOTA_RETENTION_DAYS} gün)`,
   );
 
   return NextResponse.json(
@@ -148,6 +164,9 @@ async function retentionGet(
       total: total.ok ? total.count : null,
       cutoff: new Date(cutoffMs).toISOString(),
       retentionDays: BILL_RETENTION_DAYS,
+      quotaRowsDeleted: quota.ok ? quota.deleted : null,
+      quotaCutoffDay: cutoffDay,
+      quotaRetentionDays: QUOTA_RETENTION_DAYS,
       batchLimit: RETENTION_BATCH_LIMIT,
     },
     { status: 200, headers: NO_STORE_HEADERS },

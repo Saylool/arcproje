@@ -140,6 +140,11 @@ export type ReserveQuotaOutcome =
   | { ok: false; reason: "globalExhausted" }
   | { ok: false; reason: "unavailable" };
 
+/** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */
+export type DeleteQuotaRowsOutcome =
+  | { ok: true; deleted: number }
+  | { ok: false; reason: "unavailable" };
+
 export type DeleteExpiredBillsOutcome =
   | { ok: true; deleted: number }
   | { ok: false; reason: "unavailable" };
@@ -403,6 +408,21 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * veremez: aradaki bir başarısızlık genel sayacı artmış bırakırdı ve hakkı
    * dolmuş bir kullanıcı, reddedilen isteklerle herkesin hakkını tüketirdi.
    */
+  /**
+   * Saklama süresi dolmuş kota satırlarını siler.
+   *
+   * Sınır GÜNDÜR (`YYYY-MM-DD`, UTC) çünkü sayacın kendisi güne bağlıdır.
+   * `limit` her çalışmada dokunulacak satır sayısını sınırlar; seçim
+   * belirlenimcidir, yoksa deyimler farklı kümelere dokunabilirdi.
+   *
+   * BUGÜNÜN satırına asla dokunulmaz: sınır katı küçüktür (`day < cutoff`),
+   * yoksa çalışan bir temizlik yürürlükteki sınırı sıfırlardı.
+   */
+  deleteQuotaRowsPastRetention(input: {
+    cutoffDay: string;
+    limit: number;
+  }): Promise<DeleteQuotaRowsOutcome>;
+
   reserveAnalysisQuota(input: {
     globalKey: string;
     userKey: string;
