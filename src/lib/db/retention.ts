@@ -58,3 +58,40 @@ export function isPastRetention(
  * edilecek bir şey yok.
  */
 export const RETENTION_BATCH_LIMIT = 500;
+
+/**
+ * KOTA SAYAÇLARININ SAKLAMA SÜRESİ.
+ *
+ * Kota satırı `(kullanıcı kimliği ya da @global, gün, adet)` tutar. Sınırı
+ * uygulamak için YALNIZCA bugünün satırı gerekir; dünkü satır artık hiçbir
+ * kararı etkilemez.
+ *
+ * Yedi gün, "dün neden analiz yapamadım" sorusunu araştırmaya yetecek kadar
+ * uzun, anlamlı bir davranış geçmişi oluşturmayacak kadar kısa. Asgari pay
+ * iki gündür (saat dilimi kayması); yedi, o payın üstüne bir haftalık
+ * işletme rahatlığı ekler.
+ *
+ * Genel satır (`@global`) da aynı kurala tabidir: o da güne bağlıdır ve
+ * eskisi aynı şekilde işe yaramaz.
+ */
+export const QUOTA_RETENTION_DAYS = 7;
+
+/**
+ * Bu günden ÖNCEKİ kota satırları silinmeye uygundur.
+ *
+ * Gün `YYYY-MM-DD` biçiminde ve UTC'dir — sayaçların kendisi gibi. Sınır tek
+ * yerde hesaplanır; sorgu her zaman bu değeri alır.
+ */
+export function quotaCutoffDay(nowMs: number): string {
+  const cutoff = nowMs - QUOTA_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+  return new Date(cutoff).toISOString().slice(0, 10);
+}
+
+/**
+ * `day` günündeki bir kota satırı, `nowMs` anında silinmeye uygun mu?
+ *
+ * Sınırın KENDİSİ uygun değildir: o günün satırı hâlâ pencerenin içindedir.
+ */
+export function isQuotaRowExpired(day: string, nowMs: number): boolean {
+  return day < quotaCutoffDay(nowMs);
+}

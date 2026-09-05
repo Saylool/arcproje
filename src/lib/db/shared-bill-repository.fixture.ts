@@ -1,6 +1,7 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  DeleteQuotaRowsOutcome,
   ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
@@ -439,6 +440,26 @@ export function createFakeSharedBillRepository(
       return { ok: true, count };
     },
 
+    async deleteQuotaRowsPastRetention(input: {
+      cutoffDay: string;
+      limit: number;
+    }): Promise<DeleteQuotaRowsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /* SQL ile AYNI ölçüt: KATI küçük, en eskiden başlayarak, sınırlı. */
+      const expired = [...analysisQuota.keys()]
+        .map((key) => ({ key, day: key.slice(key.indexOf("|") + 1) }))
+        .filter((row) => row.day < input.cutoffDay)
+        .sort((a, b) => (a.day === b.day ? a.key.localeCompare(b.key) : a.day.localeCompare(b.day)))
+        .slice(0, input.limit);
+      for (const row of expired) {
+        analysisQuota.delete(row.key);
+      }
+      return { ok: true, deleted: expired.length };
+    },
+
     async reserveAnalysisQuota(input: {
       globalKey: string;
       userKey: string;
@@ -546,6 +567,18 @@ export function createFakeSharedBillRepository(
        * Hesap satırlarının KENDİSİ durur.
        */
       savedContacts.delete(input.userId);
+      /*
+       * Kota tablosunun yabancı anahtarı YOK; cascade bunu yapmaz, silme
+       * sorgusu elle yapar. Sahte depo da aynısını yapmazsa gerçek SQL'deki
+       * bir eksiklik burada görünmez olurdu.
+       *
+       * Genel satıra DOKUNULMAZ: `@global` kimseye ait değil.
+       */
+      for (const key of [...analysisQuota.keys()]) {
+        if (key.startsWith(`${input.userId}|`)) {
+          analysisQuota.delete(key);
+        }
+      }
       for (const bill of bills.values()) {
         if (bill.createdByUserId === input.userId) {
           bill.createdByUserId = null;

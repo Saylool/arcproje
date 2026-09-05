@@ -14,6 +14,11 @@ import {
   appUserStillExists,
   consumeAnalysisQuota,
 } from "./analysis-quota-service";
+import {
+  QUOTA_RETENTION_DAYS,
+  isQuotaRowExpired,
+  quotaCutoffDay,
+} from "./retention";
 import { createFakeSharedBillRepository } from "./shared-bill-repository.fixture";
 import type { SharedBillRepository } from "./shared-bill-repository";
 
@@ -706,5 +711,135 @@ describe("BASARISIZ ayirma hicbir sayaci kirletmez", () => {
     expect(outcome.ok).toBe(true);
     expect(repository.analysisQuota.get(`${WHO}|${day}`)).toBe(1);
     expect(repository.analysisQuota.get(`${GLOBAL_QUOTA_KEY}|${day}`)).toBe(1);
+  });
+});
+
+describe("kota satirlarinin OMRU", () => {
+  const NOON = Date.UTC(2026, 8, 5, 12, 0, 0);
+  const WHO = "44444444-4444-4444-8444-444444444444";
+  const OTHER_USER = "55555555-5555-4555-8555-555555555555";
+
+  it("saklama penceresi 7 GUNDUR ve UTC gununu kullanir", () => {
+    expect(QUOTA_RETENTION_DAYS).toBe(7);
+    expect(quotaCutoffDay(NOON)).toBe("2026-08-29");
+  });
+
+  it("SINIR gununun satiri HENUZ silinmez", () => {
+    /* Kati kucuk: sinirin kendisi pencerenin icindedir. */
+    expect(isQuotaRowExpired("2026-08-29", NOON)).toBe(false);
+    expect(isQuotaRowExpired("2026-08-28", NOON)).toBe(true);
+  });
+
+  it("BUGUNUN satirina asla dokunulmaz", () => {
+    /*
+     * Yururlukteki sinir bugunun satirinda tutulur; onu silen bir temizlik
+     * kotayi sifirlar ve gunluk tavan anlamsizlasirdi.
+     */
+    expect(isQuotaRowExpired(quotaDay(NOON), NOON)).toBe(false);
+  });
+
+  it("temizlik SINIRLIDIR ve en ESKIDEN baslar", async () => {
+    const repository = createFakeSharedBillRepository();
+    for (const day of ["2026-08-20", "2026-08-21", "2026-08-22"]) {
+      repository.analysisQuota.set(`${WHO}|${day}`, 3);
+    }
+    repository.analysisQuota.set(`${WHO}|${quotaDay(NOON)}`, 1);
+
+    const first = await repository.deleteQuotaRowsPastRetention({
+      cutoffDay: quotaCutoffDay(NOON),
+      limit: 2,
+    });
+    expect(first.ok && first.deleted).toBe(2);
+    /* En eski ikisi gitmeli, ucuncusu ve BUGUN durmalı. */
+    expect(repository.analysisQuota.has(`${WHO}|2026-08-20`)).toBe(false);
+    expect(repository.analysisQuota.has(`${WHO}|2026-08-21`)).toBe(false);
+    expect(repository.analysisQuota.has(`${WHO}|2026-08-22`)).toBe(true);
+    expect(repository.analysisQuota.has(`${WHO}|${quotaDay(NOON)}`)).toBe(true);
+  });
+
+  it("temizlik TEKRARLANABILIR: ikinci calisma bir sey bozmaz", async () => {
+    const repository = createFakeSharedBillRepository();
+    repository.analysisQuota.set(`${WHO}|2026-08-20`, 3);
+    const run = () =>
+      repository.deleteQuotaRowsPastRetention({
+        cutoffDay: quotaCutoffDay(NOON),
+        limit: 50,
+      });
+    expect((await run()).ok && (await run()).ok).toBe(true);
+    const second = await run();
+    expect(second.ok && second.deleted).toBe(0);
+  });
+
+  it("HESAP silinince o kullanicinin kota satirlari da gider", async () => {
+    const repository = createFakeSharedBillRepository();
+    const day = quotaDay(NOON);
+    repository.analysisQuota.set(`${WHO}|${day}`, 4);
+    repository.analysisQuota.set(`${OTHER_USER}|${day}`, 2);
+    repository.analysisQuota.set(`${GLOBAL_QUOTA_KEY}|${day}`, 6);
+
+    await repository.deleteAppUser({ userId: WHO });
+
+    expect(repository.analysisQuota.has(`${WHO}|${day}`)).toBe(false);
+    /* BASKA kullanicinin sayaci durur. */
+    expect(repository.analysisQuota.get(`${OTHER_USER}|${day}`)).toBe(2);
+    /* GENEL satira dokunulmaz: kimseye ait degil, silinmesi herkesin tavanini sifirlardi. */
+    expect(repository.analysisQuota.get(`${GLOBAL_QUOTA_KEY}|${day}`)).toBe(6);
+  });
+});
+
+describe("temizlik SQL'i sahte depoyla AYNI seyi yapar", () => {
+  const neon = readFileSync(
+    "src/lib/db/neon-shared-bill-repository.ts",
+    "utf8",
+  );
+  const between = (from: string, to: string) =>
+    neon.slice(neon.indexOf(from), neon.indexOf(to, neon.indexOf(from)));
+  const expired = between("const DELETE_EXPIRED_QUOTA_ROWS = `", "`;");
+  const perUser = between("const DELETE_USER_QUOTA_ROWS = `", "`;");
+  const deleteUser = between(
+    "async deleteAppUser(",
+    "async listRecentDebtorsFor(",
+  );
+
+  it("sinir KATI kucuktur: bugunun satiri korunur", () => {
+    /*
+     * `<=` olsaydi sinir gununun satiri de silinirdi. Bugun icin bu, ISLEYEN
+     * kotayi sifirlamak demektir — sahte depo bunu gostermez, cunku o kendi
+     * olcutunu uygular. Sinir burada, SQL metninde sabitlenir.
+     */
+    expect(expired).toContain("WHERE day < $1::date");
+    expect(expired).not.toContain("day <= ");
+  });
+
+  it("her calisma SINIRLIDIR", () => {
+    /* Sinirsiz bir silme, buyuk bir tabloda islemi kilitleyebilirdi. */
+    expect(expired).toContain("LIMIT $2");
+  });
+
+  it("secim BELIRLENIMCIDIR ve en eskiden baslar", () => {
+    /* Sirasiz secim, ardisik calismalarin farkli kumelere dokunmasina yol acardi. */
+    expect(expired).toContain("ORDER BY day ASC, quota_key ASC");
+  });
+
+  it("gun UYGULAMADAN gelir, current_date DEGIL", () => {
+    expect(expired).toContain("$1::date");
+    expect(expired).not.toContain("current_date");
+    expect(expired).not.toContain("now()");
+  });
+
+  it("hesap silme YALNIZCA o kullanicinin satirlarini hedefler", () => {
+    /*
+     * Kosulsuz bir silme ya da genel satiri kapsayan bir olcut, bir kisinin
+     * hesabini silmesiyle HERKESIN gunluk tavanini sifirlardi.
+     */
+    expect(perUser).toContain("WHERE quota_key = $1");
+    expect(perUser).not.toContain("@global");
+  });
+
+  it("hesap silme ve kota silme TEK ISLEMDEDIR", () => {
+    /* Ayri cagrilar yarim sonuc birakabilirdi. */
+    expect(deleteUser).toContain("sql.transaction((txn) => [");
+    expect(deleteUser).toContain("txn.query(DELETE_USER_QUOTA_ROWS");
+    expect(deleteUser).toContain("txn.query(DELETE_APP_USER");
   });
 });
