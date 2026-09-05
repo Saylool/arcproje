@@ -290,15 +290,20 @@ describe("kota SQL'i sahte depoyla AYNI seyi yapar", () => {
     }
   });
 
-  it("uc deyim TEK ISLEMDE calisir", () => {
-    /*
-     * Ayri cagrilar olsaydi kilitler arada birakilir ve atomiklik kaybolurdu.
-     */
-    expect(impl).toContain("sql.transaction((txn) => [");
-    expect(impl).toContain("txn.query(SEED_QUOTA_ROWS, parameters)");
-    expect(impl).toContain("txn.query(LOCK_QUOTA_ROWS, parameters)");
-    expect(impl).toContain("txn.query(RESERVE_ANALYSIS_QUOTA, parameters)");
-  });
+  /*
+   * BURADA BIR TEST VARDI VE HATAYI CIVILIYORDU.
+   *
+   * "Uc deyim tek islemde calisir" demek istiyordu; olctugu sey ise kaynakta
+   * `txn.query(SEED_QUOTA_ROWS, parameters)` metninin gecmesiydi. O metin,
+   * ilk iki deyime BILDIRDIGINDEN FAZLA parametre gonderen hatali cagrinin
+   * ta kendisiydi: PostgreSQL boyle bir istegi reddeder, islem duser ve her
+   * fis analizi 503 doner. Dogru cagriyi yazmak bu testi KIRIYORDU.
+   *
+   * Ayni sey artik `quota-reservation-driver.test.ts` icinde OLCULUYOR:
+   * gercek depo calisir, ag ucunda kac istek gittigi ve her deyimin kac
+   * parametre aldigi sayilir. Kaynak metnine bakan bir iddia burada geri
+   * gelmemeli — ayni tuzagi kurar.
+   */
 
   it("SIFIR SATIR tukenme demektir, erisilememe DEGIL", () => {
     /*
