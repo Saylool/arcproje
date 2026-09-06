@@ -406,14 +406,14 @@ eşzamanlı istekler tek bir yukarı akış çağrısında birleşir; böylece h
 veya her kullanıcı bir kredi harcamaz.
 
 Önbellek **süreç içidir**. Sunucusuz ortamda her soğuk başlangıç ve her
-eşzamanlı örnek kendi önbelleğini tutar; bu yüzden önbellek bir garanti değil,
-bir iyileştirmedir. Paylaşılan/kalıcı önbellek bu sürümün kapsamı dışındadır
-(arka uç veya veritabanı eklenmemiştir).
+eşzamanlı örnek kendi önbelleğini tutar; bu yüzden önbellek tek başına bir
+garanti değil, bir iyileştirmedir.
 
-> **Dağıtım gereksinimi — tamamlanmış bir garanti DEĞİL.** Herkese açık bir
-> Vercel dağıtımında örnekler arası kota koruması bu depoda
-> **karşılanmamıştır**. Paylaşılan bir sayaç/oran sınırlayıcı (Redis/KV) ya da
-> Vercel firewall/rate limiting **dağıtım tarafında ayrıca yapılandırılmalıdır**.
+Üstündeki garantiyi **paylaşılan çağrı bütçesi** verir: yukarı akışa gerçekten
+gidilecekse, önce Postgres'teki `provider_call_budget` sayacından bir kredi
+**atomik olarak** ayrılır. Ayrılamazsa CoinGecko **hiç çağrılmaz**. Böylece
+dakikadaki yukarı akış çağrısı, örnek sayısından bağımsız olarak sınırlıdır.
+Ayrıntı: "Örnekler arası çağrı bütçesi".
 
 ### Sağlayıcı hatalarında soğuma (negatif önbellek)
 
@@ -437,15 +437,13 @@ soğuma** uygulanır:
   soğutulmaz.
 - Bozuk veya bayat veri asla geçerli başarı olarak önbelleklenmez.
 
-> **Bu koruma yalnızca MVP düzeyindedir ve çapraz örnek riski ÇÖZÜLMEMİŞTİR.**
-> Soğuma ve önbellek **süreç içidir**; Vercel sunucusuz örnekleri arasında
-> **paylaşılmaz**. Tek bir örneği korur, toplam yukarı akış hızını **hiç**
-> sınırlamaz: yeterince eşzamanlı örnekle Demo kotası yine tükenebilir.
+> **Soğuma ve önbellek hâlâ SÜREÇ İÇİDİR** ve örnekler arasında paylaşılmaz;
+> tek başlarına toplam yukarı akış hızını sınırlamazlar.
 >
-> Gerçek ölçekte gereken paylaşılan depo/oran sınırlayıcı (ör. Redis/KV
-> tabanlı) ya da Vercel firewall/rate limiting bir **dağıtım gereksinimidir**;
-> bu odaklı düzeltmede böyle bir bağımlılık **eklenmemiştir** ve risk
-> **açık kalmaktadır**.
+> Toplam hızı sınırlayan şey **paylaşılan çağrı bütçesidir**: soğuma
+> penceresini geçen bir istek bile, yukarı akışa gitmeden önce Postgres'teki
+> sayaçtan kredi ayırmak zorundadır. Bu iki katman farklı işler yapar —
+> soğuma **arızalı bir sağlayıcıyı** korur, bütçe **kotayı** korur.
 
 ### Gönderim sonucu belirsizse
 
@@ -580,11 +578,11 @@ aşağıdakiler **hâlâ gereklidir** ve bu depoda yoktur:
   kendisinin dayatması için bir ödeme sözleşmesi veya imzalama ile yayınlamanın
   ayrıldığı bir akış. Şu anki süre kontrolleri istemci ve sunucu tarafındadır;
   imzalanmış bir işlem gecikmeli olarak yayınlanırsa zincir bunu engellemez.
-- **Örnekler arası kota koruması** — CoinGecko sınırları için paylaşılan bir
-  Redis/KV sayacı ya da Vercel firewall/rate limiting. Bu bir **dağıtım
-  gereksinimidir** ve bu depoda **karşılanmamıştır**: süreç içi soğuma yalnızca
-  tek örneği korur, herkese açık bir Vercel dağıtımında risk **açık
-  kalmaktadır**.
+- **Kullanıcı başına oran sınırlama** — çağrı bütçesi CoinGecko kotasını
+  toplamda korur, ama tek bir kullanıcının kur ucunu döverek diğerlerinin
+  penceresini tüketmesini **engellemez**. Kişi bazlı sınırlama (Vercel
+  firewall/rate limiting ya da oturum başına sayaç) hâlâ bir **dağıtım
+  gereksinimidir**.
 - **Aynı tarayıcı dışında tekrar engeli** — Web Locks, `localStorage` ve
   `BroadcastChannel` yalnızca tek tarayıcı içindir. Başka cihaz, başka tarayıcı
   veya gizli sekme hiçbir şey bilmez; yetkili engel için arka uçta ya da zincir
@@ -778,6 +776,7 @@ Tek tek uygulamak istenirse sıra şudur:
 | `0003_shared_bill_owner.sql` | Hesabı oluşturan kullanıcı (sahiplik atfı) | "Hesaplarım" listesi ve sahiplik |
 | `0004_saved_contacts.sql` | Kayıtlı kişiler (kullanıcının adres defteri) | Kişi kaydetme ve öneriler |
 | `0005_receipt_analysis_quota.sql` | Fiş analizi kotası (OpenAI maliyet sınırı) | Kota sayımı — **analiz sınırsız çalışır** |
+| `0006_provider_call_budget.sql` | Örnekler arası CoinGecko çağrı bütçesi | Örnekler arası koruma — **kur servisi tek örneklik korumaya düşer** |
 
 Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/db/migrations.test.ts)):
 `migrations/` altına eklenen ama burada anılmayan bir dosya kapıyı düşürür.
@@ -1092,22 +1091,71 @@ doğrudan depoya yerleştiren ayrı regresyon testleriyle ölçülür.
   **kanıtlamaz**; cüzdan imzası bir kimlik/KYC kanıtı değildir.
 - **Arc Testnet** içindir ve **mainnet'e hazır değildir**; test USDC'sinin
   **gerçek parasal değeri yoktur**.
-- Kur servisinin **örnekler arası** kota koruması yoktur (bkz. yukarıdaki
-  "Demo plan ve önbellek sınırları").
+- Kur servisinin örnekler arası kota koruması **vardır** (paylaşılan çağrı
+  bütçesi); eksik olan **kullanıcı başına** oran sınırlamadır.
 
-### Part 4'e ERTELENENLER
+### Part 4 durumu
 
-- Neon **sağlama (provisioning) yapılmadı**; `migrations/0001_shared_bills.sql`
-  **hiç uygulanmadı**.
-- `DATABASE_URL`, `SHARED_BILL_AUTH_SECRET` ve `APP_ORIGIN` **yerelde
-  tanımlanmadı**; Vercel ortam değişkenleri **değiştirilmedi**.
-- **Dağıtım yapılmadı**, PR açılmadı/birleştirilmedi.
-- **Gerçek cüzdanla canlı bir işlem denenmedi**: tüm doğrulama enjekte edilmiş
-  belirlenimci sahtelerle yapıldı.
-- Oluşturucu akışı hâlâ **`SHARED_BILL_FLOW_ENABLED = false`** ile kapalıdır;
-  çalışan bir ortak bağlantı **paylaşılmadı**.
-- Örnekler arası oran sınırlama (Redis/KV veya Vercel firewall) hâlâ bir
-  **dağıtım gereksinimidir** ve bu depoda karşılanmamıştır.
+Bu bölüm bir zamanlar **Part 4'e ERTELENENLERİ** sayıyordu. O maddelerin hepsi
+kapandı; liste artık yapılmış olanı kaydediyor:
+
+- Neon sağlandı ve geçişlerin **hepsi uygulandı**
+  (`0001_shared_bills.sql` → `0005_receipt_analysis_quota.sql`).
+- `DATABASE_URL` ve `SHARED_BILL_AUTH_SECRET` tanımlandı; dağıtım yapıldı ve
+  uygulama Vercel'de **yayında**.
+- PR'lar açıldı ve birleştirildi.
+- **Gerçek bir cüzdanla Arc Testnet üzerinde canlı transfer tamamlandı.**
+  Doğrulama artık yalnızca enjekte edilmiş belirlenimci sahtelere dayanmıyor.
+- Oluşturucu akışı **açıktır**: `SHARED_BILL_FLOW_ENABLED = true`. Bunu bir
+  test zorlar, yani sessizce geri kapanamaz.
+
+Listedeki son açık madde olan **örnekler arası oran sınırlama** da kapandı:
+kur servisi artık paylaşılan bir çağrı bütçesi kullanıyor (aşağıya bakınız).
+
+Geriye **kullanıcı başına** oran sınırlama kalıyor: bütçe CoinGecko kotasını
+toplamda korur, ama tek bir kullanıcının kur ucunu döverek diğerlerinin
+penceresini tüketmesini engellemez. Bu hâlâ bir **dağıtım gereksinimidir**.
+
+Fiş analizinin **OpenAI maliyeti bundan ayrıdır ve zaten korunuyordu**: günlük
+genel tavan (`DAILY_ANALYSES_TOTAL`) kullanıcı başına hakla birlikte
+Postgres'te `receipt_analysis_quota` üzerinde **atomik olarak** ayrılır, bu
+yüzden örnek sayısından bağımsızdır.
+
+### Örnekler arası çağrı bütçesi
+
+Kur servisinin önbelleği, tek uçuşu ve soğuması **süreç içidir**: yalnızca tek
+bir Node.js örneğini korur. Vercel'de her soğuk başlangıç ve her eşzamanlı
+sunucusuz örnek kendi kopyasını taşıdığı için toplam CoinGecko hızını hiçbir
+şey sınırlamıyordu.
+
+`migrations/0006_provider_call_budget.sql` bunu kapatır. Yukarı akışa
+gerçekten gidilecekse, önce `provider_call_budget` tablosundan bir kredi
+**atomik olarak** ayrılır; ayrılamazsa CoinGecko **hiç çağrılmaz**.
+
+- **Sayaç çağrıyla orantılıdır, istekle değil.** Ayırma yalnızca önbellek
+  ıskaladığında sorulur; önbellekten karşılanan istekler sayaca hiç uğramaz.
+- **Ayırma tek uçuşun içindedir.** Eşzamanlı istekler tek bir krediyi
+  paylaşır; blok dışında beklenseydi ikinci istek aynı pencere için ikinci
+  bir kredi ayırırdı.
+- **Bütçe reddi bir sağlayıcı hatası değildir.** Ardışık hata sayacı artmaz ve
+  üstel soğuma tetiklenmez — sağlayıcı sapasağlamken arızalı sanılmaz.
+- **Pencere ve sınır** `src/lib/rates/provider-budget.ts` içindedir. Kova
+  hesabı tam sayı bölmedir; SQL ve TypeScript aynı hesabı yapar, sunucu saat
+  dilimine bağlı değildir.
+
+**Kesintide engellenmez** (bilinçli karar): sayaca ulaşılamazsa bugünkü süreç
+içi korumaya düşülür — bugünkünden kötü değildir, ve kur servisini kapatmak
+bir veritabanı hıçkırığını ödeme akışının durmasına çevirirdi. Sessiz de
+kalmaz: pencere başına bir kez günlüğe düşer.
+
+`DATABASE_URL` **tanımlı değilse** bu bir olay sayılmaz ve günlüğe düşmez;
+yerel geliştirmede ve testlerde beklenen durumdur. Ama o zaman **örnekler
+arası koruma da yoktur** — koruma geçişin uygulanmış olmasına bağlıdır.
+
+Ayrıca `APP_ORIGIN` **yerelde tanımlı değildir**. Geliştirmede sorun çıkarmaz,
+çünkü `DEVELOPMENT_APP_ORIGIN` (`http://localhost:3000`) devreye girer. Üretimde
+ise **zorunludur**: eksikse ortak hesap erişim uçları
+(`challenge` ve `resolve`) **503 `SERVICE_NOT_CONFIGURED`** döner.
 
 ## Fiş analizi nasıl çalışıyor
 
@@ -1407,7 +1455,8 @@ incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
 - **Google oturumu KYC değildir**: hesap yalnızca fiş analizi kotasını kişiye
   bağlamak içindir. Ortak hesapta borçlunun kimliği hâlâ **cüzdan sahipliği
   kanıtıyla** belirlenir; oturum açmış olmak bir borcu görme hakkı vermez.
-- **Kur servisinde örnekler arası kota koruması yoktur**; oran sınırlama bir
-  dağıtım gereksinimidir (Vercel Firewall ile karşılanır).
+- **Kur servisinin örnekler arası kota koruması vardır**: paylaşılan çağrı
+  bütçesi Postgres'te tutulur. Eksik olan **kullanıcı başına** oran
+  sınırlamadır; o hâlâ bir dağıtım gereksinimidir.
 - Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
   görülebilir ama bağlantının kendisi gizli sayılmalıdır.

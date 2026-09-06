@@ -151,6 +151,13 @@ describe("negatif önbellek (soğuma)", () => {
     const a = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
     const b = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
     const c = getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
+    /*
+     * BÜTÇE ADIMI ARAYA GİRDİ. Yukarı akış çağrısı artık senkron
+     * BAŞLAMAZ: önce paylaşılan çağrı bütçesi sorulur (bkz.
+     * `provider-budget.ts`). Tekilleştirme iddiası aynen duruyor —
+     * yalnızca ölçmeden önce mikro görev kuyruğunun boşalması gerekiyor.
+     */
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     release(failure(500));
     await Promise.all([a, b, c]);

@@ -9,6 +9,7 @@ import {
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
   DeleteQuotaRowsOutcome,
+  ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
@@ -462,6 +463,31 @@ SELECT
   (SELECT used FROM bumped WHERE quota_key = $2)::int AS user_after,
   /* Sıfır satır "tükendi" mi "hesap yok" mu — ayırt eden budur. */
   (SELECT count(*) FROM app_users WHERE user_id = $2)::int AS user_present
+`;
+
+/**
+ * Bir sağlayıcı çağrısını TEK deyimde ayırır.
+ *
+ * Satır yoksa 1 ile yazılır; varsa yalnızca `used < limit` iken artırılır.
+ * `ON CONFLICT ... DO UPDATE ... WHERE` koşulu tutmazsa deyim HİÇBİR satır
+ * döndürmez — "tükendi" cevabı budur.
+ *
+ * NEDEN OKU-SONRA-YAZ DEĞİL: eşzamanlı iki örnek aynı `used` değerini okur
+ * ve ikisi de "yer var" derdi; sınır sessizce aşılırdı. Tek deyim, satır
+ * kilidini Postgres'e bırakır.
+ *
+ * NEDEN `VALUES` DALI DA KORUNUYOR: sınır 1'den küçükse hiçbir çağrı
+ * ayrılamamalı, ama `ON CONFLICT` yalnızca ÇAKIŞMADA çalışır — ilk satır
+ * çakışmadan yazılırdı. `WHERE $3 >= 1` o dalı da kapatır.
+ */
+const RESERVE_PROVIDER_CALL = `
+INSERT INTO provider_call_budget (provider_key, window_start, used)
+SELECT $1, $2::bigint, 1
+WHERE $3::int >= 1
+ON CONFLICT (provider_key, window_start) DO UPDATE
+  SET used = provider_call_budget.used + 1
+  WHERE provider_call_budget.used < $3::int
+RETURNING used
 `;
 
 const COUNT_ALL_BILLS = `
@@ -1482,6 +1508,40 @@ export async function createNeonSharedBillRepository(
           return { ok: false, reason: "unavailable" };
         }
         return { ok: true, userUsed: userAfter };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async reserveProviderCall(input: {
+      providerKey: string;
+      windowStart: number;
+      limit: number;
+    }): Promise<ReserveProviderCallOutcome> {
+      try {
+        /*
+         * TEK deyim; işlem sarmalayıcısına gerek yok. Ayırma zaten tek
+         * satıra dokunuyor ve atomikliği `ON CONFLICT` sağlıyor.
+         */
+        const rows = (await sql.query(RESERVE_PROVIDER_CALL, [
+          input.providerKey,
+          input.windowStart,
+          input.limit,
+        ])) as { used: unknown }[];
+        const raw = rows[0]?.used;
+        if (raw === undefined) {
+          /*
+           * Sıfır satır = koşul tutmadı = pencere dolu. Bu bir HATA
+           * DEĞİLDİR ve `unavailable` ile karıştırılmamalıdır: çağıran
+           * ikisine farklı davranır.
+           */
+          return { ok: false, reason: "exhausted" };
+        }
+        const parsed = typeof raw === "number" ? raw : Number(raw);
+        if (!Number.isInteger(parsed) || parsed < 1) {
+          return { ok: false, reason: "unavailable" };
+        }
+        return { ok: true, used: parsed };
       } catch {
         return { ok: false, reason: "unavailable" };
       }
