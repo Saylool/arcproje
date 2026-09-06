@@ -1076,19 +1076,33 @@ doğrudan depoya yerleştiren ayrı regresyon testleriyle ölçülür.
 - Kur servisinin **örnekler arası** kota koruması yoktur (bkz. yukarıdaki
   "Demo plan ve önbellek sınırları").
 
-### Part 4'e ERTELENENLER
+### Part 4 durumu
 
-- Neon **sağlama (provisioning) yapılmadı**; `migrations/0001_shared_bills.sql`
-  **hiç uygulanmadı**.
-- `DATABASE_URL`, `SHARED_BILL_AUTH_SECRET` ve `APP_ORIGIN` **yerelde
-  tanımlanmadı**; Vercel ortam değişkenleri **değiştirilmedi**.
-- **Dağıtım yapılmadı**, PR açılmadı/birleştirilmedi.
-- **Gerçek cüzdanla canlı bir işlem denenmedi**: tüm doğrulama enjekte edilmiş
-  belirlenimci sahtelerle yapıldı.
-- Oluşturucu akışı hâlâ **`SHARED_BILL_FLOW_ENABLED = false`** ile kapalıdır;
-  çalışan bir ortak bağlantı **paylaşılmadı**.
-- Örnekler arası oran sınırlama (Redis/KV veya Vercel firewall) hâlâ bir
-  **dağıtım gereksinimidir** ve bu depoda karşılanmamıştır.
+Bu bölüm bir zamanlar **Part 4'e ERTELENENLERİ** sayıyordu. O maddelerin hepsi
+kapandı; liste artık yapılmış olanı kaydediyor:
+
+- Neon sağlandı ve geçişlerin **hepsi uygulandı**
+  (`0001_shared_bills.sql` → `0005_receipt_analysis_quota.sql`).
+- `DATABASE_URL` ve `SHARED_BILL_AUTH_SECRET` tanımlandı; dağıtım yapıldı ve
+  uygulama Vercel'de **yayında**.
+- PR'lar açıldı ve birleştirildi.
+- **Gerçek bir cüzdanla Arc Testnet üzerinde canlı transfer tamamlandı.**
+  Doğrulama artık yalnızca enjekte edilmiş belirlenimci sahtelere dayanmıyor.
+- Oluşturucu akışı **açıktır**: `SHARED_BILL_FLOW_ENABLED = true`. Bunu bir
+  test zorlar, yani sessizce geri kapanamaz.
+
+Bu listeden **hâlâ açık olan tek madde**:
+
+- **Örnekler arası oran sınırlama** — paylaşılan bir Redis/KV sayacı ya da
+  Vercel firewall/rate limiting. Bu bir **dağıtım gereksinimidir**, bu depoda
+  karşılanmaz ve **üretimde açık olup olmadığı doğrulanmamıştır**. Kapalıysa
+  fiş analizinin OpenAI maliyeti ve CoinGecko kotası örnekler arasında
+  korumasızdır.
+
+Ayrıca `APP_ORIGIN` **yerelde tanımlı değildir**. Geliştirmede sorun çıkarmaz,
+çünkü `DEVELOPMENT_APP_ORIGIN` (`http://localhost:3000`) devreye girer. Üretimde
+ise **zorunludur**: eksikse ortak hesap erişim uçları
+(`challenge` ve `resolve`) **503 `SERVICE_NOT_CONFIGURED`** döner.
 
 ## Fiş analizi nasıl çalışıyor
 
@@ -1389,6 +1403,7 @@ incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
   bağlamak içindir. Ortak hesapta borçlunun kimliği hâlâ **cüzdan sahipliği
   kanıtıyla** belirlenir; oturum açmış olmak bir borcu görme hakkı vermez.
 - **Kur servisinde örnekler arası kota koruması yoktur**; oran sınırlama bir
-  dağıtım gereksinimidir (Vercel Firewall ile karşılanır).
+  dağıtım gereksinimidir (Vercel Firewall ile karşılanabilir, ama üretimde açık
+  olup olmadığı **doğrulanmamıştır**).
 - Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
   görülebilir ama bağlantının kendisi gizli sayılmalıdır.
