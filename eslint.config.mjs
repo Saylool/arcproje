@@ -12,6 +12,17 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    /*
+     * Depoya girmeyen yerel dizinler.
+     *
+     * `lint` betiği `eslint`i yol argümanı olmadan çağırdığı için tarama
+     * proje kökünden başlar ve buralara da iner. `.claude/worktrees`
+     * altındaki git-worktree kopyaları kendi kaynaklarını ve `.next`
+     * çıktılarını taşır; yukarıdaki `.next/**` yalnızca kökteki dizine
+     * uyduğundan bu kopyalar binlerce sahte bulgu üretir.
+     */
+    ".claude/**",
+    "output/**",
   ]),
 ]);
 
