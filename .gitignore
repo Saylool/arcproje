@@ -44,6 +44,9 @@ next-env.d.ts
 # local tooling (Claude Code preview launch config)
 .claude/
 
+# yerel araç çıktıları (imagegen vb.) — üretilen dosyalar, depoya girmez
+/output/
+
 # android imzalama anahtarlari — ASLA commit edilmez
 *.keystore
 *.jks
