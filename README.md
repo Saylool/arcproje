@@ -578,11 +578,11 @@ aşağıdakiler **hâlâ gereklidir** ve bu depoda yoktur:
   kendisinin dayatması için bir ödeme sözleşmesi veya imzalama ile yayınlamanın
   ayrıldığı bir akış. Şu anki süre kontrolleri istemci ve sunucu tarafındadır;
   imzalanmış bir işlem gecikmeli olarak yayınlanırsa zincir bunu engellemez.
-- **Kullanıcı başına oran sınırlama** — çağrı bütçesi CoinGecko kotasını
-  toplamda korur, ama tek bir kullanıcının kur ucunu döverek diğerlerinin
-  penceresini tüketmesini **engellemez**. Kişi bazlı sınırlama (Vercel
-  firewall/rate limiting ya da oturum başına sayaç) hâlâ bir **dağıtım
-  gereksinimidir**.
+- **Dağıtık kaynaktan pencere tüketimi** — iki koruma katmanı da yerinde
+  (aşağıya bakınız), ama yeterince farklı IP'den gelen istek paylaşılan çağrı
+  bütçesini yine de tüketebilir ve kur ~1 dakika boyunca alınamaz hâle gelir.
+  Bu bir **maliyet** riski değil, kısa süreli bir **erişilebilirlik** riskidir;
+  kalıcı çözümü kenar katmanında bot yönetimidir.
 - **Aynı tarayıcı dışında tekrar engeli** — Web Locks, `localStorage` ve
   `BroadcastChannel` yalnızca tek tarayıcı içindir. Başka cihaz, başka tarayıcı
   veya gizli sekme hiçbir şey bilmez; yetkili engel için arka uçta ya da zincir
@@ -1091,8 +1091,9 @@ doğrudan depoya yerleştiren ayrı regresyon testleriyle ölçülür.
   **kanıtlamaz**; cüzdan imzası bir kimlik/KYC kanıtı değildir.
 - **Arc Testnet** içindir ve **mainnet'e hazır değildir**; test USDC'sinin
   **gerçek parasal değeri yoktur**.
-- Kur servisinin örnekler arası kota koruması **vardır** (paylaşılan çağrı
-  bütçesi); eksik olan **kullanıcı başına** oran sınırlamadır.
+- Kur servisi iki katmanla korunur: örnekler arası **çağrı bütçesi** (kod) ve
+  IP başına **oran sınırlama** (Vercel Firewall). Kalan risk yalnızca dağıtık
+  kaynaktan gelen kısa süreli pencere tüketimidir.
 
 ### Part 4 durumu
 
@@ -1112,9 +1113,10 @@ kapandı; liste artık yapılmış olanı kaydediyor:
 Listedeki son açık madde olan **örnekler arası oran sınırlama** da kapandı:
 kur servisi artık paylaşılan bir çağrı bütçesi kullanıyor (aşağıya bakınız).
 
-Geriye **kullanıcı başına** oran sınırlama kalıyor: bütçe CoinGecko kotasını
-toplamda korur, ama tek bir kullanıcının kur ucunu döverek diğerlerinin
-penceresini tüketmesini engellemez. Bu hâlâ bir **dağıtım gereksinimidir**.
+Kişi bazlı sınırlama da yerinde: Vercel Firewall'da `GET /api/rates/usdc-try`
+için **IP başına 60 saniyede 10 istek** kuralı etkindir ve aşıldığında **429**
+döner (2026-09-06'da panelde doğrulandı). Bu bir **dağıtım ayarıdır**, depoda
+kodu yoktur — firewall kuralı kapatılırsa bu koruma da kalkar.
 
 Fiş analizinin **OpenAI maliyeti bundan ayrıdır ve zaten korunuyordu**: günlük
 genel tavan (`DAILY_ANALYSES_TOTAL`) kullanıcı başına hakla birlikte
@@ -1455,8 +1457,8 @@ incelemede yeniden tartışılmasın diye gerekçeleriyle burada:
 - **Google oturumu KYC değildir**: hesap yalnızca fiş analizi kotasını kişiye
   bağlamak içindir. Ortak hesapta borçlunun kimliği hâlâ **cüzdan sahipliği
   kanıtıyla** belirlenir; oturum açmış olmak bir borcu görme hakkı vermez.
-- **Kur servisinin örnekler arası kota koruması vardır**: paylaşılan çağrı
-  bütçesi Postgres'te tutulur. Eksik olan **kullanıcı başına** oran
-  sınırlamadır; o hâlâ bir dağıtım gereksinimidir.
+- **Kur servisi iki katmanla korunur**: örnekler arası çağrı bütçesi
+  Postgres'te (kod), IP başına oran sınırlama Vercel Firewall'da (dağıtım
+  ayarı). İkincisi depoda görünmez; kapatılırsa sessizce kalkar.
 - Bağlantıyı ele geçiren biri hesabı açabilir; borç yalnızca doğru cüzdanla
   görülebilir ama bağlantının kendisi gizli sayılmalıdır.

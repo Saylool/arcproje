@@ -380,14 +380,31 @@ describe("çapraz örnek kota sınırı belgelenir", () => {
     expect(readme).toContain("migrations/0006_provider_call_budget.sql");
   });
 
-  it("GERİYE KALAN acik durust biçimde isaretlenir", () => {
+  it("IP basina siniri KODDA OLMADIGI soylenir", () => {
     /*
-     * Bütçe kotayı TOPLAMDA korur; kullanıcı başına sınırlama hâlâ yok.
-     * Bunun "çözüldü" diye yutulması, tam da bu testin engellemek için
-     * var olduğu şeydir.
+     * BU TEST DEGISTI. Eskiden "kullanici basina sinirlama hala yok"
+     * ifadesini zorluyordu. 2026-09-06'da Vercel panelinde olculdu:
+     * `GET /api/rates/usdc-try` icin IP basina 60 saniyede 10 istek kurali
+     * ETKIN ve asildiginda 429 donuyor. Yani o eksik kapali.
+     *
+     * Test kaldirilmadi, cunku yerine DAHA ONEMLI bir sey zorluyor: bu
+     * korumanin depoda KODU YOK. Firewall kurali panelden kapatilirsa
+     * hicbir test kirilmaz ve koruma sessizce kalkar. En azindan README
+     * bunun bir dagitim ayari oldugunu soylemek zorunda.
      */
-    expect(readme).toMatch(/kullanıcı başına/i);
-    expect(readme).toContain("dağıtım gereksinimidir");
+    expect(readme).toContain("Vercel Firewall");
+    expect(readme).toMatch(/IP başına/i);
+    expect(readme).toMatch(/dağıtım ayarı|dağıtım ayarıdır/i);
+  });
+
+  it("GERIYE KALAN acik durust biçimde isaretlenir", () => {
+    /*
+     * Iki katman da yerinde olsa bile risk sifir degil: yeterince farkli
+     * IP'den gelen istek paylasilan pencereyi yine tuketebilir. Bunun
+     * "cozuldu" diye yutulmasi, tam da bu testin engellemek icin var
+     * oldugu seydir.
+     */
+    expect(readme).toMatch(/dağıtık kaynaktan|erişilebilirlik/i);
   });
 
   it("KESİNTİ davranışı yazılıdır", () => {
