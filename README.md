@@ -776,6 +776,7 @@ Tek tek uygulamak istenirse sıra şudur:
 | `0003_shared_bill_owner.sql` | Hesabı oluşturan kullanıcı (sahiplik atfı) | "Hesaplarım" listesi ve sahiplik |
 | `0004_saved_contacts.sql` | Kayıtlı kişiler (kullanıcının adres defteri) | Kişi kaydetme ve öneriler |
 | `0005_receipt_analysis_quota.sql` | Fiş analizi kotası (OpenAI maliyet sınırı) | Kota sayımı — **analiz sınırsız çalışır** |
+| `0006_provider_call_budget.sql` | Örnekler arası CoinGecko çağrı bütçesi | Örnekler arası koruma — **kur servisi tek örneklik korumaya düşer** |
 
 Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/db/migrations.test.ts)):
 `migrations/` altına eklenen ama burada anılmayan bir dosya kapıyı düşürür.
