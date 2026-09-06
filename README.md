@@ -1,4 +1,4 @@
-# Hesabı Böl
+# Split Bill
 
 Ortak hesabı adil biçimde bölmek için küçük bir hackathon MVP'si. Hedeflenen akış:
 fişin fotoğrafını yükle → fişteki ürünleri kişilere dağıt → herkesin borcunu hesapla →
@@ -85,10 +85,13 @@ Uygulama `http://localhost:3000` adresinde açılır.
 ## Uygulama kabuğu (PWA)
 
 Uygulama `/manifest.webmanifest` yayınlar ve ana ekrana kurulabilir. Kurulan
-uygulamanın adı **Hesabı Böl**'dür ve manifest tek dillidir: `<link
-rel="manifest">` varsayılan olarak çerez göndermez, bu yüzden dil çerezine
-bakan bir manifest güvenilir çalışmaz. Sayfa metinleri her zamanki gibi
-kullanıcının dilinde kalır.
+uygulamanın adı **Split Bill**'dir. Marka adı ÇEVRİLMEZ: iki sözlükte de
+aynıdır, çünkü uygulama her ülkede tek bir isimle tanınmalı — telefonda
+ikonun altında görünen ad da budur ve o değer dile göre değişemez.
+
+Manifest tek dillidir: `<link rel="manifest">` varsayılan olarak çerez
+göndermez, bu yüzden dil çerezine bakan bir manifest güvenilir çalışmaz.
+Sayfa metinleri her zamanki gibi kullanıcının dilinde kalır.
 
 **Servis çalışanı YOKTUR ve bilerek yoktur.** Sayfalar `no-store`; bir
 önbellek ödeme sayfasını ya da imzalı bir yükü saklayabilir, o sınırı delerdi.
@@ -688,7 +691,7 @@ dakikalar ömürlü bir kura çakılmaz.
 
 ### İmzalanan manifest
 
-Ayrı bir EIP-712 alanı kullanılır (`Hesabi Bol Shared Bill`); ödeme talebi
+Ayrı bir EIP-712 alanı kullanılır (`Split Bill Shared Bill`); ödeme talebi
 imzası paylaşılan hesap imzası olarak **kullanılamaz**. İmza şunları kapsar:
 
 `schemaVersion`, `billId`, `chainId`, `recipient`, `recipientLabel`,
@@ -836,7 +839,7 @@ gerekir:
 > olduğunu **kanıtlamaz**. Yalnızca "bu adresi kontrol eden kişi buradayım"
 > der.
 
-Erişim imzası **ayrı bir EIP-712 alanındadır** (`Hesabi Bol Shared Bill
+Erişim imzası **ayrı bir EIP-712 alanındadır** (`Split Bill Shared Bill
 Access`). Ne paylaşılan hesap manifesti ne de ödeme talebi imzası buraya
 geçebilir; bu imza da oralarda kullanılamaz.
 

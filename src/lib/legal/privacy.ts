@@ -104,7 +104,7 @@ const tr: PrivacyPolicy = {
   title: "Gizlilik Politikası",
   effectiveDate: PRIVACY_EFFECTIVE_DATE,
   intro:
-    "Bu sayfa Hesabı Böl'ün hangi verileri işlediğini, bunların nereye gittiğini ve ne kadar süreyle durduğunu anlatır. Metin uygulamanın kaynak kodu okunarak yazılmıştır; iddia edilen her süre koddaki sabitten gelir.",
+    "Bu sayfa Split Bill'in hangi verileri işlediğini, bunların nereye gittiğini ve ne kadar süreyle durduğunu anlatır. Metin uygulamanın kaynak kodu okunarak yazılmıştır; iddia edilen her süre koddaki sabitten gelir.",
   sections: [
     {
       id: "sorumlu",
@@ -112,7 +112,7 @@ const tr: PrivacyPolicy = {
       blocks: [
         {
           kind: "paragraph",
-          text: "Hesabı Böl kişisel bir projedir; bir şirket tarafından işletilmez. Veri sorumlusu projeyi yürüten gerçek kişidir.",
+          text: "Split Bill kişisel bir projedir; bir şirket tarafından işletilmez. Veri sorumlusu projeyi yürüten gerçek kişidir.",
         },
         {
           kind: "paragraph",
@@ -377,7 +377,7 @@ const en: PrivacyPolicy = {
   title: "Privacy Policy",
   effectiveDate: PRIVACY_EFFECTIVE_DATE,
   intro:
-    "This page explains which data Split the Bill processes, where it goes and how long it is kept. It was written by reading the application's source code; every duration claimed here comes from a constant in that code.",
+    "This page explains which data Split Bill processes, where it goes and how long it is kept. It was written by reading the application's source code; every duration claimed here comes from a constant in that code.",
   sections: [
     {
       id: "sorumlu",
@@ -385,7 +385,7 @@ const en: PrivacyPolicy = {
       blocks: [
         {
           kind: "paragraph",
-          text: "Split the Bill is a personal project and is not operated by a company. The controller is the individual who runs it.",
+          text: "Split Bill is a personal project and is not operated by a company. The controller is the individual who runs it.",
         },
         {
           kind: "paragraph",

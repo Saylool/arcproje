@@ -20,7 +20,7 @@ import type { Dictionary } from "./tr";
 
 export const en: Dictionary = {
   app: {
-    name: "Split the Bill",
+    name: "Split Bill",
     tagline:
       "Upload your receipt, share the items among your friends, and work out what everyone owes.",
   },
@@ -56,20 +56,20 @@ export const en: Dictionary = {
   },
 
   metadata: {
-    homeTitle: "Split the Bill — Upload your receipt",
+    homeTitle: "Split Bill — Upload your receipt",
     homeDescription:
       "Upload your receipt, share the items among your friends, and work out what everyone owes.",
-    payTitle: "Payment request — Split the Bill",
+    payTitle: "Payment request — Split Bill",
     payDescription:
       "Pay the signed payment request that was sent to you, from your own wallet.",
-    sharedBillTitle: "Shared bill — Split the Bill",
+    sharedBillTitle: "Shared bill — Split Bill",
     sharedBillDescription:
       "Connect your wallet and sign an authentication message to see what you owe.",
-    authErrorTitle: "Sign-in error — Split the Bill",
-    privacyTitle: "Privacy Policy — Split the Bill",
+    authErrorTitle: "Sign-in error — Split Bill",
+    privacyTitle: "Privacy Policy — Split Bill",
     privacyDescription:
-      "Which data Split the Bill processes, where it goes and how long it is kept.",
-    accountTitle: "Your account — Split the Bill",
+      "Which data Split Bill processes, where it goes and how long it is kept.",
+    accountTitle: "Your account — Split Bill",
     accountDescription:
       "Permanently remove the record created by your Google sign-in, along with the personal data attached to it.",
   },
@@ -414,7 +414,7 @@ export const en: Dictionary = {
     linkNotice:
       "The link does NOT carry the debt list, the addresses or the names; it only contains an unguessable identifier. Anyone who opens the link can see the bill, so only share it with the people involved. It is valid for at most {days} days.",
     faucetPrefix: "For test USDC, see ",
-    shareTitle: "Split the Bill",
+    shareTitle: "Split Bill",
     shareText: "Shared bill payment link",
     createFailed: "The shared bill could not be created. Please try again.",
   },
@@ -635,7 +635,7 @@ export const en: Dictionary = {
     faucetPrefix: "For test USDC, see ",
     faucetMiddle: ", and for network setup, see ",
     shareTitle: "Payment request",
-    shareText: "Split the Bill payment request",
+    shareText: "Split Bill payment request",
     refreshHint: "Refresh the rate and sign the request again.",
   },
 

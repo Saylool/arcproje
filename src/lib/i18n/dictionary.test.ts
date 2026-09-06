@@ -69,6 +69,14 @@ describe("anahtar eşliği", () => {
      * metin, çevrilmeyi unutulmuş bir kayıt işaretidir.
      */
     const allowedIdentical = new Set([
+      /*
+       * MARKA ADI ÇEVRİLMEZ. "Split Bill" her dilde aynıdır; uygulama tek bir
+       * isimle tanınsın diye böyle. Eskiden Türkçesi "Hesabı Böl"dü ve bu da
+       * telefonda ikonun altında herkese Türkçe ad gösteriyordu.
+       */
+      "app.name",
+      /* Paylasim sayfasinin basligi da MARKA adidir. */
+      "sharedBill.shareTitle",
       "language.tr",
       "language.en",
       "common.dash",
