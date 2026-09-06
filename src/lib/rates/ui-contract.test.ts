@@ -356,15 +356,42 @@ describe("mutabakat kaydı yenilemeden sonra da durur", () => {
 });
 
 describe("çapraz örnek kota sınırı belgelenir", () => {
-  it("README süreç içi korumanın Vercel'de yetmediğini söyler", () => {
+  /*
+   * BU BÖLÜM DEĞİŞTİ. Eskiden README'nin çapraz örnek korumasını
+   * "karşılanmamış bir dağıtım gereksinimi" diye sunmasını zorluyordu ve bu
+   * doğruydu: koruma yoktu.
+   *
+   * Artık var (`provider_call_budget`). Test kaldırılmadı, çünkü asıl işlevi
+   * hâlâ geçerli: README'nin bu konuda ne söylediğini kapıda tutmak. Yalnızca
+   * neyi zorladığı güncellendi — bugün olmayan bir açığı iddia etmesin, ama
+   * olan açığı da gizlemesin.
+   */
+  it("README süreç içi korumanın TEK BAŞINA yetmediğini söyler", () => {
     expect(readme).toMatch(/süreç içi/i);
     expect(readme).toContain("Vercel");
-    expect(readme).toMatch(/Redis|KV/);
   });
 
-  it("paylaşılan sınırlayıcı DAĞITIM GEREKSİNİMİ olarak işaretlenir", () => {
-    expect(readme).toContain("Dağıtım gereksinimi");
-    // Tamamlanmış bir garanti gibi sunulmaz.
-    expect(readme).toMatch(/karşılanmamıştır|açık kalmaktadır/i);
+  it("paylaşılan bütçe ve onu kuran geçiş ADIYLA anılır", () => {
+    /*
+     * Koruma geçişin UYGULANMIŞ olmasına bağlı. Geçiş adı README'de
+     * geçmezse, kurulumu yapan kişi korumayı hiç açmadan üretime çıkar.
+     */
+    expect(readme).toContain("provider_call_budget");
+    expect(readme).toContain("migrations/0006_provider_call_budget.sql");
+  });
+
+  it("GERİYE KALAN acik durust biçimde isaretlenir", () => {
+    /*
+     * Bütçe kotayı TOPLAMDA korur; kullanıcı başına sınırlama hâlâ yok.
+     * Bunun "çözüldü" diye yutulması, tam da bu testin engellemek için
+     * var olduğu şeydir.
+     */
+    expect(readme).toMatch(/kullanıcı başına/i);
+    expect(readme).toContain("dağıtım gereksinimidir");
+  });
+
+  it("KESİNTİ davranışı yazılıdır", () => {
+    /* Sayaca ulaşılamazsa engellenmediği söylenmeli; sessiz kalmamalı. */
+    expect(readme).toMatch(/ulaşılamazsa|Kesintide/i);
   });
 });

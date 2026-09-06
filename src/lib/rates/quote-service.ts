@@ -20,6 +20,11 @@ import {
   type RateQuote,
   type SignedRateQuote,
 } from "./quote";
+import {
+  budgetWindowStart,
+  windowRetryAfterSeconds,
+  type ProviderBudgetOutcome,
+} from "./provider-budget";
 import { createQuoteId, readQuoteSecret, signRateQuote } from "./quote-auth";
 
 /**
@@ -70,6 +75,44 @@ let cooldownUntilMs = 0;
 let consecutiveFailures = 0;
 let lastFailureCode: ProviderFailureCode | null = null;
 
+/**
+ * PAYLAŞILAN BÜTÇEYİ SORAN İŞLEV.
+ *
+ * Enjekte edilebilir: testler belirlenimci kalsın ve bu modül Postgres'i
+ * tanımasın diye. Varsayılanı tembel yüklenir — veritabanı kodu, gerçekten
+ * bir sağlayıcı çağrısı yapılacağı ana kadar hiç içeri girmez.
+ */
+export type ProviderBudgetReserver = (
+  nowMs: number,
+) => Promise<ProviderBudgetOutcome>;
+
+async function defaultReserver(nowMs: number): Promise<ProviderBudgetOutcome> {
+  const { reserveCoinGeckoCall } = await import(
+    "@/lib/db/provider-budget-service"
+  );
+  return reserveCoinGeckoCall(nowMs);
+}
+
+/**
+ * Bütçeye ulaşılamadığında bir kez günlüğe düşer.
+ *
+ * Neden "bir kez": kesinti sırasında her istek satır yazsaydı günlük
+ * kullanılmaz hâle gelirdi. Pencere değiştiğinde yeniden yazılır, böylece
+ * süren bir kesinti görünmez olmaz.
+ */
+let lastUnavailableWindow: number | null = null;
+
+function noteBudgetUnavailable(nowMs: number, log: (line: string) => void): void {
+  const window = budgetWindowStart(nowMs);
+  if (lastUnavailableWindow === window) {
+    return;
+  }
+  lastUnavailableWindow = window;
+  log(
+    "[rates] paylasilan cagri butcesine ulasilamadi; ornekler arasi koruma bu pencerede YOK",
+  );
+}
+
 /** Testler arasında süreç durumunu sıfırlar. */
 export function resetRateQuoteCache(): void {
   cachedObservation = null;
@@ -77,6 +120,7 @@ export function resetRateQuoteCache(): void {
   cooldownUntilMs = 0;
   consecutiveFailures = 0;
   lastFailureCode = null;
+  lastUnavailableWindow = null;
 }
 
 /**
@@ -137,7 +181,7 @@ export type ObservationResult =
  */
 export async function getUsdcTryObservation(
   nowMs: number,
-  options: FetchQuoteOptions & ClockOptions = {},
+  options: FetchQuoteOptions & ClockOptions & BudgetOptions = {},
 ): Promise<ObservationResult> {
   const clock = options.clock ?? Date.now;
   /*
@@ -171,8 +215,67 @@ export async function getUsdcTryObservation(
   }
 
   if (inflight === null) {
-    inflight = fetchUsdcTryObservation(options)
+    /*
+     * BÜTÇE UÇUŞUN İÇİNDE SORULUR — dışarıda sorulamaz.
+     *
+     * `inflight` ataması SENKRONDUR; ayırmayı bu bloğun dışında `await`
+     * etseydik, beklerken giren ikinci istek de `inflight === null` görür
+     * ve AYNI pencere için ikinci bir kredi ayırırdı. Tek uçuş yalnızca
+     * yukarı akış çağrısını değil, onun bütçesini de tekilleştirir.
+     *
+     * Önbellekten karşılanan istekler buraya hiç ulaşmaz: sayaç kullanıcı
+     * isteğiyle değil, gerçekten harcanan krediyle orantılıdır.
+     */
+    const reserve = options.reserveProviderCall ?? defaultReserver;
+    const log = options.log ?? ((line: string) => console.log(line));
+    inflight = reserve(nowMs)
+      .then((budget) => {
+        if (!budget.ok && budget.reason === "exhausted") {
+          /*
+           * Pencere dolu. Bu bir SAĞLAYICI HATASI DEĞİLDİR: ardışık hata
+           * sayacı artmaz ve üstel soğuma tetiklenmez. Yalnızca pencerenin
+           * sonuna kadar yukarı akışa gidilmez.
+           */
+          return {
+            ok: false as const,
+            code: "providerUnavailable" as const,
+            retryAfterSeconds: windowRetryAfterSeconds(nowMs),
+            budgetDenied: true as const,
+          };
+        }
+        if (!budget.ok && budget.reason === "unavailable") {
+          /*
+           * Sayaç kurulu ama ulaşılamadı. Bilinçli karar: ENGELLENMEZ,
+           * bugünkü süreç içi korumaya düşülür — bugünkünden kötü değildir.
+           * Ama sessiz de kalmaz; bu bir olaydır.
+           *
+           * `unconfigured` buraya girmez: paylaşılan sayacın hiç kurulmamış
+           * olması bilinen bir dağıtım durumudur, her istekte olay üretmez.
+           */
+          noteBudgetUnavailable(nowMs, log);
+        }
+        return fetchUsdcTryObservation(options);
+      })
       .then((result) => {
+        /*
+         * ÖNCE `ok` üzerinden daraltılır, SONRA bayrağa bakılır: ters sırada
+         * TypeScript başarı dalını da kapsayan bir kesişim üretir ve
+         * `code`/`retryAfterSeconds` görünmez olur.
+         */
+        if (!result.ok && "budgetDenied" in result) {
+          /*
+           * Bütçe reddi bookkeeping'e HİÇ girmez: ardışık hata sayacı
+           * artmaz, üstel soğuma tetiklenmez. Yalnızca pencere sonuna kadar
+           * yukarı akışa gidilmemesi için soğuma çıpası ileri alınır.
+           */
+          const holdSeconds = result.retryAfterSeconds ?? 1;
+          cooldownUntilMs = Math.max(cooldownUntilMs, nowMs + holdSeconds * 1000);
+          return {
+            ok: false as const,
+            code: result.code,
+            retryAfterSeconds: holdSeconds,
+          };
+        }
         // Çıpa: isteğin başladığı an değil, yanıtın DÖNDÜĞÜ an.
         const settledAtMs = clock();
 
@@ -255,6 +358,17 @@ export function rateTextToRational(rateText: string): {
   };
 }
 
+/**
+ * Paylaşılan bütçe bağımlılıkları. Enjekte edilebilir olmalarının nedeni
+ * testlerin belirlenimci kalması ve bu modülün Postgres'i tanımamasıdır.
+ */
+export type BudgetOptions = {
+  /** Verilmezse varsayılan sürücü (Postgres) tembel yüklenir. */
+  reserveProviderCall?: ProviderBudgetReserver;
+  /** Bütçeye ulaşılamadığında yazılan satır; verilmezse `console.log`. */
+  log?: (line: string) => void;
+};
+
 export type ClockOptions = {
   /**
    * Yerleşim (settlement) saati. Önbellek ve soğuma çıpaları, isteğin
@@ -264,7 +378,7 @@ export type ClockOptions = {
   clock?: () => number;
 };
 
-export type MintOptions = FetchQuoteOptions & ClockOptions & {
+export type MintOptions = FetchQuoteOptions & ClockOptions & BudgetOptions & {
   /**
    * Basımın BAŞLADIĞI an. Testlerde sabit başlangıç vermek içindir; teklifin
    * kendisi bu ana değil, `clock` ile okunan YERLEŞİM anına çıpalanır.
