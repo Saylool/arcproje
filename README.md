@@ -759,20 +759,39 @@ oturum jetonu, HMAC etiketi ya da veritabanı ayrıntısı **taşımaz**.
 DATABASE_URL=
 ```
 
-Şema **elle** uygulanır; tablolar istek işleyicisi içinde tembel oluşturulmaz:
+Şema **elle** uygulanır; tablolar istek işleyicisi içinde tembel oluşturulmaz.
+Geçişler **numara sırasıyla ve eksiksiz** uygulanır — biri atlanırsa uygulama
+derlenir ve testler geçer, ama o tabloya dokunan akış çalışma anında düşer:
 
 ```bash
-psql "$DATABASE_URL" -f migrations/0001_shared_bills.sql
+for f in migrations/[0-9][0-9][0-9][0-9]_*.sql; do psql "$DATABASE_URL" -f "$f"; done
 ```
+
+Tek tek uygulamak istenirse sıra şudur:
+
+| Geçiş | Ne ekler | Atlanırsa ne kırılır |
+| --- | --- | --- |
+| `0001_shared_bills.sql` | Ortak hesap şeması; Part 3'ün ödeme tabloları da bunun içindedir | Ortak hesabın tamamı |
+| `0002_app_users.sql` | Uygulama kullanıcıları (Google kimlik eşlemesi) | Google girişi |
+| `0003_shared_bill_owner.sql` | Hesabı oluşturan kullanıcı (sahiplik atfı) | "Hesaplarım" listesi ve sahiplik |
+| `0004_saved_contacts.sql` | Kayıtlı kişiler (kullanıcının adres defteri) | Kişi kaydetme ve öneriler |
+| `0005_receipt_analysis_quota.sql` | Fiş analizi kotası (OpenAI maliyet sınırı) | Kota sayımı — **analiz sınırsız çalışır** |
+
+Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/db/migrations.test.ts)):
+`migrations/` altına eklenen ama burada anılmayan bir dosya kapıyı düşürür.
 
 `DATABASE_URL` yoksa uygulama ve testler yine derlenir; depo gerektiren rota
 kontrollü **503 `SERVICE_NOT_CONFIGURED`** döner ve bellek içi bir yedeğe
 **asla** düşmez.
 
-Geçiş dosyası **hiç uygulanmadığı için** Part 3'ün ödeme tabloları (teklif,
-deneme ve borç ödeme durumu) **ayrı bir dosya yerine aynı `0001` geçişine**
-eklenmiştir. Uygulanmış bir şemaya sonradan `ALTER TABLE` çalıştırmak
-gerekmez.
+Geçişlerin hepsi `IF NOT EXISTS` kullanır: yukarıdaki döngü **zaten uygulanmış
+bir şemada yeniden çalıştırılabilir**, var olanı bozmaz.
+
+Part 3'ün ödeme tabloları (teklif, deneme ve borç ödeme durumu) ayrı bir dosya
+yerine **aynı `0001` geçişine** eklenmişti; o karar alındığında şema henüz
+hiçbir ortamda uygulanmamıştı. Bu gerekçe **artık geçerli değildir**:
+`CREATE TABLE IF NOT EXISTS` var olan bir tabloyu **değiştirmez**, bu yüzden
+bundan sonra eklenecek her alan kendi geçiş dosyasını ister.
 
 ### Gizlilik sınırı
 
