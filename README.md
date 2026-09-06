@@ -1096,8 +1096,13 @@ Bu listeden **hâlâ açık olan tek madde**:
 - **Örnekler arası oran sınırlama** — paylaşılan bir Redis/KV sayacı ya da
   Vercel firewall/rate limiting. Bu bir **dağıtım gereksinimidir**, bu depoda
   karşılanmaz ve **üretimde açık olup olmadığı doğrulanmamıştır**. Kapalıysa
-  fiş analizinin OpenAI maliyeti ve CoinGecko kotası örnekler arasında
-  korumasızdır.
+  korumasız kalan şey **kur servisinin CoinGecko kotasıdır**: soğuma ve tek
+  uçuş süreç içi tutulur, yani her örnek kendi sayacını taşır.
+
+  Fiş analizinin **OpenAI maliyeti bundan ayrıdır ve zaten korunur**: günlük
+  genel tavan (`DAILY_ANALYSES_TOTAL`) kullanıcı başına hakla birlikte
+  Postgres'te `receipt_analysis_quota` üzerinde **atomik olarak** ayrılır, bu
+  yüzden örnek sayısından bağımsızdır.
 
 Ayrıca `APP_ORIGIN` **yerelde tanımlı değildir**. Geliştirmede sorun çıkarmaz,
 çünkü `DEVELOPMENT_APP_ORIGIN` (`http://localhost:3000`) devreye girer. Üretimde
