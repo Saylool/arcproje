@@ -1,8 +1,8 @@
 {
-  "packageId": "app.hesabibol.twa",
+  "packageId": "app.splitbill.twa",
   "host": "arcproje-seven.vercel.app",
-  "name": "Hesabı Böl",
-  "launcherName": "Hesabı Böl",
+  "name": "Split Bill",
+  "launcherName": "Split Bill",
   "display": "standalone",
   "orientation": "default",
   "themeColor": "#7c3aed",

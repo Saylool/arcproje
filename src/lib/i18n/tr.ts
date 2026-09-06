@@ -23,7 +23,7 @@ export const tr = {
   /* Uygulama kabuğu                                                         */
   /* --------------------------------------------------------------------- */
   app: {
-    name: "Hesabı Böl",
+    name: "Split Bill",
     tagline: "Fişini yükle, ürünleri arkadaşlarına dağıt, herkesin payını hesapla.",
   },
 
@@ -59,20 +59,20 @@ export const tr = {
   },
 
   metadata: {
-    homeTitle: "Hesabı Böl — Fişini yükle",
+    homeTitle: "Split Bill — Fişini yükle",
     homeDescription:
       "Fişini yükle, ürünleri arkadaşlarına dağıt, herkesin payını hesapla.",
-    payTitle: "Ödeme talebi — Hesabı Böl",
+    payTitle: "Ödeme talebi — Split Bill",
     payDescription:
       "Sana gönderilen imzalı ödeme talebini kendi cüzdanınla öde.",
-    sharedBillTitle: "Ortak hesap — Hesabı Böl",
+    sharedBillTitle: "Ortak hesap — Split Bill",
     sharedBillDescription:
       "Kendi borcunu görmek için cüzdanını bağla ve kimlik doğrulama mesajı imzala.",
-    authErrorTitle: "Oturum hatası — Hesabı Böl",
-    privacyTitle: "Gizlilik Politikası — Hesabı Böl",
+    authErrorTitle: "Oturum hatası — Split Bill",
+    privacyTitle: "Gizlilik Politikası — Split Bill",
     privacyDescription:
-      "Hesabı Böl'ün hangi verileri işlediği, bunların nereye gittiği ve ne kadar süreyle saklandığı.",
-    accountTitle: "Hesabın — Hesabı Böl",
+      "Split Bill'in hangi verileri işlediği, bunların nereye gittiği ve ne kadar süreyle saklandığı.",
+    accountTitle: "Hesabın — Split Bill",
     accountDescription:
       "Google hesabınla oluşturduğun kaydı ve ona bağlı kişisel verileri kalıcı olarak sil.",
   },
@@ -454,7 +454,7 @@ export const tr = {
     linkNotice:
       "Baglanti borc listesini, adresleri veya isimleri TASIMAZ; yalnizca tahmin edilemez bir kimlik icerir. Baglantiyi acan herkes hesabi gorebilir, bu yuzden yalnizca ilgili kisilerle paylas. En fazla {days} gun gecerlidir.",
     faucetPrefix: "Test USDC'si icin ",
-    shareTitle: "Hesabi Bol",
+    shareTitle: "Split Bill",
     shareText: "Ortak hesap odeme baglantisi",
     createFailed: "Paylasilan hesap olusturulamadi. Lutfen tekrar dene.",
   },
@@ -681,7 +681,7 @@ export const tr = {
     faucetPrefix: "Test USDC için ",
     faucetMiddle: ", ağ kurulumu için ",
     shareTitle: "Ödeme talebi",
-    shareText: "Hesabı Böl ödeme talebi",
+    shareText: "Split Bill ödeme talebi",
     refreshHint: "Kuru yenileyip talebi yeniden imzala.",
   },
 

@@ -39,7 +39,7 @@ import {
 export const PAYMENT_REQUEST_SCHEMA_VERSION = 2;
 export const LEGACY_MANUAL_RATE_SCHEMA_VERSION = 1;
 
-export const PAYMENT_REQUEST_DOMAIN_NAME = "Hesabi Bol Payment Request";
+export const PAYMENT_REQUEST_DOMAIN_NAME = "Split Bill Payment Request";
 export const PAYMENT_REQUEST_DOMAIN_VERSION = "1";
 
 /**

@@ -29,7 +29,7 @@ import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
  */
 
 export const SHARED_BILL_ACCESS_VERSION = 1;
-export const SHARED_BILL_ACCESS_DOMAIN_NAME = "Hesabi Bol Shared Bill Access";
+export const SHARED_BILL_ACCESS_DOMAIN_NAME = "Split Bill Shared Bill Access";
 export const SHARED_BILL_ACCESS_DOMAIN_VERSION = "1";
 
 /** Meydan okumanın ÜST SINIR ömrü: beş dakika. */

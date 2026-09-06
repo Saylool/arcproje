@@ -54,7 +54,7 @@ export const SHARED_BILL_SCHEMA_VERSION = 2;
 export const LEGACY_AGGREGATE_SCHEMA_VERSION = 1;
 
 /** Ayrı EIP-712 alanı: ödeme talebi imzası paylaşılan hesap imzası olamaz. */
-export const SHARED_BILL_DOMAIN_NAME = "Hesabi Bol Shared Bill";
+export const SHARED_BILL_DOMAIN_NAME = "Split Bill Shared Bill";
 export const SHARED_BILL_DOMAIN_VERSION = "2";
 
 /**

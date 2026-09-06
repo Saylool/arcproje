@@ -253,7 +253,7 @@ describe("manifest", () => {
   it("TEK DİLLİDİR ve dilini bildirir", () => {
     // `<link rel="manifest">` çerez göndermez; dile göre değişemez.
     expect(m.lang).toBe("tr");
-    expect(m.name).toBe("Hesabı Böl");
+    expect(m.name).toBe("Split Bill");
   });
 });
 

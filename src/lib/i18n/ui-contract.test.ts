@@ -394,7 +394,9 @@ describe("sözlük kapsamı", () => {
     expect(dictionary).not.toMatch(/\bthe payer\b/);
     expect(dictionary).not.toMatch(/\bpayer's wallet address\b/);
     // Zorunlu terimler kullanılır.
-    expect(dictionary).toContain("Split the Bill");
+    expect(dictionary).toContain("Split Bill");
+    /* Marka TEK kelime dizisidir; eski "Split the Bill" geri sizmamali. */
+    expect(dictionary).not.toContain("Split the Bill");
     expect(dictionary).toContain("bill payer");
     expect(dictionary).toContain("Debtor");
     expect(dictionary).toContain("Recipient");
