@@ -147,6 +147,22 @@ export type ReserveQuotaOutcome =
   | { ok: false; reason: "userMissing" }
   | { ok: false; reason: "unavailable" };
 
+/**
+ * Dış sağlayıcıya yapılacak BİR çağrının paylaşılan bütçeden ayrılması.
+ *
+ * `unavailable` ayrı bir sebeptir ve "tükendi" ile karıştırılmamalıdır:
+ * biri "bu dakika yeter" der, öteki "sayacı hiç göremedim" der. Çağıran
+ * ikisine farklı davranır — tükendiğinde beklenir, ulaşılamadığında
+ * süreç içi korumaya düşülür.
+ */
+export type ReserveProviderCallOutcome =
+  /** Kredi ayrıldı. `used`, ayırmadan SONRAKİ pencere toplamıdır. */
+  | { ok: true; used: number }
+  /** Pencere doldu; çağrı YAPILMAMALI. */
+  | { ok: false; reason: "exhausted" }
+  /** Sayaca ulaşılamadı; hiçbir şey ayrılmadı. */
+  | { ok: false; reason: "unavailable" };
+
 /** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */
 export type DeleteQuotaRowsOutcome =
   | { ok: true; deleted: number }
@@ -437,6 +453,23 @@ export type SharedBillRepository = SharedBillPaymentRepository &
     globalLimit: number;
     userLimit: number;
   }): Promise<ReserveQuotaOutcome>;
+
+  /**
+   * Dış sağlayıcıya yapılacak bir çağrıyı paylaşılan bütçeden ayırır.
+   *
+   * ATOMİKTİR: sayaç sınırın altındaysa artırılır ve yeni değer döner;
+   * değilse hiçbir satır yazılmaz. Okuyup sonra yazmak yarış açardı —
+   * eşzamanlı iki örnek aynı değeri okuyup ikisi de "yer var" derdi.
+   *
+   * `windowStart` çağıran tarafından verilir (Unix dakika). Sunucunun
+   * saatini sorguya bırakmıyoruz: kova hesabı tek yerde, saf bir işlevde
+   * durur ve testlerde belirlenimci kalır.
+   */
+  reserveProviderCall(input: {
+    providerKey: string;
+    windowStart: number;
+    limit: number;
+  }): Promise<ReserveProviderCallOutcome>;
 
   /**
    * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.

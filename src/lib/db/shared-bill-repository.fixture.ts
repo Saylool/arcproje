@@ -2,6 +2,7 @@ import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
   DeleteQuotaRowsOutcome,
+  ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
@@ -132,6 +133,8 @@ export function createFakeSharedBillRepository(
   const appUsers = new Set<string>();
   /* `receipt_analysis_quota` karşılığı: "anahtar|gün" → kullanılan hak. */
   const analysisQuota = new Map<string, number>();
+  /* `provider_call_budget` karşılığı: "sağlayıcı|kova" → yapılan çağrı. */
+  const providerBudget = new Map<string, number>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -500,6 +503,37 @@ export function createFakeSharedBillRepository(
       analysisQuota.set(globalCell, globalUsed + 1);
       analysisQuota.set(userCell, userUsed + 1);
       return { ok: true, userUsed: userUsed + 1 };
+    },
+
+    async reserveProviderCall(input: {
+      providerKey: string;
+      windowStart: number;
+      limit: number;
+    }): Promise<ReserveProviderCallOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /*
+       * SQL ile AYNI ölçüt: sayaç sınırın ALTINDAYSA artar, değilse hiç
+       * yazılmaz. Gerçek sorgu bunu tek deyimde `ON CONFLICT ... DO UPDATE
+       * ... WHERE used < limit` ile yapar; sahte depo gevşek davranırsa
+       * sınırdaki kapanma yalnızca üretimde görünürdü.
+       *
+       * Sınır 1'den küçükse HİÇBİR çağrı ayrılamaz — ilk satırın da
+       * yazılmaması gerekir. SQL'de bu, `VALUES (…, 1)` satırının
+       * yazılmasını engelleyen aynı koşuldur.
+       */
+      if (input.limit < 1) {
+        return { ok: false, reason: "exhausted" };
+      }
+      const cell = `${input.providerKey}|${input.windowStart}`;
+      const used = providerBudget.get(cell) ?? 0;
+      if (used >= input.limit) {
+        return { ok: false, reason: "exhausted" };
+      }
+      providerBudget.set(cell, used + 1);
+      return { ok: true, used: used + 1 };
     },
 
     async countAllBills(): Promise<CountExpiredBillsOutcome> {
