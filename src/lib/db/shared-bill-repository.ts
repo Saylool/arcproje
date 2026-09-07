@@ -163,6 +163,49 @@ export type ReserveProviderCallOutcome =
   /** Sayaca ulaşılamadı; hiçbir şey ayrılmadı. */
   | { ok: false; reason: "unavailable" };
 
+/**
+ * PAYLAŞILAN ÖNBELLEKTE DURAN GÖZLEM.
+ *
+ * `ProviderObservation` ile aynı iki alanı taşır, üstüne yazma anını ekler.
+ * Ayrı bir tip olmasının nedeni yön: sağlayıcı tipi "CoinGecko ne dedi"yi,
+ * bu tip "depoda ne duruyor"u anlatır. Depo katmanı `@/lib/rates`'i import
+ * etmez; bağımlılık tek yönlü kalır.
+ */
+export type StoredProviderObservation = Readonly<{
+  /** Kanonik altı ondalıklı kur metni, ör. "42.123456". */
+  rateText: string;
+  /** Sağlayıcının BİLDİRDİĞİ gözlem anı (Unix saniye). */
+  observedAt: number;
+  /** Satırın YAZILDIĞI an (Unix milisaniye). */
+  storedAtMs: number;
+}>;
+
+/**
+ * Paylaşılan önbellekten okuma.
+ *
+ * `missing` ile `unavailable` AYRIDIR ve karıştırılmamalıdır: biri "henüz
+ * kimse kur çekmemiş" der (soğuk başlangıçta normaldir), öteki "depoya
+ * ulaşamadım" der (bir olaydır). Geçiş henüz uygulanmamışsa tablo yoktur ve
+ * sonuç `unavailable` olur — çağıran o durumda bugünkü süreç içi davranışına
+ * düşer, hiçbir şey kırılmaz.
+ */
+export type ReadProviderRateCacheOutcome =
+  | { ok: true; observation: StoredProviderObservation }
+  | { ok: false; reason: "missing" }
+  | { ok: false; reason: "unavailable" };
+
+/**
+ * Paylaşılan önbelleğe yazma.
+ *
+ * `stored`, YAZININ KAZANIP KAZANMADIĞINI söyler. Yazma monotondur: depoda
+ * daha YENİ bir gözlem varsa üzerine yazılmaz ve `stored: false` döner. Bu
+ * bir hata değildir; yavaş bir yanıtın eski veriyle taze veriyi ezmesini
+ * engelleyen normal sonuçtur.
+ */
+export type WriteProviderRateCacheOutcome =
+  | { ok: true; stored: boolean }
+  | { ok: false; reason: "unavailable" };
+
 /** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */
 export type DeleteQuotaRowsOutcome =
   | { ok: true; deleted: number }
@@ -470,6 +513,38 @@ export type SharedBillRepository = SharedBillPaymentRepository &
     windowStart: number;
     limit: number;
   }): Promise<ReserveProviderCallOutcome>;
+
+  /**
+   * Paylaşılan önbellekteki SON gözlemi okur.
+   *
+   * NEDEN VAR: `reserveProviderCall` yukarı akış çağrılarının SAYISINI bütün
+   * örnekler adına sınırlar, ama sonucu paylaşmazdı. Sonuç paylaşılmayınca
+   * limitin bedelini önbellek isabeti değil KULLANICI ödüyordu: krediyi
+   * kapamayan eşzamanlı örnekler, taze kur yan taraftaki örneğin belleğinde
+   * dururken `exhausted` görüp hata döndürüyordu.
+   *
+   * TAZELİK BURADA KARARLAŞTIRILMAZ. Depo satırı olduğu gibi verir; yaşın
+   * kabul edilebilir olup olmadığı çağıranın işidir ve süreç içi önbellekle
+   * BİREBİR aynı kontrolden geçer.
+   */
+  readProviderRateCache(input: {
+    providerKey: string;
+  }): Promise<ReadProviderRateCacheOutcome>;
+
+  /**
+   * Paylaşılan önbelleğe gözlemi yazar (varsa üzerine).
+   *
+   * MONOTONDUR: yalnızca depodakinden DAHA YENİ bir gözlem yazılır. Yavaş
+   * bir sağlayıcı yanıtı geç döndüğünde, o sırada başka bir örneğin yazdığı
+   * taze veriyi ezmemelidir — karşılaştırma `observedAt` üzerinden yapılır,
+   * yazma anı üzerinden değil.
+   */
+  writeProviderRateCache(input: {
+    providerKey: string;
+    rateText: string;
+    observedAt: number;
+    storedAtMs: number;
+  }): Promise<WriteProviderRateCacheOutcome>;
 
   /**
    * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.

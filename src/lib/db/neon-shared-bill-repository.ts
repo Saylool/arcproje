@@ -9,8 +9,10 @@ import {
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
   DeleteQuotaRowsOutcome,
+  ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
+  WriteProviderRateCacheOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -488,6 +490,50 @@ ON CONFLICT (provider_key, window_start) DO UPDATE
   SET used = provider_call_budget.used + 1
   WHERE provider_call_budget.used < $3::int
 RETURNING used
+`;
+
+/*
+ * PAYLAŞILAN KUR ÖNBELLEĞİ — okuma.
+ *
+ * Sağlayıcı başına TEK satır; erişim birincil anahtar üzerindendir. Tazelik
+ * BURADA kararlaştırılmaz: satır olduğu gibi verilir, yaşın kabul edilebilir
+ * olup olmadığına çağıran karar verir ve bunu süreç içi önbellekle BİREBİR
+ * aynı kontrolle yapar.
+ */
+const READ_PROVIDER_RATE_CACHE = `
+SELECT rate_text, observed_at, stored_at
+FROM provider_rate_cache
+WHERE provider_key = $1
+`;
+
+/*
+ * PAYLAŞILAN KUR ÖNBELLEĞİ — yazma. MONOTONDUR.
+ *
+ * Koşul iki eksende de geriye gitmeyi engeller:
+ *
+ *  - `observed_at <` : yavaş dönen bir yanıtın ESKİ gözlemi, o sırada başka
+ *    bir örneğin yazdığı taze gözlemi ezemez. Karşılaştırma yazma anına
+ *    değil, sağlayıcının bildirdiği gözlem anına bakar.
+ *
+ *  - eşitlikte `stored_at <` : CoinGecko aynı `last_updated_at` değerini
+ *    dakikalarca döndürebilir. Aynı gözlem yeniden DOĞRULANDIĞINDA yazma
+ *    anı tazelenmelidir, yoksa TTL hiç ilerlemez ve her örnek boşuna
+ *    yeniden çağrı yapar. Ama bu tazeleme de geriye gitmemeli.
+ *
+ * `RETURNING` yalnızca yazma GERÇEKLEŞTİĞİNDE satır verir; sıfır satır
+ * "daha eskiydi, yazılmadı" demektir ve bir HATA DEĞİLDİR.
+ */
+const WRITE_PROVIDER_RATE_CACHE = `
+INSERT INTO provider_rate_cache (provider_key, rate_text, observed_at, stored_at)
+VALUES ($1, $2, $3::bigint, $4::bigint)
+ON CONFLICT (provider_key) DO UPDATE
+  SET rate_text   = excluded.rate_text,
+      observed_at = excluded.observed_at,
+      stored_at   = excluded.stored_at
+  WHERE provider_rate_cache.observed_at < excluded.observed_at
+     OR (provider_rate_cache.observed_at = excluded.observed_at
+         AND provider_rate_cache.stored_at < excluded.stored_at)
+RETURNING stored_at
 `;
 
 const COUNT_ALL_BILLS = `
@@ -1542,6 +1588,87 @@ export async function createNeonSharedBillRepository(
           return { ok: false, reason: "unavailable" };
         }
         return { ok: true, used: parsed };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async readProviderRateCache(input: {
+      providerKey: string;
+    }): Promise<ReadProviderRateCacheOutcome> {
+      try {
+        const rows = (await sql.query(READ_PROVIDER_RATE_CACHE, [
+          input.providerKey,
+        ])) as {
+          rate_text: unknown;
+          observed_at: unknown;
+          stored_at: unknown;
+        }[];
+        const row = rows[0];
+        if (row === undefined) {
+          /*
+           * Satır YOK. Soğuk bir dağıtımda normaldir — henüz kimse kur
+           * çekmemiş. `unavailable` ile karıştırılmaz: biri "daha yazılmadı",
+           * öteki "depoyu göremedim" demektir.
+           */
+          return { ok: false, reason: "missing" };
+        }
+        /*
+         * `bigint` sütunları sürücüden metin olarak da gelebilir; ikisi de
+         * kabul edilir. Değerler güvenli tam sayı aralığındadır: Unix
+         * saniye ~1.7e9, Unix milisaniye ~1.7e12.
+         */
+        const toInt = (value: unknown): number | null => {
+          const parsed = typeof value === "number" ? value : Number(value);
+          return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+        };
+        const rateText = row.rate_text;
+        const observedAt = toInt(row.observed_at);
+        const storedAtMs = toInt(row.stored_at);
+        if (
+          typeof rateText !== "string" ||
+          observedAt === null ||
+          storedAtMs === null
+        ) {
+          /*
+           * Şekli tanınmayan satır KULLANILMAZ. Kısıtlar bunu zaten
+           * engeller; buradaki kontrol, sürücü davranışı değişirse sessizce
+           * bozuk veri taşımamak içindir.
+           */
+          return { ok: false, reason: "unavailable" };
+        }
+        return {
+          ok: true,
+          observation: { rateText, observedAt, storedAtMs },
+        };
+      } catch {
+        /*
+         * Geçiş henüz uygulanmamışsa tablo yoktur ve buraya düşülür. Çağıran
+         * o durumda bugünkü süreç içi davranışına döner; hiçbir şey kırılmaz.
+         */
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async writeProviderRateCache(input: {
+      providerKey: string;
+      rateText: string;
+      observedAt: number;
+      storedAtMs: number;
+    }): Promise<WriteProviderRateCacheOutcome> {
+      try {
+        const rows = (await sql.query(WRITE_PROVIDER_RATE_CACHE, [
+          input.providerKey,
+          input.rateText,
+          input.observedAt,
+          input.storedAtMs,
+        ])) as { stored_at: unknown }[];
+        /*
+         * Sıfır satır = depodaki gözlem daha yeniydi, yazma atlandı. Bu
+         * beklenen bir sonuçtur; `ok: true` içinde `stored: false` olarak
+         * bildirilir ve bir hataya dönüştürülmez.
+         */
+        return { ok: true, stored: rows.length > 0 };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

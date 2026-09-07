@@ -780,6 +780,7 @@ Tek tek uygulamak istenirse sıra şudur:
 | `0004_saved_contacts.sql` | Kayıtlı kişiler (kullanıcının adres defteri) | Kişi kaydetme ve öneriler |
 | `0005_receipt_analysis_quota.sql` | Fiş analizi kotası (OpenAI maliyet sınırı) | Kota sayımı — **analiz sınırsız çalışır** |
 | `0006_provider_call_budget.sql` | Örnekler arası CoinGecko çağrı bütçesi | Örnekler arası koruma — **kur servisi tek örneklik korumaya düşer** |
+| `0007_provider_rate_cache.sql` | Örnekler arası kur önbelleği (son gözlem) | Paylaşılan önbellek — **kur yalnızca süreç belleğinde tutulur; krediyi kapamayan örnekler kullanıcıya hata döner** |
 
 Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/db/migrations.test.ts)):
 `migrations/` altına eklenen ama burada anılmayan bir dosya kapıyı düşürür.
@@ -1192,6 +1193,53 @@ Ayrıca `APP_ORIGIN` **yerelde tanımlı değildir**. Geliştirmede sorun çıka
 çünkü `DEVELOPMENT_APP_ORIGIN` (`http://localhost:3000`) devreye girer. Üretimde
 ise **zorunludur**: eksikse ortak hesap erişim uçları
 (`challenge` ve `resolve`) **503 `SERVICE_NOT_CONFIGURED`** döner.
+
+### Örnekler arası kur önbelleği
+
+0006 çağrıların **sayısını** paylaştırdı ama **sonucunu** paylaştırmadı. Tek
+başına bu bileşim zararlıdır: limit paylaşılıp sonuç paylaşılmayınca korumanın
+bedelini önbellek isabeti değil **kullanıcı** öder. Penceredeki krediyi
+kapamayan eşzamanlı örnekler — taze kur yan taraftaki örneğin belleğinde
+dururken — `exhausted` görüp "kur alınamadı" döndürüyordu. Arıza kullanıcı
+sayısıyla değil **eşzamanlılıkla** büyür; ilk kalabalık akşamda görülür.
+
+`migrations/0007_provider_rate_cache.sql` bunu kapatır. Önbellek artık iki
+katmanlıdır:
+
+| Katman | Nerede | Ne yapar |
+| --- | --- | --- |
+| L1 | süreç belleği | Bedava ve anlık; soğuk başlangıçta boş, örnekler arası **paylaşılmaz** |
+| L2 | `provider_rate_cache` | Bütün örneklerin gördüğü **son gözlem** |
+
+Sıra: **L1 → L2 → soğuma → bütçe → sağlayıcı.**
+
+- **L2, soğuma kontrolünden ÖNCE okunur.** Soğuma yukarı akışa gitmeyi
+  durdurmak içindir; paylaşılan önbellekten okumak yukarı akışa gitmez. Ters
+  sırada, bütçe reddi yüzünden soğumaya girmiş örnek — düzeltmenin konusu tam
+  da o örnek — elinin altındaki taze kuru yine kullanamazdı.
+- **Tazelik ölçütü L1 ile birebir aynıdır**: hem depolama TTL'i hem de
+  `QUOTE_MAX_OBSERVATION_AGE_MS` yaş sınırı. Verinin paylaşılan bir yerden
+  gelmesi **hiçbir doğrulamayı gevşetmez**; teklif her durumda taze basılır
+  (yeni `quoteId`, yeni pencere, yeni HMAC etiketi).
+- **Yazma monotondur ve bunu SQL zorlar**: depoda daha yeni bir gözlem varsa
+  üzerine yazılmaz. Yavaş dönen bir yanıt taze veriyi ezemez.
+- **Yazma beklenir, ateşle-unut değil**: sunucusuz çalışmada yanıt döndükten
+  sonra bekleyen iş çalışmayabilir. Bedeli yalnızca sağlayıcıya gidilen yolda
+  tek bir sorgudur.
+- **L2 okunamazsa engellenmez**: geçiş uygulanmadan da kod doğru çalışır ve
+  eski tek örneklik davranışa düşer. Sessiz kalmaz — pencere başına bir kez
+  günlüğe düşer, ki uygulanmamış geçiş görünür olsun.
+
+**TTL 60 → 240 saniye.** Teklif ömrü `min(300 sn, 600 sn − gözlem yaşı)`
+olduğu için 300 saniyeye kadar eskimiş bir gözlem hâlâ **tam 300 saniyelik**
+teklif verir; 240 saniyelik TTL bu eşiğin altında kalır ve **teklif ömründen
+hiçbir şey götürmez**. Eski 60 saniye, izin verilen gözlem yaşının altıda
+biriydi ve bedelini CoinGecko Demo kotasından ödüyordu.
+
+**Kalan sınır:** iki örnek tam aynı anda gelip ikisi de L2'yi boş bulursa,
+kazanan yazana kadar kaybeden yine hata döndürebilir. Bunu tümüyle kapatmak
+dağıtık bir kilit ister; TTL başına bir kez ve saniyenin altında süren bu
+artık, düzeltilen sürekli duruma göre önemsizdir.
 
 ## Fiş analizi nasıl çalışıyor
 

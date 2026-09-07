@@ -35,24 +35,52 @@ import { createQuoteId, readQuoteSecret, signRateQuote } from "./quote-auth";
  * Amaç, her bileşen render'ı veya her kullanıcı için bir CoinGecko kredisi
  * harcamamaktır.
  *
- * SINIRLAR — ÇAPRAZ ÖRNEK KOTA KORUMASI YOKTUR. Önbellek ve soğuma
- * SÜREÇ İÇİDİR: yalnızca tek bir Node.js örneğini korur. Herkese açık bir
- * Vercel dağıtımında her soğuk başlangıç ve her eşzamanlı sunucusuz örnek
- * kendi önbelleğini tutar; toplam CoinGecko hızını hiçbir şey sınırlamaz.
- * Bu yüzden buradaki koruma bir GARANTİ değil, tek örneklik bir
- * iyileştirmedir. Örnekler arası koruma bir DAĞITIM GEREKSİNİMİDİR ve bu
- * depoda KARŞILANMAMIŞTIR: paylaşılan bir sayaç/oran sınırlayıcı (Redis/KV)
- * ya da Vercel firewall/rate limiting yapılandırması dağıtım tarafında
- * ayrıca kurulmalıdır. Bu odaklı düzeltmede böyle bir bağımlılık
- * EKLENMEMİŞTİR.
+ * ÖRNEKLER ARASI DURUM İKİ TABLODADIR ve ikisi de PAYLAŞILIR:
+ *
+ *   `provider_call_budget` (0006)  yukarı akış çağrılarının SAYISINI sınırlar
+ *   `provider_rate_cache`  (0007)  o çağrıların SONUCUNU paylaşır
+ *
+ * İkincisi olmadan birincisi kendi başına ZARARLIDIR: limit paylaşılıp sonuç
+ * paylaşılmayınca, korumanın bedelini önbellek isabeti değil KULLANICI öder.
+ * Penceredeki krediyi kapamayan eşzamanlı örnekler, taze kur yan taraftaki
+ * örneğin belleğinde dururken `exhausted` görüp hata döndürürdü.
+ *
+ * SOĞUMA hâlâ SÜREÇ İÇİDİR ve öyle kalması yeterlidir: görevi bu örneğin
+ * yukarı akışı dövmesini engellemektir, küresel bir garanti vermek değil.
+ *
+ * YAPILANDIRMA YOKSA ENGEL DE YOK: `DATABASE_URL` tanımlı değilse ya da geçiş
+ * henüz uygulanmamışsa iki tablo da sessizce devre dışı kalır ve servis
+ * eski, tek örneklik davranışına düşer — hiçbir şey kırılmaz.
  *
  * Her teklif, önbellekten gelse bile TAZE basılır: yeni quoteId, yeni
  * issuedAt/expiresAt ve yeni HMAC etiketi alır; bayat bir gözlem `observedAt`
  * üzerinden hâlâ sınırlıdır.
  */
 
-/** Sağlayıcı sonucunun önbellekte kalma süresi. */
-export const PROVIDER_CACHE_TTL_MS = 60 * 1000;
+/**
+ * Sağlayıcı sonucunun önbellekte (L1 ve L2) kalma süresi.
+ *
+ * NEDEN 240 SANİYE — VE NEDEN BU TEKLİF ÖMRÜNDEN HİÇBİR ŞEY GÖTÜRMEZ:
+ *
+ * Teklif ömrü iki sınırın küçüğüdür (bkz. `mintUsdcTryQuote`):
+ *
+ *     kalan ömür = min(QUOTE_LIFETIME_MS, QUOTE_MAX_OBSERVATION_AGE_MS − yaş)
+ *                = min(300 sn, 600 sn − gözlem yaşı)
+ *
+ * 300 saniyeye kadar eskimiş bir gözlem hâlâ TAM 300 saniyelik teklif verir;
+ * kayıp ancak 300 saniyeden sonra başlar. 240 saniyelik TTL bu eşiğin altında
+ * kalır ve 60 saniyelik pay bırakır.
+ *
+ * ESKİ DEĞER 60 SANİYEYDİ: izin verilen gözlem yaşının altıda biri, yani
+ * gereksiz sıkı. Bedelini CoinGecko kotasından ödüyordu — Demo katmanının
+ * AYLIK tavanı var ve düzenli trafikte dakikada bir çağrı onu ayın ortasında
+ * bitirir. Dört kat uzatmak, çağrı sayısını dörtte bire indirir.
+ *
+ * DOĞRULAMA SINIRI DEĞİŞMEDİ: `QUOTE_MAX_OBSERVATION_AGE_MS` yaş kontrolü
+ * yerinde durur ve hem L1'e hem L2'ye aynen uygulanır. Bu sabit yalnızca
+ * "ne sıklıkla yeniden çekilir" sorusunu yanıtlar.
+ */
+export const PROVIDER_CACHE_TTL_MS = 240 * 1000;
 
 /**
  * NEGATİF ÖNBELLEK (soğuma).
@@ -67,10 +95,7 @@ export const COOLDOWN_MAX_MS = 120 * 1000;
 type CacheEntry = { observation: ProviderObservation; storedAtMs: number };
 
 let cachedObservation: CacheEntry | null = null;
-let inflight: Promise<
-  | { ok: true; observation: ProviderObservation }
-  | { ok: false; code: ProviderFailureCode; retryAfterSeconds: number | null }
-> | null = null;
+let inflight: Promise<ObservationResult> | null = null;
 let cooldownUntilMs = 0;
 let consecutiveFailures = 0;
 let lastFailureCode: ProviderFailureCode | null = null;
@@ -113,6 +138,92 @@ function noteBudgetUnavailable(nowMs: number, log: (line: string) => void): void
   );
 }
 
+/**
+ * PAYLAŞILAN ÖNBELLEĞİ OKUYAN VE YAZAN İŞLEVLER.
+ *
+ * Bütçe sorucusuyla aynı gerekçe: enjekte edilebilir olmaları testleri
+ * belirlenimci tutar ve bu modülü Postgres'ten habersiz bırakır.
+ * Varsayılanları tembel yüklenir.
+ */
+export type SharedRateCacheEntry = Readonly<{
+  observation: ProviderObservation;
+  /** Kaydın paylaşılan depoya YAZILDIĞI an; TTL bundan hesaplanır. */
+  storedAtMs: number;
+}>;
+
+export type SharedRateCacheReadResult =
+  | { ok: true; entry: SharedRateCacheEntry }
+  /**
+   * `missing` ve `unconfigured` OLAY DEĞİLDİR: biri "henüz kimse yazmamış"
+   * (soğuk dağıtımda normal), öteki "veritabanı hiç kurulmamış" (yerelde
+   * normal) demektir. `unavailable` ise bir olaydır — depo kurulu ama
+   * ulaşılamadı, ya da geçiş henüz uygulanmadı.
+   */
+  | { ok: false; reason: "missing" | "unconfigured" | "unavailable" };
+
+export type SharedRateCacheReader = () => Promise<SharedRateCacheReadResult>;
+export type SharedRateCacheWriter = (
+  entry: SharedRateCacheEntry,
+) => Promise<void>;
+
+async function defaultSharedCacheReader(): Promise<SharedRateCacheReadResult> {
+  const { readCoinGeckoRateCache } = await import(
+    "@/lib/db/provider-rate-cache-service"
+  );
+  const outcome = await readCoinGeckoRateCache();
+  if (!outcome.ok) {
+    return { ok: false, reason: outcome.reason };
+  }
+  return {
+    ok: true,
+    entry: {
+      observation: {
+        rateText: outcome.observation.rateText,
+        observedAt: outcome.observation.observedAt,
+      },
+      storedAtMs: outcome.observation.storedAtMs,
+    },
+  };
+}
+
+async function defaultSharedCacheWriter(
+  entry: SharedRateCacheEntry,
+): Promise<void> {
+  const { writeCoinGeckoRateCache } = await import(
+    "@/lib/db/provider-rate-cache-service"
+  );
+  await writeCoinGeckoRateCache({
+    rateText: entry.observation.rateText,
+    observedAt: entry.observation.observedAt,
+    storedAtMs: entry.storedAtMs,
+  });
+}
+
+/**
+ * Paylaşılan önbelleğe ulaşılamadığında bir kez günlüğe düşer.
+ *
+ * `noteBudgetUnavailable` ile AYNI gerekçe ve aynı pencere kuralı. Ayrı bir
+ * çıpası vardır: ikisi farklı arızalardır ve biri ötekini susturmamalıdır.
+ *
+ * Bu satır aynı zamanda geçişin uygulanmadığını söyler — tablo yoksa depo
+ * `unavailable` döner ve mesaj pencere başına bir kez görünür.
+ */
+let lastSharedUnavailableWindow: number | null = null;
+
+function noteSharedCacheUnavailable(
+  nowMs: number,
+  log: (line: string) => void,
+): void {
+  const window = budgetWindowStart(nowMs);
+  if (lastSharedUnavailableWindow === window) {
+    return;
+  }
+  lastSharedUnavailableWindow = window;
+  log(
+    "[rates] paylasilan kur onbellegine ulasilamadi; kur bu pencerede yalnizca surec icinde tutuluyor",
+  );
+}
+
 /** Testler arasında süreç durumunu sıfırlar. */
 export function resetRateQuoteCache(): void {
   cachedObservation = null;
@@ -121,6 +232,7 @@ export function resetRateQuoteCache(): void {
   consecutiveFailures = 0;
   lastFailureCode = null;
   lastUnavailableWindow = null;
+  lastSharedUnavailableWindow = null;
 }
 
 /**
@@ -163,7 +275,7 @@ function nextCooldownMs(retryAfterSeconds: number | null): number {
   return Math.min(COOLDOWN_BASE_MS * 2 ** exponent, COOLDOWN_MAX_MS);
 }
 
-export type ObservationSource = "cache" | "provider";
+export type ObservationSource = "cache" | "shared" | "provider";
 
 export type ObservationResult =
   | { ok: true; observation: ProviderObservation; source: ObservationSource }
@@ -178,17 +290,36 @@ export type ObservationResult =
 /**
  * Önbellekli/tekilleştirilmiş gözlem. Aynı pencerede gelen ikinci istek yeni
  * bir yukarı akış çağrısı başlatmaz, devam edeni bekler.
+ *
+ * İKİ KATMANLI ÖNBELLEK:
+ *
+ *   L1  süreç içi  — bu Node.js örneğinin belleği. Bedava ve anlıktır, ama
+ *                    soğuk başlangıçta boştur ve örnekler arasında PAYLAŞILMAZ.
+ *   L2  Postgres   — bütün örneklerin gördüğü son gözlem.
+ *
+ * L2'NİN VARLIK NEDENİ: 0006 ile yukarı akış çağrılarının SAYISI bütün
+ * örnekler adına sınırlandı, ama SONUÇ paylaşılmıyordu. Sonuç paylaşılmayınca
+ * limitin bedelini önbellek isabeti değil KULLANICI ödüyordu — penceredeki
+ * krediyi kapamayan eşzamanlı örnekler, taze kur yan taraftaki örneğin
+ * belleğinde dururken `exhausted` görüp hata döndürüyordu.
+ *
+ * KALAN SINIR: iki örnek TAM AYNI ANDA gelir ve ikisi de L2'yi boş bulursa,
+ * kazanan yazana kadar kaybeden yine hata döndürebilir. Bunu tümüyle kapatmak
+ * dağıtık bir kilit ister; TTL başına bir kez ve saniyenin altında süren bu
+ * artık, düzeltilen SÜREKLİ duruma göre önemsizdir.
  */
 export async function getUsdcTryObservation(
   nowMs: number,
-  options: FetchQuoteOptions & ClockOptions & BudgetOptions = {},
+  options: FetchQuoteOptions &
+    ClockOptions &
+    BudgetOptions &
+    SharedCacheOptions = {},
 ): Promise<ObservationResult> {
-  const clock = options.clock ?? Date.now;
   /*
-   * Önbellek isabeti TEK BAŞINA yeterli değildir. 60 saniyelik depolama TTL'i
-   * içinde bile gözlem, izin verilen yaş sınırını geçmiş olabilir; o zaman
-   * kayıt atılır ve taze veri çekilir. Aksi hâlde sınırı aşmış bir gözlem
-   * TTL boyunca "geçerli" gibi dönerdi.
+   * L1 isabeti TEK BAŞINA yeterli değildir. Depolama TTL'i içinde bile gözlem,
+   * izin verilen yaş sınırını geçmiş olabilir; o zaman kayıt atılır ve taze
+   * veri çekilir. Aksi hâlde sınırı aşmış bir gözlem TTL boyunca "geçerli"
+   * gibi dönerdi.
    */
   if (
     cachedObservation !== null &&
@@ -204,6 +335,74 @@ export async function getUsdcTryObservation(
     cachedObservation = null;
   }
 
+  /*
+   * TEK UÇUŞ. `inflight` ataması SENKRONDUR ve öyle KALMALIDIR: bu satırdan
+   * önce bir `await` olsaydı, beklerken giren ikinci istek de
+   * `inflight === null` görür, ikinci bir yukarı akış çağrısı ve ikinci bir
+   * bütçe kredisi başlatırdı.
+   *
+   * Paylaşılan önbellek okuması, soğuma kontrolü ve bütçe ayırma bu yüzden
+   * uçuşun İÇİNDEDİR; hiçbiri bu atamadan önce beklenmez.
+   */
+  if (inflight === null) {
+    inflight = resolveObservation(nowMs, options).finally(() => {
+      // Zaman aşımından sonra da temizlenir: sonraki istek kilitlenmez.
+      inflight = null;
+    });
+  }
+
+  return inflight;
+}
+
+/**
+ * Uçuşun gövdesi: L2 → soğuma → bütçe → sağlayıcı.
+ *
+ * SIRA BİLİNÇLİDİR. Özellikle L2 okuması soğuma kontrolünden ÖNCEDİR: soğuma
+ * YUKARI AKIŞA gitmeyi durdurmak içindir, paylaşılan önbellekten okumak yukarı
+ * akışa gitmez. Ters sırada, bütçe reddi yüzünden soğumaya girmiş örnek —
+ * düzeltmenin konusu tam da o örnek — elinin altındaki taze kuru yine
+ * kullanamaz, kullanıcıya hata dönerdi.
+ */
+async function resolveObservation(
+  nowMs: number,
+  options: FetchQuoteOptions & ClockOptions & BudgetOptions & SharedCacheOptions,
+): Promise<ObservationResult> {
+  const clock = options.clock ?? Date.now;
+  const log = options.log ?? ((line: string) => console.log(line));
+
+  /*
+   * L2 — PAYLAŞILAN ÖNBELLEK.
+   *
+   * Tazelik L1 ile BİREBİR AYNI ölçütle değerlendirilir: hem depolama TTL'i
+   * hem de `QUOTE_MAX_OBSERVATION_AGE_MS` yaş sınırı. Verinin paylaşılan bir
+   * yerden gelmesi hiçbir kontrolü gevşetmez.
+   */
+  const readShared = options.readSharedRateCache ?? defaultSharedCacheReader;
+  const shared = await readShared();
+  if (!shared.ok && shared.reason === "unavailable") {
+    noteSharedCacheUnavailable(nowMs, log);
+  }
+  if (
+    shared.ok &&
+    nowMs - shared.entry.storedAtMs < PROVIDER_CACHE_TTL_MS &&
+    isFreshObservation(shared.entry.observation, nowMs)
+  ) {
+    /*
+     * L1'e de yazılır ki aynı örneğin sonraki isteği sorgu yapmasın. ÇIPA
+     * paylaşılan kaydın KENDİ yazma anıdır, "şimdi" DEĞİL: aksi hâlde L1,
+     * paylaşılan TTL'in ötesine uzar ve örnek tazelemeyi bırakırdı.
+     */
+    cachedObservation = {
+      observation: shared.entry.observation,
+      storedAtMs: shared.entry.storedAtMs,
+    };
+    return {
+      ok: true,
+      observation: shared.entry.observation,
+      source: "shared",
+    };
+  }
+
   // Soğuma penceresindeyken yukarı akışa HİÇ gidilmez.
   if (nowMs < cooldownUntilMs) {
     return {
@@ -214,118 +413,100 @@ export async function getUsdcTryObservation(
     };
   }
 
-  if (inflight === null) {
+  /*
+   * BÜTÇE. Önbellekten (L1 ya da L2) karşılanan istekler buraya HİÇ ulaşmaz;
+   * sayaç kullanıcı isteğiyle değil, gerçekten harcanan krediyle orantılıdır.
+   */
+  const reserve = options.reserveProviderCall ?? defaultReserver;
+  const budget = await reserve(nowMs);
+  if (!budget.ok && budget.reason === "exhausted") {
     /*
-     * BÜTÇE UÇUŞUN İÇİNDE SORULUR — dışarıda sorulamaz.
-     *
-     * `inflight` ataması SENKRONDUR; ayırmayı bu bloğun dışında `await`
-     * etseydik, beklerken giren ikinci istek de `inflight === null` görür
-     * ve AYNI pencere için ikinci bir kredi ayırırdı. Tek uçuş yalnızca
-     * yukarı akış çağrısını değil, onun bütçesini de tekilleştirir.
-     *
-     * Önbellekten karşılanan istekler buraya hiç ulaşmaz: sayaç kullanıcı
-     * isteğiyle değil, gerçekten harcanan krediyle orantılıdır.
+     * Pencere dolu. Bu bir SAĞLAYICI HATASI DEĞİLDİR: ardışık hata sayacı
+     * artmaz ve üstel soğuma tetiklenmez. Yalnızca pencerenin sonuna kadar
+     * yukarı akışa gidilmemesi için soğuma çıpası ileri alınır.
      */
-    const reserve = options.reserveProviderCall ?? defaultReserver;
-    const log = options.log ?? ((line: string) => console.log(line));
-    inflight = reserve(nowMs)
-      .then((budget) => {
-        if (!budget.ok && budget.reason === "exhausted") {
-          /*
-           * Pencere dolu. Bu bir SAĞLAYICI HATASI DEĞİLDİR: ardışık hata
-           * sayacı artmaz ve üstel soğuma tetiklenmez. Yalnızca pencerenin
-           * sonuna kadar yukarı akışa gidilmez.
-           */
-          return {
-            ok: false as const,
-            code: "providerUnavailable" as const,
-            retryAfterSeconds: windowRetryAfterSeconds(nowMs),
-            budgetDenied: true as const,
-          };
-        }
-        if (!budget.ok && budget.reason === "unavailable") {
-          /*
-           * Sayaç kurulu ama ulaşılamadı. Bilinçli karar: ENGELLENMEZ,
-           * bugünkü süreç içi korumaya düşülür — bugünkünden kötü değildir.
-           * Ama sessiz de kalmaz; bu bir olaydır.
-           *
-           * `unconfigured` buraya girmez: paylaşılan sayacın hiç kurulmamış
-           * olması bilinen bir dağıtım durumudur, her istekte olay üretmez.
-           */
-          noteBudgetUnavailable(nowMs, log);
-        }
-        return fetchUsdcTryObservation(options);
-      })
-      .then((result) => {
-        /*
-         * ÖNCE `ok` üzerinden daraltılır, SONRA bayrağa bakılır: ters sırada
-         * TypeScript başarı dalını da kapsayan bir kesişim üretir ve
-         * `code`/`retryAfterSeconds` görünmez olur.
-         */
-        if (!result.ok && "budgetDenied" in result) {
-          /*
-           * Bütçe reddi bookkeeping'e HİÇ girmez: ardışık hata sayacı
-           * artmaz, üstel soğuma tetiklenmez. Yalnızca pencere sonuna kadar
-           * yukarı akışa gidilmemesi için soğuma çıpası ileri alınır.
-           */
-          const holdSeconds = result.retryAfterSeconds ?? 1;
-          cooldownUntilMs = Math.max(cooldownUntilMs, nowMs + holdSeconds * 1000);
-          return {
-            ok: false as const,
-            code: result.code,
-            retryAfterSeconds: holdSeconds,
-          };
-        }
-        // Çıpa: isteğin başladığı an değil, yanıtın DÖNDÜĞÜ an.
-        const settledAtMs = clock();
-
-        if (result.ok && !isFreshObservation(result.observation, settledAtMs)) {
-          /*
-           * Bayat veya gelecekte görünen bir gözlem BAŞARI SAYILMAZ ve asla
-           * olumlu önbelleğe alınmaz: aksi hâlde 60 saniye boyunca her teklif
-           * basımı aynı geçersiz veriyle düşerdi.
-           */
-          const stale = {
-            ok: false as const,
-            code: "invalidObservation" as const,
-            retryAfterSeconds: null,
-          };
-          consecutiveFailures += 1;
-          lastFailureCode = stale.code;
-          cooldownUntilMs = settledAtMs + nextCooldownMs(null);
-          return stale;
-        }
-
-        if (result.ok) {
-          cachedObservation = {
-            observation: result.observation,
-            storedAtMs: settledAtMs,
-          };
-          consecutiveFailures = 0;
-          cooldownUntilMs = 0;
-          lastFailureCode = null;
-        } else if (isCooldownWorthy(result.code)) {
-          consecutiveFailures += 1;
-          lastFailureCode = result.code;
-          cooldownUntilMs = settledAtMs + nextCooldownMs(result.retryAfterSeconds);
-        }
-        return result;
-      })
-      .finally(() => {
-        // Zaman aşımından sonra da temizlenir: sonraki istek kilitlenmez.
-        inflight = null;
-      });
+    const holdSeconds = windowRetryAfterSeconds(nowMs);
+    cooldownUntilMs = Math.max(cooldownUntilMs, nowMs + holdSeconds * 1000);
+    return {
+      ok: false,
+      code: "providerUnavailable",
+      cooldown: false,
+      retryAfterSeconds: holdSeconds,
+    };
+  }
+  if (!budget.ok && budget.reason === "unavailable") {
+    /*
+     * Sayaç kurulu ama ULAŞILAMADI. Bilinçli karar: ENGELLENMEZ, süreç içi
+     * korumaya düşülür. Ama sessiz de kalmaz; bu bir olaydır.
+     *
+     * `unconfigured` buraya girmez: paylaşılan sayacın hiç kurulmamış olması
+     * bilinen bir dağıtım durumudur, her istekte olay üretmez.
+     */
+    noteBudgetUnavailable(nowMs, log);
   }
 
-  const result = await inflight;
-  return result.ok
-    ? { ok: true, observation: result.observation, source: "provider" }
-    : {
-        ok: false,
-        code: result.code,
-        cooldown: false,
-        retryAfterSeconds: result.retryAfterSeconds,
-      };
+  const result = await fetchUsdcTryObservation(options);
+  // Çıpa: isteğin başladığı an değil, yanıtın DÖNDÜĞÜ an.
+  const settledAtMs = clock();
+
+  if (result.ok && !isFreshObservation(result.observation, settledAtMs)) {
+    /*
+     * Bayat veya gelecekte görünen bir gözlem BAŞARI SAYILMAZ ve asla olumlu
+     * önbelleğe alınmaz — ne L1'e ne L2'ye: aksi hâlde TTL boyunca her teklif
+     * basımı aynı geçersiz veriyle düşerdi.
+     */
+    consecutiveFailures += 1;
+    lastFailureCode = "invalidObservation";
+    cooldownUntilMs = settledAtMs + nextCooldownMs(null);
+    return {
+      ok: false,
+      code: "invalidObservation",
+      cooldown: false,
+      retryAfterSeconds: null,
+    };
+  }
+
+  if (!result.ok) {
+    if (isCooldownWorthy(result.code)) {
+      consecutiveFailures += 1;
+      lastFailureCode = result.code;
+      cooldownUntilMs = settledAtMs + nextCooldownMs(result.retryAfterSeconds);
+    }
+    return {
+      ok: false,
+      code: result.code,
+      cooldown: false,
+      retryAfterSeconds: result.retryAfterSeconds,
+    };
+  }
+
+  cachedObservation = {
+    observation: result.observation,
+    storedAtMs: settledAtMs,
+  };
+  consecutiveFailures = 0;
+  cooldownUntilMs = 0;
+  lastFailureCode = null;
+
+  /*
+   * L2'YE YAZ — bu değişikliğin asıl kazancı burada. Bu satır olmadan çekilen
+   * kur yalnızca bu örneğin belleğinde kalır.
+   *
+   * BEKLENİR, ateşle-unut DEĞİL: sunucusuz çalışmada yanıt döndükten sonra
+   * bekleyen iş çalışmayabilir; beklenmeyen bir yazma hiç yazılmayabilirdi.
+   * Bedeli yalnızca SAĞLAYICIYA GİDİLEN yolda tek bir sorgudur — o yol zaten
+   * yüzlerce milisaniyelik bir ağ çağrısı yapmıştır.
+   *
+   * HATASI İSTEĞİ ETKİLEMEZ: kur elde edilmiştir; paylaşamamak bir sonraki
+   * isteği pahalılaştırır, bu isteği bozmaz.
+   */
+  const writeShared = options.writeSharedRateCache ?? defaultSharedCacheWriter;
+  await writeShared({
+    observation: result.observation,
+    storedAtMs: settledAtMs,
+  }).catch(() => undefined);
+
+  return { ok: true, observation: result.observation, source: "provider" };
 }
 
 export type QuoteMintFailure = ProviderFailureCode | "secretMissing" | "invalidQuote";
@@ -365,8 +546,24 @@ export function rateTextToRational(rateText: string): {
 export type BudgetOptions = {
   /** Verilmezse varsayılan sürücü (Postgres) tembel yüklenir. */
   reserveProviderCall?: ProviderBudgetReserver;
-  /** Bütçeye ulaşılamadığında yazılan satır; verilmezse `console.log`. */
+  /**
+   * Paylaşılan bir bağımlılığa (bütçe ya da kur önbelleği) ulaşılamadığında
+   * yazılan satır; verilmezse `console.log`.
+   */
   log?: (line: string) => void;
+};
+
+/**
+ * Paylaşılan kur önbelleği bağımlılıkları.
+ *
+ * Bütçeyle aynı gerekçe: enjekte edilebilir olmaları testlerin belirlenimci
+ * kalmasını sağlar ve bu modülü Postgres'ten habersiz bırakır.
+ */
+export type SharedCacheOptions = {
+  /** Verilmezse varsayılan sürücü (Postgres) tembel yüklenir. */
+  readSharedRateCache?: SharedRateCacheReader;
+  /** Verilmezse varsayılan sürücü (Postgres) tembel yüklenir. */
+  writeSharedRateCache?: SharedRateCacheWriter;
 };
 
 export type ClockOptions = {
@@ -378,7 +575,10 @@ export type ClockOptions = {
   clock?: () => number;
 };
 
-export type MintOptions = FetchQuoteOptions & ClockOptions & BudgetOptions & {
+export type MintOptions = FetchQuoteOptions &
+  ClockOptions &
+  BudgetOptions &
+  SharedCacheOptions & {
   /**
    * Basımın BAŞLADIĞI an. Testlerde sabit başlangıç vermek içindir; teklifin
    * kendisi bu ana değil, `clock` ile okunan YERLEŞİM anına çıpalanır.
