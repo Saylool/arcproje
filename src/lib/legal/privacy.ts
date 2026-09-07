@@ -90,6 +90,19 @@ export const DISCLOSED_HOSTS: readonly string[] = [
    * içinde. Yalnızca CSP'nin rapor kipi ortaya çıkardı.
    */
   "rpc.testnet.arc.network",
+  /*
+   * YEDEK RPC SAĞLAYICILARI — yalnızca SUNUCU bağlanır, tarayıcı DEĞİL.
+   *
+   * Makbuz doğrulanırken birincil adres cevap vermezse sırayla bunlara
+   * geçilir. Hepsi Arc'ın resmî dokümanında listelenir ve aynı zinciri sunar.
+   *
+   * Tarayıcı bu adreslere hiç gitmediği için CSP'nin `connect-src` listesi
+   * büyümez; ama uygulama onlara bağlandığı için POLİTİKADA yer alırlar.
+   * Giden veri, zaten herkese açık olan bir işlem hash'idir.
+   */
+  "rpc.blockdaemon.testnet.arc.io",
+  "rpc.drpc.testnet.arc.io",
+  "rpc.quicknode.testnet.arc.io",
   "testnet.arcscan.app",
   "arcscan.app",
   "api.openai.com",
@@ -221,7 +234,7 @@ const tr: PrivacyPolicy = {
             [
               `${NETWORK} ağı ve RPC sunucuları`,
               "Cüzdan adresleri ve gönderdiğin işlemler",
-              "Transferin gerçekleşmesi. Bu veri HERKESE AÇIKTIR. Tarayıcın BİRDEN FAZLA RPC sunucusuna bağlanır: uygulamanın kendi seçtiği sunucu ve cüzdan kitinin kullandığı sunucu",
+              "Transferin gerçekleşmesi. Bu veri HERKESE AÇIKTIR. Tarayıcın BİRDEN FAZLA RPC sunucusuna bağlanır: uygulamanın kendi seçtiği sunucu ve cüzdan kitinin kullandığı sunucu. Sunucu da makbuzu doğrularken resmî listedeki RPC sağlayıcılarına sorar; biri cevap vermezse sıradakine geçer",
             ],
             ["Neon (veritabanı) ve Vercel (barındırma)", "Yukarıda sayılan kayıtlar", "Uygulamanın çalışması"],
           ],
@@ -494,7 +507,7 @@ const en: PrivacyPolicy = {
             [
               `The ${NETWORK} network and its RPC servers`,
               "Wallet addresses and the transactions you send",
-              "Making the transfer happen. This data is PUBLIC. Your browser reaches MORE THAN ONE RPC server: the one the app picks and the one the wallet kit uses",
+              "Making the transfer happen. This data is PUBLIC. Your browser reaches MORE THAN ONE RPC server: the one the app picks and the one the wallet kit uses. The server also asks the official RPC providers when it verifies a receipt, moving on to the next one if one does not answer",
             ],
             ["Neon (database) and Vercel (hosting)", "The records listed above", "Running the application"],
           ],

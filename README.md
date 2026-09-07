@@ -1474,6 +1474,45 @@ bildirilmemişti ve hiçbir test bunu yakalayamazdı.
 Ortaya çıkaran şey CSP'nin rapor kipi oldu. Bu, kipin varlık sebebi:
 bağımlılıkların gerçekte nereye bağlandığını **çalışırken** ölçmek.
 
+### Yedekli RPC (yalnızca sunucu)
+
+Makbuz doğrulaması önceden **tek** genel adrese bağlıydı: `rpc.testnet.arc.io`
+yavaşladığında ya da hız sınırına takıldığında makbuz okunamıyor ve ödeme
+kesinleştirilemiyordu. Genel testnet RPC'leri bunu düzenli olarak yapar, ve
+bu, düzeltilmesi en pahalı hata sınıfının kapısıdır: **zincirde işlem
+başarılıyken uygulamanın onu görememesi.**
+
+Artık Arc'ın resmî dokümanındaki adresler **sırayla** denenir — birincil,
+sonra Blockdaemon, dRPC ve QuickNode. Hepsi aynı zinciri sunar ve
+`arc-receipt.ts` her çağrıda chainId'yi ayrıca doğrular: yanlış zincire bağlı
+bir yedek sonucu kabul ettiremez.
+
+**Süre bütçesi DEĞİŞMEDİ ve bu bilinçli.** `finalize` üç ardışık RPC çağrısı
+yapar; her uca ayrı ayrı 8 saniye verilseydi en kötü durum uç sayısıyla
+çarpılır ve rotanın süre tavanını aşardı. Toplam sabit kalır, uçlara bölünür.
+Takas açık: yavaş ama çalışan bir birincilden erken devredilir — sağlıklı bir
+yedeğe geçmek, ölü bir uçta sekiz saniye beklemekten iyidir.
+
+Yeniden deneme **kapalıdır** (`retryCount: 0`): burada "tekrar denemek",
+sıradaki uca geçmektir. Aynı ölü uca ısrar etmek bütçeyi yer ve yedeğe hiç
+sıra gelmezdi. Sıralama da ölçüme bırakılmaz (`rank: false`) — gecikme ölçen
+bir sıralayıcı fazladan istek atar ve devretmeyi öngörülemez kılar.
+
+**Tarayıcının yüzeyi büyümez.** Yedeklere yalnızca sunucu bağlanır: cüzdana
+bildirilen adres (`wallet_addEthereumChain`) hâlâ tek, ve CSP'nin
+`connect-src` listesi olduğu gibi kalır. Üçü de testle tutulur
+([`rpc-fallback.test.ts`](src/lib/arc/rpc-fallback.test.ts)).
+
+Gizlilik politikası ise **genişler**: tarayıcı gitmiyor diye bildirim
+gerekmiyor değil — uygulama o sunuculara bağlanıyor. Üç adres de
+`DISCLOSED_HOSTS` içindedir ve politika metni artık sunucunun da birden fazla
+sağlayıcıya sorduğunu söyler.
+
+**Kalan yarım:** RPC'ye hiç ulaşılamadığında sonuç zaten "başarısız" değil
+`unavailable` sayılıyor ve kilit korunuyor — ama sunucu tarafında o kaydı
+sonradan yeniden denemeye alan bir görev **yok**. Kullanıcı uygulamayı
+kapatırsa uzlaştırma yalnızca istemcinin yoklamasına bağlı kalır.
+
 ### Bilinen eksik: `script-src`
 
 `script-src` bilerek `'unsafe-inline'` içerir. Ölçüldü: sayfa 10 satır içi

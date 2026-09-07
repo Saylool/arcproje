@@ -20,7 +20,26 @@ export type PaymentNetworkProfile = Readonly<{
   /** App Kit zincir kimliği. */
   appKitChain: "Arc_Testnet";
   chainId: number;
+  /**
+   * BİRİNCİL RPC. Cüzdana bildirilen ve tarayıcının gördüğü tek adres budur.
+   *
+   * Yedekler bilerek buraya karışmaz: `wallet_addEthereumChain` ile cüzdana
+   * verilen liste büyüdüğünde tarayıcı o adreslere de bağlanabilir, ve o an
+   * CSP ile gizlilik bildiriminin kapsamı sessizce genişlerdi.
+   */
   rpcUrl: string;
+  /**
+   * YEDEK RPC'ler — YALNIZCA SUNUCU.
+   *
+   * Arc'ın resmî dokümanında birincilin yanında üçüncü taraf sağlayıcılar da
+   * listelenir. Hepsi aynı zinciri (chainId 5042002) sunar ve makbuz
+   * doğrulaması bunu her çağrıda ayrıca kontrol eder.
+   *
+   * Sıra ÖNEMLİDİR: birincil önce denenir, listedekiler sırayla devreye girer.
+   *
+   * Kaynak: https://docs.arc.io/arc/references/connect-to-arc
+   */
+  fallbackRpcUrls: readonly string[];
   explorerUrl: string;
   /** Explorer bağlantısı doğrulanırken kabul edilen alan adı soneki. */
   explorerHostSuffix: string;
@@ -43,6 +62,12 @@ export const ARC_TESTNET_PROFILE: PaymentNetworkProfile = Object.freeze({
   appKitChain: "Arc_Testnet",
   chainId: 5042002,
   rpcUrl: "https://rpc.testnet.arc.io",
+  /* Resmî dokümanda birincilin yanında listelenen sağlayıcılar. */
+  fallbackRpcUrls: Object.freeze([
+    "https://rpc.blockdaemon.testnet.arc.io",
+    "https://rpc.drpc.testnet.arc.io",
+    "https://rpc.quicknode.testnet.arc.io",
+  ]),
   explorerUrl: "https://testnet.arcscan.app",
   explorerHostSuffix: "arcscan.app",
   faucetUrl: "https://faucet.circle.com",
