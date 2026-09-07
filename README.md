@@ -764,13 +764,22 @@ DATABASE_URL=
 
 Şema **elle** uygulanır; tablolar istek işleyicisi içinde tembel oluşturulmaz.
 Geçişler **numara sırasıyla ve eksiksiz** uygulanır — biri atlanırsa uygulama
-derlenir ve testler geçer, ama o tabloya dokunan akış çalışma anında düşer:
+derlenir ve testler geçer, ama o tabloya dokunan akış çalışma anında düşer.
+
+Uygulama ve takip [`scripts/migrate.mjs`](scripts/migrate.mjs) ile yapılır:
 
 ```bash
-for f in migrations/[0-9][0-9][0-9][0-9]_*.sql; do psql "$DATABASE_URL" -f "$f"; done
+npm run migrate
 ```
 
-Tek tek uygulamak istenirse sıra şudur:
+```bash
+npm run migrate -- --apply
+```
+
+Argümansız çalışma **hiçbir şey uygulamaz**; yalnızca durumu yazar. Ayrıntı ve
+tek seferlik temel alma adımı için aşağıdaki *Geçiş çalıştırıcısı* bölümüne bak.
+
+Geçişlerin listesi ve sırası:
 
 | Geçiş | Ne ekler | Atlanırsa ne kırılır |
 | --- | --- | --- |
@@ -781,6 +790,7 @@ Tek tek uygulamak istenirse sıra şudur:
 | `0005_receipt_analysis_quota.sql` | Fiş analizi kotası (OpenAI maliyet sınırı) | Kota sayımı — **analiz sınırsız çalışır** |
 | `0006_provider_call_budget.sql` | Örnekler arası CoinGecko çağrı bütçesi | Örnekler arası koruma — **kur servisi tek örneklik korumaya düşer** |
 | `0007_provider_rate_cache.sql` | Örnekler arası kur önbelleği (son gözlem) | Paylaşılan önbellek — **kur yalnızca süreç belleğinde tutulur; krediyi kapamayan örnekler kullanıcıya hata döner** |
+| `0008_schema_migrations.sql` | Uygulanmış geçişlerin kaydı (sürüm, ad, checksum) | Takip — **hangi geçişin uygulandığı yine bilinmez** |
 
 Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/db/migrations.test.ts)):
 `migrations/` altına eklenen ama burada anılmayan bir dosya kapıyı düşürür.
@@ -789,14 +799,93 @@ Bu listenin eksiksizliği bir testle zorlanır ([`migrations.test.ts`](src/lib/d
 kontrollü **503 `SERVICE_NOT_CONFIGURED`** döner ve bellek içi bir yedeğe
 **asla** düşmez.
 
-Geçişlerin hepsi `IF NOT EXISTS` kullanır: yukarıdaki döngü **zaten uygulanmış
-bir şemada yeniden çalıştırılabilir**, var olanı bozmaz.
+Geçişlerin hepsi `IF NOT EXISTS` kullanır, yani bugüne kadar tekrar
+çalıştırmak zararsızdı. **Bu garantiye yaslanılmaz**: `IF NOT EXISTS` var olan
+bir tabloyu değiştirmez, bu yüzden ilk `ALTER TABLE ... ADD COLUMN` yazıldığı
+gün tekrar çalıştırmak ya düşer ya iki kez uygulanır. Çalıştırıcı bu yüzden
+neyin uygulandığını kaydeder ve uygulanmışı bir daha çalıştırmaz.
 
 Part 3'ün ödeme tabloları (teklif, deneme ve borç ödeme durumu) ayrı bir dosya
 yerine **aynı `0001` geçişine** eklenmişti; o karar alındığında şema henüz
 hiçbir ortamda uygulanmamıştı. Bu gerekçe **artık geçerli değildir**:
 `CREATE TABLE IF NOT EXISTS` var olan bir tabloyu **değiştirmez**, bu yüzden
 bundan sonra eklenecek her alan kendi geçiş dosyasını ister.
+
+### Geçiş çalıştırıcısı
+
+0008'e kadar geçişler elle uygulanıyordu ve **hangisinin uygulandığını
+kaydeden hiçbir şey yoktu**; tek öğrenme yolu veritabanına bakıp "şu tablo var
+mı" diye çıkarım yapmaktı. Onbeş test kullanıcısındayken veritabanı silinip
+yeniden kurulabilir; binde kurulamaz.
+
+Üç mod vardır ve **varsayılan hiçbir şey uygulamaz**:
+
+| Komut | Ne yapar |
+| --- | --- |
+| `npm run migrate` | Durumu yazar: uygulanmış, bekleyen, sorunlu. Hiçbir geçiş **uygulamaz** |
+| `npm run migrate -- --apply` | Bekleyenleri sırayla uygular |
+| `npm run migrate -- --baseline NNNN` | **Tek seferlik**; aşağıya bak |
+
+**Tek istisna:** üç mod da, daha ilk okumadan önce kayıt tablosunun kendisini
+(`0008`) koşulsuz uygular. Tavuk-yumurta: kaydı okuyabilmek için tablonun var
+olması gerekir, ama tabloyu getiren de bir geçiştir. Dosya `IF NOT EXISTS`
+kullandığı için bu tekrarlanabilir ve **uygulama şemasına dokunmaz** — yalnızca
+takip tablosunu yaratır. Yani argümansız çalıştırmak da veritabanına yazar;
+"salt okunur" değildir.
+
+Çalışma biçimi:
+
+- **Geçiş ve kaydı AYNI işlemdedir.** Dosyanın sarmalayıcı `BEGIN;`/`COMMIT;`
+  satırları çıkarılır, gövde ile kayıt satırı tek işleme alınır. Aksi hâlde
+  arada kalan bir çökme, uygulanmış ama kaydedilmemiş bir geçiş bırakırdı.
+  SQL **noktalı virgülden bölünmez** — dize içindeki bir noktalı virgülde
+  bozulan klasik hata budur; yalnızca kendi satırında duran iki anahtar sözcük
+  çıkarılır ve dosyanın gerçekten öyle sarıldığı doğrulanır.
+- **Checksum tutulur.** Uygulanmış bir dosya sonradan düzenlenirse çalıştırıcı
+  durur. Depo ile veritabanının sessizce ayrışması, başka hiçbir kontrolün
+  görmediği bir hata sınıfıdır.
+- **Sıra dışı geçiş reddedilir.** İki dal paralel çalışıp geç merge edildiğinde
+  0003 uygulanmışken 0002 sonradan gelebilir; sessizce uygulanırsa şema kimsenin
+  gözden geçirmediği bir sırayla oluşur.
+- **Dağıtımda otomatik çalışmaz** ve bu bilinçlidir: kötü bir geçiş siteyi
+  indirir.
+- **`DATABASE_URL` asla yazdırılmaz** — ne günlüğe, ne hata mesajına.
+
+#### Tek seferlik temel alma
+
+Çalıştırıcı, geçişleri **zaten elle uygulanmış** bir veritabanına geliyor. O
+geçişler yeniden çalıştırılmamalı, ama kaydedilmezlerse "bekliyor" sanılır.
+`--baseline`, verilen sürüme kadarki geçişleri **çalıştırmadan** kaydeder:
+
+```bash
+npm run migrate -- --baseline 0007
+```
+
+Sınır **elle verilir ve varsayılanı yoktur**. "Hepsini işaretle" demek, henüz
+uygulanmamış bir geçişi de uygulanmış saymak olurdu — sessizce atlanan bir
+tablo en pahalı hata sınıfıdır. Bu yüzden komut, veritabanında **gerçekten
+uygulanmış son sürümü** ister.
+
+İddia ayrıca **sınanır**: işaretlenecek her geçişin yarattığı tabloların
+gerçekten var olduğu doğrulanır; biri yoksa temel alma reddedilir. Yalnızca
+`ALTER TABLE` yapan bir geçiş (ör. 0003) doğrulanamaz ve bu açıkça bildirilir.
+
+Temel alma yalnızca **boş** bir kayıt tablosunda çalışır, yani bir kez.
+
+**Sıra:** önce argümansız `npm run migrate` — hangi geçişin gerçekten
+uygulandığını o yazar, tahmin edilmez. Sonra veritabanında **gerçekten var
+olan** son sürümle `--baseline`, sonra `--apply`. Bundan sonrası sadece
+`--apply`.
+
+Bugünkü somut durum: `0007` depoya yeni girdi ve elle uygulanmadıysa sınır
+`0006`'dır; `--apply` o zaman `0007`'yi de uygular. `0007` zaten elle
+uygulanmışsa sınır `0007`'dir. **Sadece bu ikisini ayırt etmek için elle SQL
+çalıştırmaya gerek yoktur** — durum çıktısı zaten söyler. Eksik bir geçişi
+elle uygulamak, çalıştırıcının önlemek için var olduğu hatanın ta kendisidir.
+
+**Testin kapsamı**, [`migrate.test.ts`](src/lib/db/migrate.test.ts): karar
+mantığının tamamı — hangi geçiş bekliyor, hangisi sorunlu, sarmalayıcı ayıklama,
+tablo çıkarımı. **Kapsamadığı**: gerçek uygulama, çünkü CI'da Postgres yoktur.
 
 ### Fonksiyon bölgesi
 
