@@ -1165,7 +1165,27 @@ Borç yalnızca bu doğrulama geçerse `paid` olur; hesap ise **her borç bağı
 olarak onaylandığında** kapanır.
 
 Makbuz yoksa veya onay yetersizse: kontrollü **beklemede** durumu, rezervasyon
-korunur, **sınırlı** yoklamaya izin verilir, ödendi denmez. Revert: kanıt
+korunur, **sınırlı** yoklamaya izin verilir, ödendi denmez.
+
+Yoklama aralığı **üstel geri çekilir**: 4 → 6 → 9 → 13,5 → 20 saniye, son
+bekleme pencerenin kalanı. Önceden her 4 saniyede bir soruluyordu; 40 saniye
+süren bir onayda bu 10 istek, her biri iki veritabanı sorgusu demekti. Onay
+ilk saniyelerde gelmediyse bir sonraki saniyede de gelme ihtimali düşüktür.
+
+**Toplam pencere değişmedi** ve bu bilinçli: 60 saniye, yani eski `15 × 4 sn`
+ile birebir aynı. Kullanıcıya verilen söz "yaklaşık bir dakika izliyoruz,
+sonra tekrar bak"tır; geri çekilmeyi pencereyi büyüterek uygulamak o sözü
+sessizce üç dakikaya çevirirdi. Değişen tek şey aynı pencerede kaç kez
+sorulduğu: **15 istek yerine 7** — yarısından fazlası gitti, ilk saniyelerdeki
+deneyim aynı.
+
+Çizelgenin toplamının pencereye tam oturması ve tavanın gerçekten devreye
+girmesi testle tutulur
+([`poll-backoff.test.ts`](src/lib/arc/poll-backoff.test.ts)). Tavan olmasaydı
+çarpan pencerenin sonunda tek bir uzun beklemeye dönüşürdü: onay 21. saniyede
+gelse bile kullanıcı 40. saniyeye kadar bunu görmezdi.
+
+Revert: kanıt
 saklanır, hash ArcScan için korunur, borç ödenmemiş kalır. Sonuç
 çözülemiyorsa: `unknown` / `review_required`, kilit korunur, **otomatik tekrar
 yoktur**.

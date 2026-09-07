@@ -11,7 +11,7 @@ import { ACTIVE_NETWORK_PROFILE } from "@/lib/arc/profile";
 import { estimateArcSend, sendArcUsdc } from "@/lib/arc/send";
 import {
   RECONCILE_MAX_ATTEMPTS,
-  RECONCILE_POLL_INTERVAL_MS,
+  RECONCILE_POLL_DELAYS,
   buildOfferSnapshot,
   claimPayment,
   decidePaymentResume,
@@ -278,9 +278,14 @@ export function SharedBillPaymentPanel({
                   required: report.requiredConfirmations,
                 }),
         });
-        await new Promise((resolve) =>
-          setTimeout(resolve, RECONCILE_POLL_INTERVAL_MS),
-        );
+        /*
+         * ÜSTEL GERİ ÇEKİLME. Çizelge sabittir ve toplamı izleme penceresine
+         * tam oturur; son denemeden sonra beklenecek bir şey kalmaz ve döngü
+         * biter.
+         */
+        const delay = RECONCILE_POLL_DELAYS[attempt];
+        if (delay === undefined) break;
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
 
       // YOKLAMA SINIRI DOLDU. Ödendi denmez; kilit korunur.

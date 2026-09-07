@@ -118,9 +118,16 @@ describe("ÖDENDİ etiketi yalnızca SUNUCU onayından sonra", () => {
     expectShows(panel, "sharedPay.confirmingNotDone", "tamamlanmış sayılmaz");
   });
 
-  it("yoklama SINIRLIDIR", () => {
+  it("yoklama SINIRLIDIR ve GERİ ÇEKİLİR", () => {
+    /*
+     * İki ayrı iddia. Birincisi eskiden beri var: döngü sonsuz değil.
+     * İkincisi yeni: aralık sabit değil, çizelgeden okunur — panelin kendi
+     * içinde sabit bir bekleme üretmesi geri çekilmeyi sessizce iptal ederdi.
+     */
     expect(panel).toContain("RECONCILE_MAX_ATTEMPTS");
-    expect(panel).toContain("RECONCILE_POLL_INTERVAL_MS");
+    expect(panel).toContain("RECONCILE_POLL_DELAYS[attempt]");
+    /* Elle yazılmış bir bekleme yok. */
+    expect(panel).not.toMatch(/setTimeout\(resolve,\s*\d/);
   });
 });
 
