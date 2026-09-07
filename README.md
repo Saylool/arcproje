@@ -1339,6 +1339,51 @@ kazanan yazana kadar kaybeden yine hata döndürebilir. Bunu tümüyle kapatmak
 dağıtık bir kilit ister; TTL başına bir kez ve saniyenin altında süren bu
 artık, düzeltilen sürekli duruma göre önemsizdir.
 
+### İşletme sayaçları
+
+`GET /api/admin/metrics`. Bu uçtan önce depoda `console.error` dışında hiçbir
+ölçüm yoktu: Vercel'in runtime günlükleri kısa saklamalı, toplanmıyor ve alarmı
+yok. Onbeş test kullanıcısında bu sorun değildi; binde, biri "çalışmıyor"
+dediğinde bunun **herkeste mi tek kişide mi** olduğunu söyleyecek hiçbir şey
+yok demektir.
+
+**Yeni tablo gerektirmez.** Veritabanı bu sayıları zaten tutuyordu —
+`shared_bill_payment_attempts.status` bedava bir huni, `receipt_analysis_quota`
+günlük analizi, `provider_call_budget` sağlayıcı çağrılarını veriyor. Eksik
+olan tek şey onları okuyan bir yoldu. Altı sorgu **tek işlemde** çalışır:
+sayaçlar tutarlı bir andan gelir ve tek gidiş-dönüş olur.
+
+Yanıt ham sayıların yanında **eşikleri de taşır**, çünkü ham bir sayı "harekete
+geç" demez:
+
+| Alan | Ne zaman bakılmalı |
+| --- | --- |
+| `analyses.warning` | Günlük tavanın **%80'i** aşıldı; bugün içinde bakılmalı |
+| `retention.behind` | Silinmeye uygun sayısı parti sınırına ulaştı — **temizlik geriye düşüyor** |
+| `attempts.needsAttention` | `reverted` + `unknown`; zincirde ne olduğu bilinmeyen ödemeler |
+| `debts.needsReview` | `review_required` borç satırları |
+| `provider.windowsAtCap` | Bütçesi dolmuş pencereler; her biri reddedilmiş bir kur çağrısı |
+
+**SALT OKUR.** Hiçbir sayacı tüketmez, hiçbir satır yazmaz; ölçmek için
+ölçüleni değiştirmez.
+
+**Yalnızca toplam döner.** Kullanıcı kimliği, cüzdan adresi, hesap kimliği,
+etiket ya da işlem hash'i bu yanıttan **geçmez** — sayım için gereken "kaç
+tane", "kim" değil. Bu uç tanımı gereği ayrıcalıklıdır ve ayrıcalıklı bir ucun
+sızdırdığı şey en çok sızan şeydir. Sınır iki yerde zorlanır: SQL'in çıktı
+sütunları izinli bir listeyle sınırlıdır
+([`metrics-driver.test.ts`](src/lib/db/metrics-driver.test.ts)) ve yanıtın
+tamamı gerçek şekilli veriyle taranır
+([`metrics-route.test.ts`](src/lib/db/metrics-route.test.ts)).
+
+Uç `METRICS_SECRET` ile korunur ve **sır tanımlı değilse hiç çalışmaz** —
+`/api/cron/retention` ile aynı karar. Yetkisiz yanıt tek biçimdir; sırrın var
+olup olmadığını bile sızdırmaz.
+
+```bash
+curl -sS -H "Authorization: Bearer $METRICS_SECRET" https://<alan-adi>/api/admin/metrics
+```
+
 ## Fiş analizi nasıl çalışıyor
 
 - Analiz **OpenAI Responses API** ile yapılır: `openai.responses.parse(...)`.

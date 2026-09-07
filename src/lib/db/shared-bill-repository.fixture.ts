@@ -2,6 +2,7 @@ import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
   DeleteQuotaRowsOutcome,
+  ReadMetricsOutcome,
   ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
@@ -109,6 +110,12 @@ export type FakeSharedBillRepository = SharedBillRepository & {
   readonly analysisQuota: Map<string, number>;
   /** `provider_rate_cache` karşılığı; testler tohumlayıp okuyabilir. */
   readonly providerRateCache: Map<string, StoredProviderObservation>;
+  /** `provider_call_budget` karşılığı; testler tohumlayıp okuyabilir. */
+  readonly providerBudget: Map<string, number>;
+  /** `app_users.created_at` karşılığı; yalnızca ölçüm pencereleri için. */
+  readonly appUserCreatedAtMs: Map<string, number>;
+  /** `shared_bills.created_at` karşılığı; yalnızca ölçüm pencereleri için. */
+  readonly billCreatedAtMs: Map<string, number>;
   controls: FakeRepositoryControls;
 };
 
@@ -142,6 +149,19 @@ export function createFakeSharedBillRepository(
   const providerBudget = new Map<string, number>();
   /* `provider_rate_cache` karşılığı: sağlayıcı → son gözlem. */
   const providerRateCache = new Map<string, StoredProviderObservation>();
+  /*
+   * OLUŞTURMA ANLARI — yalnızca ölçüm sayaçları için.
+   *
+   * Gerçek şemada `created_at` her satırda vardır ve `now()` ile dolar; sahte
+   * depoda duvar saati YOKTUR, bu yüzden zaman penceresi sayımı MODELLENİR:
+   * kaydı olmayan bir satır "eski" sayılır (an = 0). Testler pencereyi
+   * sınamak için bu haritaları doldurur.
+   *
+   * Buradaki modelleme, gerçek karşılaştırmanın DOĞRULUĞUNU kanıtlamaz; onu
+   * `metrics-driver.test.ts` içindeki SQL eşleşme testi yapar.
+   */
+  const appUserCreatedAtMs = new Map<string, number>();
+  const billCreatedAtMs = new Map<string, number>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -174,6 +194,9 @@ export function createFakeSharedBillRepository(
     appUsers,
     analysisQuota,
     providerRateCache,
+    providerBudget,
+    appUserCreatedAtMs,
+    billCreatedAtMs,
 
     async createSharedBill(
       record: SharedBillRecord,
@@ -603,6 +626,135 @@ export function createFakeSharedBillRepository(
         }),
       );
       return { ok: true, stored: true };
+    },
+
+    async readMetrics(input: {
+      since24hMs: number;
+      since7dMs: number;
+      retentionCutoffMs: number;
+      quotaDay: string;
+      globalQuotaKey: string;
+      userQuotaLimit: number;
+      providerKey: string;
+      providerWindowFrom: number;
+      providerLimitPerWindow: number;
+    }): Promise<ReadMetricsOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+
+      const createdAfter = (
+        times: Map<string, number>,
+        key: string,
+        since: number,
+      ) => (times.get(key) ?? 0) > since;
+
+      let usersNew24h = 0;
+      let usersNew7d = 0;
+      for (const userId of appUsers) {
+        if (createdAfter(appUserCreatedAtMs, userId, input.since24hMs)) {
+          usersNew24h += 1;
+        }
+        if (createdAfter(appUserCreatedAtMs, userId, input.since7dMs)) {
+          usersNew7d += 1;
+        }
+      }
+
+      let billsOpen = 0;
+      let billsCreated24h = 0;
+      let billsCreated7d = 0;
+      let billsPastRetention = 0;
+      /* Durumlar SABİT LİSTEDEN değil, gerçekte var olan satırlardan sayılır. */
+      const debtsByStatus: Record<string, number> = {};
+      for (const bill of bills.values()) {
+        if (bill.status === "open") {
+          billsOpen += 1;
+        }
+        if (createdAfter(billCreatedAtMs, bill.billId, input.since24hMs)) {
+          billsCreated24h += 1;
+        }
+        if (createdAfter(billCreatedAtMs, bill.billId, input.since7dMs)) {
+          billsCreated7d += 1;
+        }
+        /*
+         * SQL ile AYNI ölçüt: `expires_at < cutoff`, KATI küçüktür ve sınırın
+         * kendisi uygun değildir. Manifest saniye taşır, sınır milisaniye.
+         */
+        if (bill.manifest.expiresAt * 1000 < input.retentionCutoffMs) {
+          billsPastRetention += 1;
+        }
+        for (const debt of bill.debts) {
+          debtsByStatus[debt.paymentStatus] =
+            (debtsByStatus[debt.paymentStatus] ?? 0) + 1;
+        }
+      }
+
+      const attemptsByStatus: Record<string, number> = {};
+      for (const attempt of attempts.values()) {
+        attemptsByStatus[attempt.status] =
+          (attemptsByStatus[attempt.status] ?? 0) + 1;
+      }
+
+      let activeUsers = 0;
+      let usersAtCap = 0;
+      for (const [cell, used] of analysisQuota) {
+        const separator = cell.lastIndexOf("|");
+        const key = cell.slice(0, separator);
+        const day = cell.slice(separator + 1);
+        if (day !== input.quotaDay || key === input.globalQuotaKey) {
+          continue;
+        }
+        activeUsers += 1;
+        /* SQL ile AYNI: `>=`, yani hakkını tam dolduran da sayılır. */
+        if (used >= input.userQuotaLimit) {
+          usersAtCap += 1;
+        }
+      }
+
+      let providerCalls = 0;
+      let windowsAtCap = 0;
+      for (const [cell, used] of providerBudget) {
+        const separator = cell.lastIndexOf("|");
+        const key = cell.slice(0, separator);
+        const window = Number(cell.slice(separator + 1));
+        if (key !== input.providerKey || window < input.providerWindowFrom) {
+          continue;
+        }
+        providerCalls += used;
+        if (used >= input.providerLimitPerWindow) {
+          windowsAtCap += 1;
+        }
+      }
+
+      return {
+        ok: true,
+        counts: {
+          users: {
+            total: appUsers.size,
+            newIn24h: usersNew24h,
+            newIn7d: usersNew7d,
+          },
+          bills: {
+            total: bills.size,
+            open: billsOpen,
+            createdIn24h: billsCreated24h,
+            createdIn7d: billsCreated7d,
+            pastRetention: billsPastRetention,
+          },
+          debtsByStatus,
+          attemptsByStatus,
+          analyses: {
+            globalUsed:
+              analysisQuota.get(
+                `${input.globalQuotaKey}|${input.quotaDay}`,
+              ) ?? 0,
+            activeUsers,
+            usersAtCap,
+          },
+          provider: { calls: providerCalls, windowsAtCap },
+        },
+      };
     },
 
     async countAllBills(): Promise<CountExpiredBillsOutcome> {
