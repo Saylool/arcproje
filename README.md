@@ -1496,6 +1496,41 @@ Timeout, SDK'nın kendi `APIConnectionTimeoutError` sınıfıyla yakalanır ve
 ile 35 saniyelik bir üst sınır uygular; istek takılırsa "Analiz zaman aşımına
 uğradı" mesajı gösterilir, seçilen görsel korunur ve tekrar denenebilir.
 
+### Fonksiyon süre tavanları
+
+Yukarıdaki 30 saniye **uygulamanın kendi** zaman aşımıdır. Bir de altında
+platformun kestiği süre vardır ve ikisi karıştırılmamalıdır.
+
+Vercel'in varsayılanı — fluid compute açıkken, **her planda** — 300 saniyedir.
+Bu uygulamada hiçbir rotanın bütçesi 60 saniyeyi geçmez, yani varsayılan gerçek
+ihtiyacın **5-20 katıdır**. Fark bedava değildir: asılı kalan bir istek beş
+dakika boyunca bir örneği meşgul eder ve kullanıcı o süre boyunca temiz hata
+mesajını göremez.
+
+Bu yüzden her rota kendi tavanını `export const maxDuration` ile bildirir:
+
+| Kademe | Süre | Nerede | Bütçe |
+| --- | --- | --- | --- |
+| `fast` | 15 sn | 16 rota | Yalnızca veritabanı; ve varsa 5 sn'lik kur çağrısı |
+| `rpc` | 30 sn | `payment/finalize` | Üç ARDIŞIK Arc RPC çağrısı × 8 sn |
+| `slow` | 60 sn | `receipts/analyze`, `cron/retention` | OpenAI 30 sn + 10 MB gövde · altı tabloda 500'lük partiler |
+
+**Kural: tavan, rotanın kendi bütçesinin hemen ÜSTÜNDEDİR.** Sıra önemlidir —
+uygulama kendi zaman aşımını yakalayıp anlamlı bir hata döndürebilmelidir
+(`ANALYSIS_TIMEOUT` → 504); platform onu daha önce keserse o hata yolu **hiç
+çalışmaz** ve kullanıcı kopuk bir bağlantı görür.
+
+Değer **sayı sabiti** olmak zorundadır: Next.js rota segmenti yapılandırmasını
+derleme anında statik okur, içe aktarılmış bir sabiti çözemez. Bu yüzden ortak
+bir sabit modülü yoktur; kademeler
+[`function-duration.test.ts`](src/lib/ci/function-duration.test.ts) içinde
+tanımlıdır ve orada koddaki gerçek zaman aşımı sabitlerine bağlanır. Analiz
+zaman aşımı bir gün 30 saniyeden büyütülürse test düşer.
+
+**Kapsam** rota işleyicileridir. Sayfalar platform varsayılanında kalır ve bu
+bilinçlidir: sunucu tarafında dış çağrı yapmazlar, oturum durumu JWT'den
+okunur.
+
 ## Vergi, servis ve indirim nasıl uygulanır
 
 Türkiye'deki fişlerde KDV çoğunlukla **ürün satır fiyatlarının içindedir** ve

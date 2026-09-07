@@ -21,6 +21,9 @@ import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-reposi
 
 export const runtime = "nodejs";
 
+/* Bütçe: OpenAI 30 sn + 10 MB'a kadar gövde ayrıştırma + kota sorguları. Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 60;
+
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 /** multipart gövdesinin dosya dışındaki payı için pay bırakılır. */
 const MAX_BODY_SIZE_BYTES = MAX_FILE_SIZE_BYTES + 64 * 1024;

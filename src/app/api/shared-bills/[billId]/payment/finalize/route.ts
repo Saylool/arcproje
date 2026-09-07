@@ -29,6 +29,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: ÜÇ ardışık Arc RPC çağrısı × 8 sn. Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 30;
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ billId: string }> },

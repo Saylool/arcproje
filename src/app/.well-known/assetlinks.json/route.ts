@@ -12,6 +12,9 @@ import { assetLinksFromEnv } from "@/lib/android/assetlinks";
  */
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca ortam değişkeni okuma. Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 export function GET(): Response {
   const statements = assetLinksFromEnv({
     ANDROID_PACKAGE_NAME: process.env.ANDROID_PACKAGE_NAME,

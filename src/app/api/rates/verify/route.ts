@@ -21,6 +21,9 @@ import { readQuoteSecret, verifyRateQuote } from "@/lib/rates/quote-auth";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 const MAX_BODY_BYTES = 4 * 1024;
 /**
  * Gövde akışı için toplam son teslim süresi.

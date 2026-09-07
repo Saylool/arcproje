@@ -27,6 +27,9 @@ import { scanForDuplicateKeys } from "@/lib/arc/json-duplicate-keys";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 export async function POST(
   request: Request,
   context: { params: Promise<{ billId: string }> },

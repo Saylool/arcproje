@@ -24,6 +24,9 @@ import { readBoundedBody } from "@/lib/http/bounded-body";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 const MAX_BODY_BYTES = 4 * 1024;
 const BODY_READ_DEADLINE_MS = 5000;
 const CONTACT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

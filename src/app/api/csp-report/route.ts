@@ -26,6 +26,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 /** Rapor gövdeleri küçüktür; büyüğü okumaya değmez. */
 const MAX_BODY_BYTES = 8 * 1024;
 const BODY_READ_DEADLINE_MS = 2000;

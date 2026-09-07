@@ -39,6 +39,9 @@ import { readBoundedBody } from "@/lib/http/bounded-body";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 /**
  * Gövde üst sınırı. En fazla 50 borç satırı + manifest + imza fazlasıyla
  * sığar; sınır AYRIŞTIRMADAN ÖNCE uygulanır.
