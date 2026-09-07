@@ -516,10 +516,17 @@ export async function finalizeSharedBillPayment(
     return INVALID_TRANSITION;
   }
   /*
-   * SON DURUMLAR (`reverted`, `unknown`) yeni bir hash ile YENİDEN
-   * AÇILMAZ, ama ZATEN bağlı oldukları hash için mutabakat tekrar
-   * denenebilir: bu, `review_required` bir borcun sonradan zincirden
-   * çözülmesini mümkün kılar.
+   * SON DURUMLAR (`reverted`, `unknown`) yeni bir hash ile YENİDEN AÇILMAZ.
+   *
+   * Aynı hash'le mutabakat tekrar SORULABİLİR ve rapor yeniden üretilir —
+   * kullanıcı ne olduğunu görebilsin diye. Ama bu, durumu DEĞİŞTİRMEZ:
+   * `ALLOWED_SETTLEMENTS` bu iki durumdan çıkışa izin vermez, yani doğrulama
+   * başarılı olsa bile yerleşim reddedilir.
+   *
+   * DÜZELTME: burada eskiden "bu, `review_required` bir borcun sonradan
+   * zincirden çözülmesini mümkün kılar" yazıyordu. YANLIŞTI ve yanlış yönde
+   * yanlıştı: takılı bir borcun kendiliğinden düzeleceğini sandırıyordu.
+   * `review_required`tan çıkış yalnızca elle mutabakattır (bkz. README).
    */
   if (attempt.status === "reverted" || attempt.status === "unknown") {
     if (attempt.txHash?.toLowerCase() !== parsed.txHash) {

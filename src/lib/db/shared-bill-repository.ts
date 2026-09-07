@@ -253,6 +253,49 @@ export type ReadMetricsOutcome =
   | { ok: true; counts: MetricsCounts }
   | { ok: false; reason: "unavailable" };
 
+/**
+ * ELLE İNCELEME BEKLEYEN BİR BORÇ SATIRI.
+ *
+ * `review_required`, ödeme denemesi `unknown` ile kapandığında yazılır:
+ * zincirde bir şey OLDU ama beklenen transferi kanıtlamadı. Kilit KALIR ve
+ * otomatik bir çıkış YOKTUR — çıkış bir insanın mutabakatıdır.
+ *
+ * GİZLİLİK — BU TİP BİLİNÇLİ BİR İSTİSNADIR.
+ *
+ * Ölçüm ucu yalnızca TOPLAM döndürür ve döndürmelidir. Ama takılı bir ödemeyi
+ * çözmek için HANGİ kayıt olduğunu bilmek şarttır; sayı tek başına hiçbir
+ * şeyi çözmez. Bu yüzden burada kimlik taşıyan alanlar vardır.
+ *
+ * İSTİSNA MÜMKÜN OLDUĞUNCA DARDIR: yalnızca ZİNCİRDE ZATEN AÇIK olan şeyler
+ * döner — adresler ve işlem hash'i — artı kaydı bulmaya yarayan hesap
+ * kimliği. İNSAN ADLARI (`debtor_label`, `recipient_label`) ve uygulama
+ * kullanıcısı kimliği DÖNMEZ: mutabakat zincire karşı yapılır, kişiye karşı
+ * değil.
+ */
+export type DebtAwaitingReview = Readonly<{
+  billId: string;
+  /** Checksum'lı adres; zincirde zaten açık. */
+  debtor: string;
+  recipient: string;
+  /** KANONİK ondalık tam sayı metni. */
+  tryMinor: string;
+  /**
+   * Belirsiz kalan denemenin işlem hash'i. `null` olabilir: deneme hash
+   * bildirilmeden `unknown`a düşmüş olabilir — o zaman incelenecek bir zincir
+   * kaydı da yoktur ve bu, bilinmesi gereken bir ayrımdır.
+   */
+  txHash: string | null;
+  microUsdc: string | null;
+  /** Unix saniye; denemenin ayrıldığı an. Sıralama buna göredir. */
+  reservedAt: number | null;
+  /** Hesabın süresi; incelemenin ne kadar geciktiğini gösterir. */
+  billExpiresAt: number;
+}>;
+
+export type ListDebtsAwaitingReviewOutcome =
+  | { ok: true; debts: readonly DebtAwaitingReview[] }
+  | { ok: false; reason: "unavailable" };
+
 /** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */
 export type DeleteQuotaRowsOutcome =
   | { ok: true; deleted: number }
@@ -555,6 +598,17 @@ export type SharedBillRepository = SharedBillPaymentRepository &
    * saatini sorguya bırakmıyoruz: kova hesabı tek yerde, saf bir işlevde
    * durur ve testlerde belirlenimci kalır.
    */
+  /**
+   * Elle inceleme bekleyen borç satırları, EN ESKİ önce.
+   *
+   * SALT OKUR ve hiçbir durumu değiştirmez. `review_required`tan çıkış
+   * otomatik değildir ve bu uç onu otomatikleştirmez; yalnızca bakılacak
+   * kayıtları gösterir.
+   */
+  listDebtsAwaitingReview(input: {
+    limit: number;
+  }): Promise<ListDebtsAwaitingReviewOutcome>;
+
   reserveProviderCall(input: {
     providerKey: string;
     windowStart: number;
