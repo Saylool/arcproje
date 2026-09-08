@@ -797,6 +797,37 @@ hiçbir ortamda uygulanmamıştı. Bu gerekçe **artık geçerli değildir**:
 `CREATE TABLE IF NOT EXISTS` var olan bir tabloyu **değiştirmez**, bu yüzden
 bundan sonra eklenecek her alan kendi geçiş dosyasını ister.
 
+### Fonksiyon bölgesi
+
+**Neon veritabanı Frankfurt'tadır (`eu-central-1`).** Vercel fonksiyonları da
+`vercel.json` içindeki `"regions": ["fra1"]` ile aynı yere sabitlenmiştir —
+`fra1` Vercel'in Frankfurt bölgesidir ve Neon'unkiyle **aynı AWS bölgesine**
+denk gelir.
+
+Bu alan **yazılmazsa** Vercel `iad1`e (Washington) düşer; belgelenmiş
+varsayılan budur ve hiçbir yerde uyarı vermez. O hâlde her SQL gidiş-dönüşü
+Atlantik'i geçerdi:
+
+| | Fonksiyon ↔ veritabanı | Ödeme hazırlama (5-7 ardışık sorgu) |
+| --- | --- | --- |
+| `iad1` (varsayılan) | ~90 ms | **~450-630 ms** yalnızca ağ beklemesi |
+| `fra1` (Neon ile aynı) | birkaç ms | **~10-15 ms** |
+
+Kazanç iki yönlüdür: kullanıcılar da Türkiye'de olduğu için `fra1` onlara da
+Washington'dan çok daha yakındır.
+
+**Statik dosyalar etkilenmez** — onlar her bölgeye dağıtılır; bu ayar yalnızca
+fonksiyonların nerede çalıştığını belirler.
+
+**Tek bölge bilinçlidir.** Hobby planı zaten tek bölge seçtirir; ötesinde,
+ikinci bir bölge oradaki fonksiyonları veritabanından uzağa koyar ve
+düzeltilen sorunu geri getirir.
+
+Seçim [`vercel-region.test.ts`](src/lib/ci/vercel-region.test.ts) ile kapıda
+tutulur. **Testin kanıtlayamadığı şey**: veritabanının gerçekten Frankfurt'ta
+olduğu — o bilgi `DATABASE_URL` içindedir ve bu depoda okunmaz. Veritabanı bir
+gün taşınırsa bu bölge de elle değiştirilmelidir.
+
 ### Gizlilik sınırı
 
 > Bağlantıyı **eline geçiren herkes hesabı açabilir.** Bağlantı borç listesini
