@@ -1384,6 +1384,71 @@ olup olmadığını bile sızdırmaz.
 curl -sS -H "Authorization: Bearer $METRICS_SECRET" https://<alan-adi>/api/admin/metrics
 ```
 
+### Hata takibi (Sentry)
+
+Sayaçlar "kaç tane" der; hata takibi "ne kırıldı" der. İkisi ayrı işler ve
+biri ötekinin yerine geçmez.
+
+`SENTRY_DSN` tanımlıysa [`src/instrumentation.ts`](src/instrumentation.ts)
+sunucu ve edge çalışma zamanlarında Sentry'yi başlatır. **Tanımlı değilse SDK
+hiç yüklenmez** — yerel geliştirme, testler ve CI hata takibi olmadan çalışır
+ve bu bir hata sayılmaz.
+
+**Kapsam bilinçli olarak SUNUCU + EDGE ile sınırlı.** Tarayıcıya hiçbir şey
+gönderilmez:
+
+- `connect-src` hâlâ ölçülüyor ve kapatılmayı bekliyor; tarayıcı tarafı bir
+  SDK oraya **kalıcı bir üçüncü taraf hedefi** ekler ve o işi zorlaştırır.
+- Uygulama mobil öncelikli; paket ağırlığının bedeli var, karşılığı ise
+  sunucuda zaten yakalanan hatalar.
+
+Sınır bir testle tutulur: `instrumentation-client.ts` ya da
+`sentry.client.config.ts` diskte belirirse
+[`sentry-config.test.ts`](src/lib/observability/sentry-config.test.ts) düşer ve
+CSP kararı yeniden sorulur. DSN de bilerek `NEXT_PUBLIC_` **değildir**.
+
+#### Gizlilik: olaylar gönderilmeden önce temizlenir
+
+Hata takibi, tanımı gereği uygulamanın iç durumunu **üçüncü bir tarafa**
+gönderir. Varsayılan haliyle bağlamak bu depodaki gizlilik sınırını sessizce
+delerdi — **en sinsi yol URL'dir**: `bill_id` bir yol parametresidir
+(`/pay/0x…`), yani istisna mesajında hiçbir şey olmasa bile her olayla
+birlikte giderdi.
+
+[`scrub.ts`](src/lib/observability/scrub.ts) bu yüzden tek tek alanlara değil,
+olayın **tamamına** uygulanır — anahtarlar dahil. Yaklaşım **şekil tanımadır**,
+alan listesi değil: alan saymak, yeni bir alan eklendiği gün sessizce eksik
+kalır.
+
+| Şekil | Yerine | Kapsadığı |
+| --- | --- | --- |
+| `0x` + 20 ve üzeri hex | `0x<hex:N>` | Adres (40), hesap/işlem/nonce/oturum (64), imza (130) |
+| UUID | `<uuid>` | Uygulama kullanıcısı, kayıtlı kişi |
+| E-posta | `<email>` | Google girişi |
+
+**Değer silinmez, uzunluğu bırakılır**: hata ayıklayan kişi "burada bir hesap
+kimliği vardı" ile "burada bir adres vardı"yı ayırt edebilmeli. Kısa
+onaltılık sayılar (`0x2b74` gibi chainId) **korunur** — kimlik değiller ve
+gerçekten gerekiyorlar.
+
+Şekil tanımayla korunamayan şeyler **tümüyle silinir**: `user`, ve istekteki
+`cookies` / `headers` / `data` / `env`. Bir yetkilendirme başlığı ya da istek
+gövdesi, tanınacak hiçbir desene uymadan sır taşır. `request.url` **kalır**
+(temizlenmiş olarak): hangi rotanın düştüğü görülmeli.
+
+Ayrıca `sendDefaultPii: false` açıkça yazılır ve **başarım izleme kapalıdır**
+(`tracesSampleRate: 0`) — işlem adları URL'den türer, ve aranan şey "ne
+kırıldı", "ne kadar sürdü" değil.
+
+#### Yapılmayanlar
+
+- **`withSentryConfig` sarmalayıcısı eklenmedi.** Tek getirisi kaynak haritası
+  yüklemesi ve sürüm etiketlemedir; ikisi de Sentry kimlik bilgileri ister ve
+  karşılığında derleme yapılandırması değişir. Yığın izleri derlenmiş dosyaya
+  işaret eder — hangi rotanın neyle düştüğünü görmek için yeterli. Kimlik
+  bilgileri geldiğinde ayrı bir iş olarak eklenebilir.
+- **Tarayıcı SDK'sı yok** (yukarıdaki gerekçe).
+
 ## Fiş analizi nasıl çalışıyor
 
 - Analiz **OpenAI Responses API** ile yapılır: `openai.responses.parse(...)`.
