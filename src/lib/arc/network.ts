@@ -19,6 +19,21 @@ export const ARC_TESTNET_CHAIN_ID = ACTIVE_NETWORK_PROFILE.chainId;
  */
 export const ARC_TESTNET_CHAIN_ID_HEX = `0x${ARC_TESTNET_CHAIN_ID.toString(16)}`;
 export const ARC_TESTNET_RPC_URL = ACTIVE_NETWORK_PROFILE.rpcUrl;
+
+/**
+ * Sunucunun makbuz doğrularken deneyeceği RPC adresleri, SIRAYLA.
+ *
+ * `ARC_TESTNET_RPC_URL` ile karıştırılmamalıdır: o tek adrestir ve CÜZDANA
+ * bildirilen odur. Bu liste YALNIZCA SUNUCU tarafındadır; tarayıcı bu
+ * adreslere bağlanmaz, bu yüzden CSP'nin `connect-src` listesi büyümez.
+ *
+ * Birincil BAŞTADIR ve bu bilinçli: yedekler yalnızca birincil cevap
+ * vermediğinde devreye girer.
+ */
+export const ARC_TESTNET_RPC_URLS: readonly string[] = Object.freeze([
+  ACTIVE_NETWORK_PROFILE.rpcUrl,
+  ...ACTIVE_NETWORK_PROFILE.fallbackRpcUrls,
+]);
 export const ARC_TESTNET_EXPLORER_URL = ACTIVE_NETWORK_PROFILE.explorerUrl;
 export const ARC_TESTNET_FAUCET_URL = ACTIVE_NETWORK_PROFILE.faucetUrl;
 export const ARC_TESTNET_DOCS_URL = ACTIVE_NETWORK_PROFILE.docsUrl;
