@@ -850,6 +850,15 @@ takip tablosunu yaratır. Yani argümansız çalıştırmak da veritabanına yaz
 - **Dağıtımda otomatik çalışmaz** ve bu bilinçlidir: kötü bir geçiş siteyi
   indirir.
 - **`DATABASE_URL` asla yazdırılmaz** — ne günlüğe, ne hata mesajına.
+- **Bağlantı 15 saniyeyle sınırlıdır.** Bu değer olmadan `connect()` sonsuza
+  kadar bekler: ağ takılırsa araç hata vermez, sadece susar — ve elle
+  çalıştırılan bir araçta susmak hata vermekten kötüdür. Süre cömerttir çünkü
+  Neon uykudaki bir dalı uyandırırken birkaç saniye harcayabilir; amaç yavaşı
+  kesmek değil, ölünün sonsuza sürmesini engellemek. Bağlantı kurulamazsa şema
+  **değişmez** ve hiçbir geçiş uygulanmaz.
+- **Sorgulara zaman aşımı KONMAZ**, bilerek. `query_timeout` istemci
+  genelindedir; koyulsaydı büyük bir tabloyu dolduran meşru bir geçiş de yarıda
+  kesilirdi. Bir geçişi beklemek, onu kesmekten iyidir.
 
 #### Tek seferlik temel alma
 

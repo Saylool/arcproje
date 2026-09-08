@@ -4,9 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   BOOTSTRAP_VERSION,
+  CONNECT_TIMEOUT_MS,
   MIGRATION_FILE_PATTERN,
   checksumOf,
+  connectionOptions,
   createdTableNames,
+  describeConnectError,
   formatPlan,
   migrationVersion,
   planMigrations,
@@ -354,5 +357,54 @@ describe("DEPODAKI gercek gecis dosyalari", () => {
     expect(checksumOf(sql)).toBe(checksumOf(sql));
     expect(checksumOf(sql)).toMatch(/^[0-9a-f]{64}$/);
     expect(checksumOf(sql)).not.toBe(checksumOf(`${sql} `));
+  });
+});
+
+describe("baglanti", () => {
+  /*
+   * Bu blok bir DAVRANIŞI DEĞİL, bir KARARI kilitler. Zaman aşımı olmadan
+   * `connect()` sonsuza kadar bekler ve araç susar; elle çalıştırılan bir
+   * araçta susmak, hata vermekten kötüdür.
+   */
+  const URL = "postgresql://kullanici:parola@ornek.example/db";
+
+  it("baglantiya SINIRLI sure tanir", () => {
+    expect(connectionOptions(URL).connectionTimeoutMillis).toBe(
+      CONNECT_TIMEOUT_MS,
+    );
+    expect(CONNECT_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
+  it("SORGULARA zaman asimi KOYMAZ; bu bilincli", () => {
+    /*
+     * `query_timeout` istemci genelindedir. Koyulsaydi buyuk bir tabloyu
+     * dolduran mesru bir gecis de yarida kesilirdi.
+     */
+    expect(connectionOptions(URL)).not.toHaveProperty("query_timeout");
+    expect(connectionOptions(URL)).not.toHaveProperty("statement_timeout");
+  });
+
+  it("baglanti dizesini oldugu gibi gecirir", () => {
+    expect(connectionOptions(URL).connectionString).toBe(URL);
+  });
+
+  it("hata anlatimi BAGLANTI DIZESINI sizdirmaz", () => {
+    /* Surucu, cozulemeyen adi veya dizenin parcalarini mesaja koyabilir. */
+    const sizintili = Object.assign(
+      new Error(`getaddrinfo ENOTFOUND ${URL}`),
+      { code: "ENOTFOUND" },
+    );
+    const anlatim = describeConnectError(sizintili);
+    expect(anlatim).not.toContain(URL);
+    expect(anlatim).not.toContain("parola");
+    expect(anlatim).not.toContain("ornek.example");
+    /* Ama teshis icin yeteni SOYLER. */
+    expect(anlatim).toContain("ENOTFOUND");
+  });
+
+  it("kodu olmayan hatayi da anlatir, cokmez", () => {
+    expect(describeConnectError(new Error("timeout expired"))).toBe("Error");
+    expect(describeConnectError(null)).toBe("bilinmeyen hata");
+    expect(describeConnectError("dize")).toBe("bilinmeyen hata");
   });
 });
