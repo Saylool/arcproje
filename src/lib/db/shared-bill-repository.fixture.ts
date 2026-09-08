@@ -2,8 +2,11 @@ import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
   DeleteQuotaRowsOutcome,
+  ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
+  StoredProviderObservation,
+  WriteProviderRateCacheOutcome,
   CountExpiredBillsOutcome,
   DeleteExpiredBillsOutcome,
   DeleteAppUserOutcome,
@@ -104,6 +107,8 @@ export type FakeSharedBillRepository = SharedBillRepository & {
   readonly appUsers: Set<string>;
   /** `receipt_analysis_quota` karşılığı; testler durumu okuyabilir. */
   readonly analysisQuota: Map<string, number>;
+  /** `provider_rate_cache` karşılığı; testler tohumlayıp okuyabilir. */
+  readonly providerRateCache: Map<string, StoredProviderObservation>;
   controls: FakeRepositoryControls;
 };
 
@@ -135,6 +140,8 @@ export function createFakeSharedBillRepository(
   const analysisQuota = new Map<string, number>();
   /* `provider_call_budget` karşılığı: "sağlayıcı|kova" → yapılan çağrı. */
   const providerBudget = new Map<string, number>();
+  /* `provider_rate_cache` karşılığı: sağlayıcı → son gözlem. */
+  const providerRateCache = new Map<string, StoredProviderObservation>();
 
   function toStored(bill: FakeStoredBill): StoredSharedBill {
     return Object.freeze({
@@ -166,6 +173,7 @@ export function createFakeSharedBillRepository(
     savedContacts,
     appUsers,
     analysisQuota,
+    providerRateCache,
 
     async createSharedBill(
       record: SharedBillRecord,
@@ -534,6 +542,67 @@ export function createFakeSharedBillRepository(
       }
       providerBudget.set(cell, used + 1);
       return { ok: true, used: used + 1 };
+    },
+
+    async readProviderRateCache(input: {
+      providerKey: string;
+    }): Promise<ReadProviderRateCacheOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const stored = providerRateCache.get(input.providerKey);
+      if (stored === undefined) {
+        /* Satır yok. SQL'de sıfır satır dönen durumun karşılığı. */
+        return { ok: false, reason: "missing" };
+      }
+      /*
+       * TAZELİK BURADA ÖLÇÜLMEZ — SQL de ölçmez. Satır olduğu gibi verilir;
+       * yaş kontrolü çağıranın işidir. Sahte depo burada "yardımcı olmaya"
+       * kalkarsa, üretimde olmayan bir filtre testlerde varmış gibi görünür.
+       */
+      return { ok: true, observation: stored };
+    },
+
+    async writeProviderRateCache(input: {
+      providerKey: string;
+      rateText: string;
+      observedAt: number;
+      storedAtMs: number;
+    }): Promise<WriteProviderRateCacheOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      const current = providerRateCache.get(input.providerKey);
+      /*
+       * SQL ile AYNI monoton ölçüt:
+       *   observed_at <  yeni                     → yaz
+       *   observed_at =  yeni VE stored_at < yeni → yaz (aynı gözlem, taze
+       *                                             doğrulama)
+       *   aksi hâlde                              → yazma
+       *
+       * Sahte depo koşulsuz yazsaydı, eski bir yanıtın taze veriyi ezmesi
+       * yalnızca üretimde görülürdü.
+       */
+      if (current !== undefined) {
+        const newer =
+          current.observedAt < input.observedAt ||
+          (current.observedAt === input.observedAt &&
+            current.storedAtMs < input.storedAtMs);
+        if (!newer) {
+          return { ok: true, stored: false };
+        }
+      }
+      providerRateCache.set(
+        input.providerKey,
+        Object.freeze({
+          rateText: input.rateText,
+          observedAt: input.observedAt,
+          storedAtMs: input.storedAtMs,
+        }),
+      );
+      return { ok: true, stored: true };
     },
 
     async countAllBills(): Promise<CountExpiredBillsOutcome> {

@@ -6,6 +6,7 @@ import { TEST_QUOTE_SECRET } from "./quote-fixture";
 import {
   COOLDOWN_BASE_MS,
   COOLDOWN_MAX_MS,
+  PROVIDER_CACHE_TTL_MS,
   getUsdcTryObservation,
   resetRateQuoteCache,
 } from "./quote-service";
@@ -136,8 +137,16 @@ describe("negatif önbellek (soğuma)", () => {
 
     await getUsdcTryObservation(NOW, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW) });
     await getUsdcTryObservation(NOW + COOLDOWN_BASE_MS, { env: ENV, fetchImpl: fetchImpl as never, ...at(NOW + COOLDOWN_BASE_MS) });
-    // Başarıdan sonra ilk hata yine taban soğumasıyla başlar (birikmez).
-    const afterCache = NOW + COOLDOWN_BASE_MS + 61_000;
+    /*
+     * Başarıdan sonra ilk hata yine taban soğumasıyla başlar (birikmez).
+     *
+     * Sınır TTL'DEN TÜRETİLİR, elle yazılmaz: burada ölçülmek istenen şey
+     * "önbellek süresi geçtikten sonraki ilk hata"dır. Sabit bir sayı, TTL
+     * değiştiği gün sessizce ÖNBELLEK İSABETİNİ ölçmeye başlar ve test
+     * yeşil kalırken iddiasını kaybeder.
+     */
+    const afterCache =
+      NOW + COOLDOWN_BASE_MS + PROVIDER_CACHE_TTL_MS + 1_000;
     const failed = await getUsdcTryObservation(afterCache, { env: ENV, fetchImpl: fetchImpl as never, ...at(afterCache) });
     expect(failed).toMatchObject({ ok: false, cooldown: false });
     expect(failed.ok === false && failed.retryAfterSeconds).toBeNull();
