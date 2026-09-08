@@ -28,9 +28,24 @@
  *     └──────────────────┘
  *                        └── belirsiz sonuç ────────> review_required
  *
- *   review_required ── onaylı makbuz ──> paid
- *   review_required ── OTOMATİK ──/──> unpaid   (ASLA; elle mutabakat)
- *   paid ──/──> herhangi bir durum              (ASLA geri dönmez)
+ *   review_required ──/──> HİÇBİR DURUM   (kodda çıkış YOK; aşağıya bak)
+ *   paid ──/──> herhangi bir durum        (ASLA geri dönmez)
+ *
+ * `review_required` PRATİKTE SON DURUMDUR ve bu ölçüldü, varsayılmadı:
+ *
+ *  - Bağlı olduğu deneme `unknown`dur ve `unknown`dan çıkış yoktur
+ *    (`ALLOWED_SETTLEMENTS.unknown` boştur), yani yeni bir makbuz
+ *    doğrulaması bile onu `paid`e taşıyamaz.
+ *  - Yeni bir teklif ya da deneme de açılamaz: ikisi de borcun `unpaid`
+ *    olmasını şart koşar.
+ *
+ * Yani "elle mutabakat" bir mecaz değil: çıkış, insanın zincire bakıp
+ * gözden geçirilmiş bir veritabanı işlemi yapmasıdır. Prosedür README'deki
+ * runbook'tadır.
+ *
+ * BURASI BİLEREK BÖYLE BIRAKILIYOR. Otomatik bir çıkış eklemek, belirsiz
+ * bir denemenin hash'ine bağlanmış herhangi bir makbuzun kilidi tek başına
+ * açabilmesi demek olurdu; o karar ayrı ve açıkça alınmalı.
  */
 export type DebtPaymentStatus = "unpaid" | "reserved" | "paid" | "review_required";
 

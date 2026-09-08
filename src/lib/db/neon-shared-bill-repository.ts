@@ -8,7 +8,9 @@ import {
 
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
+  DebtAwaitingReview,
   DeleteQuotaRowsOutcome,
+  ListDebtsAwaitingReviewOutcome,
   ReadMetricsOutcome,
   ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
@@ -537,6 +539,41 @@ ON CONFLICT (provider_key) DO UPDATE
 RETURNING stored_at
 `;
 
+/*
+ * ELLE İNCELEME BEKLEYEN BORÇ SATIRLARI.
+ *
+ * SEÇİLEN SÜTUNLAR BİLİNÇLİ OLARAK DARDIR: yalnızca zincirde zaten açık olan
+ * adresler ve işlem hash'i, artı kaydı bulmaya yarayan hesap kimliği ve tutar.
+ * `debtor_label` ve `recipient_label` SEÇİLMEZ — mutabakat zincire karşı
+ * yapılır, kişiye karşı değil.
+ *
+ * `LEFT JOIN`: bir borç, hash bildirilmeden de `review_required`a düşmüş
+ * olabilir. O satırı gizlemek, incelenecek en tuhaf vakayı görünmez kılardı;
+ * boş hash'in kendisi bir bilgidir.
+ *
+ * En eski önce: en uzun bekleyen kullanıcı ilk sırada.
+ */
+const SELECT_DEBTS_AWAITING_REVIEW = `
+SELECT
+  d.bill_id,
+  d.debtor_address,
+  b.recipient_address,
+  d.try_minor,
+  a.tx_hash,
+  a.micro_usdc,
+  extract(epoch FROM a.reserved_at)::bigint AS reserved_at,
+  extract(epoch FROM b.expires_at)::bigint AS bill_expires_at
+FROM shared_bill_debts d
+JOIN shared_bills b ON b.bill_id = d.bill_id
+LEFT JOIN shared_bill_payment_attempts a
+  ON a.bill_id = d.bill_id
+ AND lower(a.debtor_address) = lower(d.debtor_address)
+ AND a.status = 'unknown'
+WHERE d.payment_status = 'review_required'
+ORDER BY a.reserved_at ASC NULLS LAST, d.bill_id ASC, d.debtor_address ASC
+LIMIT $1
+`;
+
 const COUNT_ALL_BILLS = `
 SELECT count(*)::int AS total
 FROM shared_bills
@@ -847,6 +884,16 @@ function toCreatedBillSummary(row: CreatedBillRow): CreatedBillSummary | null {
     totalTryMinor,
     paidTryMinor,
   });
+}
+
+/**
+ * `bigint` sütunları sürücüden metin olarak da gelebilir; ikisi de kabul
+ * edilir. Tanınmayan değer `null` döner — sıfıra DÜŞÜRÜLMEZ.
+ */
+function asInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isInteger(parsed) ? parsed : null;
 }
 
 function asText(value: unknown): string | null {
@@ -1873,6 +1920,48 @@ export async function createNeonSharedBillRepository(
             },
           },
         };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async listDebtsAwaitingReview(input: {
+      limit: number;
+    }): Promise<ListDebtsAwaitingReviewOutcome> {
+      try {
+        const rows = (await sql.query(SELECT_DEBTS_AWAITING_REVIEW, [
+          Math.max(0, Math.floor(input.limit)),
+        ])) as Record<string, unknown>[];
+        const debts: DebtAwaitingReview[] = [];
+        for (const row of rows) {
+          const billId = asText(row.bill_id);
+          const debtor = asText(row.debtor_address);
+          const recipient = asText(row.recipient_address);
+          const tryMinor = asText(row.try_minor);
+          const billExpiresAt = asInteger(row.bill_expires_at);
+          if (
+            billId === null ||
+            debtor === null ||
+            recipient === null ||
+            tryMinor === null ||
+            billExpiresAt === null
+          ) {
+            /* Şekli tanınmayan satır ATLANMAZ: eksik gösterilen bir inceleme
+             * listesi, hiç gösterilmeyenden daha yanıltıcıdır. */
+            return { ok: false, reason: "unavailable" };
+          }
+          debts.push({
+            billId,
+            debtor,
+            recipient,
+            tryMinor,
+            txHash: asText(row.tx_hash),
+            microUsdc: asText(row.micro_usdc),
+            reservedAt: asInteger(row.reserved_at),
+            billExpiresAt,
+          });
+        }
+        return { ok: true, debts };
       } catch {
         return { ok: false, reason: "unavailable" };
       }

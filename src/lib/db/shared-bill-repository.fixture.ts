@@ -1,7 +1,9 @@
 import type { SharedBillManifest } from "@/lib/arc/shared-bill";
 
 import type {
+  DebtAwaitingReview,
   DeleteQuotaRowsOutcome,
+  ListDebtsAwaitingReviewOutcome,
   ReadMetricsOutcome,
   ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
@@ -1195,6 +1197,59 @@ export function createFakeSharedBillRepository(
         return { ok: false, reason: "notFound" };
       }
       return { ok: true, attempt };
+    },
+
+    async listDebtsAwaitingReview(input: {
+      limit: number;
+    }): Promise<ListDebtsAwaitingReviewOutcome> {
+      calls += 1;
+      if (repository.controls.failWithUnavailable === true) {
+        return { ok: false, reason: "unavailable" };
+      }
+      /*
+       * SQL ile AYNI ölçüt ve AYNI dar sütun kümesi. Sahte depo etiketleri
+       * de döndürseydi, gizlilik sınırını ölçen test yalnızca üretimde
+       * anlamlı olurdu.
+       */
+      const found: DebtAwaitingReview[] = [];
+      for (const bill of bills.values()) {
+        for (const debt of bill.debts) {
+          if (debt.paymentStatus !== "review_required") continue;
+          /* Belirsiz kalan deneme; olmayabilir ve bu bir bilgidir. */
+          const attempt = [...attempts.values()].find(
+            (row) =>
+              row.billId.toLowerCase() === bill.billId.toLowerCase() &&
+              row.debtor.toLowerCase() === debt.debtor.toLowerCase() &&
+              row.status === "unknown",
+          );
+          found.push({
+            billId: bill.billId,
+            debtor: debt.debtor,
+            recipient: bill.manifest.recipient,
+            tryMinor: debt.tryMinor,
+            txHash: attempt?.txHash ?? null,
+            microUsdc: attempt?.microUsdc ?? null,
+            reservedAt: attempt?.reservedAt ?? null,
+            billExpiresAt: bill.manifest.expiresAt,
+          });
+        }
+      }
+      /* En eski önce; kaydı olmayan sona. */
+      found.sort((left, right) => {
+        if (left.reservedAt === right.reservedAt) {
+          return (
+            left.billId.localeCompare(right.billId) ||
+            left.debtor.localeCompare(right.debtor)
+          );
+        }
+        if (left.reservedAt === null) return 1;
+        if (right.reservedAt === null) return -1;
+        return left.reservedAt - right.reservedAt;
+      });
+      return {
+        ok: true,
+        debts: found.slice(0, Math.max(0, Math.floor(input.limit))),
+      };
     },
 
     async readLatestAttempt(input: {

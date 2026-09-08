@@ -162,6 +162,78 @@ politikayı güncellemeden testlerden geçemez.
 - **Zincire yazılan hiçbir şey geri alınamaz.** Silme hakkı oraya ulaşmaz;
   politika bunu yumuşatmadan söyler.
 
+### Runbook: `review_required` bir borç
+
+Bu duruma düşen her satır gerçek bir insanın **"ödedim ama görünmüyor"** anıdır:
+zincirde bir şey oldu, beklenen transferi kanıtlamadı, kilit kaldı.
+
+`GET /api/admin/review` bekleyenleri **en eski önce** listeler; `REVIEW_SECRET`
+ile korunur.
+
+```bash
+curl -sS -H "Authorization: Bearer $REVIEW_SECRET" https://<alan-adi>/api/admin/review
+```
+
+**Yanıt bilerek dardır.** Ölçüm ucu yalnızca toplam döndürür ve döndürmelidir;
+burası farklıdır çünkü takılı bir ödemeyi çözmek için **hangi** kayıt olduğunu
+bilmek şarttır. İstisna en dar hâliyle tutulur: yalnızca **zincirde zaten açık**
+olanlar döner — adresler ve işlem hash'i — artı hesap kimliği ve tutar. İnsan
+adları ve uygulama kullanıcısı kimliği **dönmez**; mutabakat zincire karşı
+yapılır, kişiye karşı değil. `METRICS_SECRET` değil **ayrı bir sır** kullanır:
+farklı duyarlılık, farklı patlama yarıçapı.
+
+#### Önce ölçülen gerçek: bu durumun kodda çıkışı YOK
+
+Şema `review_required → paid` geçişini anlatıyordu ama **uygulayan bir kod yolu
+yok** — bu runbook yazılırken ölçüldü:
+
+- Bağlı olduğu deneme `unknown`dur ve `ALLOWED_SETTLEMENTS.unknown` **boştur**:
+  yeni bir makbuz doğrulaması bile onu `paid`e taşıyamaz.
+- Yeni bir teklif ya da deneme de açılamaz; ikisi de borcun `unpaid` olmasını
+  şart koşar.
+
+Yani "elle mutabakat" bir mecaz değil. İki yanıltıcı yorum bu sırada
+düzeltildi; eskisi takılı bir borcun **kendiliğinden düzeleceğini** sandırıyordu.
+
+#### Adımlar
+
+1. **Listeyi al** (yukarıdaki `curl`).
+2. **`txHash` yoksa** zincirde bakılacak bir şey yoktur: deneme hash
+   bildirilmeden belirsizleşmiş. Kullanıcıya cüzdan geçmişini sor — gerçekten
+   bir gönderim var mı?
+3. **`txHash` varsa ArcScan'de aç** ve **dördünü birden** doğrula:
+   - işlem **başarılı** mı (revert değil),
+   - gönderen `debtor` adresi mi,
+   - alıcı `recipient` adresi mi,
+   - transfer edilen miktar `microUsdc` ile **birebir** eşit mi.
+4. **Dördü de tutuyorsa** ödeme gerçekten yapılmıştır ve borç `paid`
+   olmalıdır. Çıkış yalnızca gözden geçirilmiş bir veritabanı işlemidir:
+
+```sql
+BEGIN;
+UPDATE shared_bill_debts
+SET payment_status = 'paid', paid_tx_hash = '0x...', paid_at = now()
+WHERE bill_id = '0x...' AND lower(debtor_address) = lower('0x...')
+  AND payment_status = 'review_required';
+-- 1 satır beklenir. Değilse ROLLBACK.
+COMMIT;
+```
+
+5. **Dördünden biri tutmuyorsa** borç ödenmemiştir. Durumu **değiştirme**;
+   kullanıcıya ne gördüğünü açıkla. Yanlış bir transferi `paid` yazmak, geri
+   dönüşü olmayan tek hatadır — `paid` hiçbir koşulda geri alınmaz.
+
+#### Uyarılar
+
+- **Zincire bakmadan asla yazma.** Bu ifadenin tek meşru girdisi ArcScan'de
+  görülen bir makbuzdur.
+- **Toplu çalıştırma.** Her satır ayrı bir insanın parasıdır; koşul
+  `payment_status = 'review_required'` ile sınırlıdır ki yanlış bir satır
+  yakalanmasın.
+- **Sayı artıyorsa** sorun tek tek kayıtlarda değildir. Ölçüm ucundaki
+  `debts.needsReview` ve `attempts.needsAttention` sayaçlarına bak; artan bir
+  eğri genellikle RPC tarafında bir arıza demektir.
+
 ### Veri güvenliği formu eşlemesi
 
 Faz 5'te Play Console formu doldurulurken kullanılacak karşılıklar. "Paylaşım"
