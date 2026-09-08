@@ -249,6 +249,9 @@ export const tr = {
     uploadNotice:
       "Fiş görselin analiz için OpenAI'ye gönderilir. Görsel sunucuda saklanmaz.",
     reading: "Fişteki ürünler okunuyor, bu birkaç saniye sürebilir…",
+    manualEntry: "Fişi elle gir",
+    manualEntryNotice:
+      "Fotoğraf göndermeden ürünleri kendin yazarsın. Analiz hakkı harcanmaz.",
     toParticipants: "Kişilere dağıt",
     checkBeforeSplit: "Ürünleri kişilere dağıtmadan önce tutarları kontrol et.",
 

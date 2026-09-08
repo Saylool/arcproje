@@ -12,6 +12,7 @@ import { ParticipantAssignment } from "@/components/ParticipantAssignment";
 import { ProgressSteps, type FlowStepId } from "@/components/ProgressSteps";
 import { ReceiptEditor } from "@/components/ReceiptEditor";
 import { ReceiptUploader } from "@/components/ReceiptUploader";
+import { createManualReceipt } from "@/lib/receipt/manual-receipt";
 import { GoogleSignInButton } from "@/components/AuthControl";
 import { readApiErrorCode } from "@/lib/i18n/api-errors";
 import {
@@ -168,6 +169,31 @@ export function ReceiptFlow({
     },
     [t],
   );
+
+  /**
+   * ANALİZ OLMADAN BAŞLA.
+   *
+   * Sunucuya HİÇ gitmez: kota harcanmaz, sağlayıcı çağrılmaz. Bu yol tam da
+   * o çağrıların yapılamadığı durumlar için var — günlük tavan dolduğunda ya
+   * da analiz servisine ulaşılamadığında.
+   *
+   * Sıfırlama, başarılı bir analizinkiyle AYNIDIR: yarım kalmış bir analizin
+   * hata mesajı, eski atamaları ya da geçersiz alan işaretleri yeni fişe
+   * taşınmaz.
+   */
+  const startManualEntry = useCallback(() => {
+    setReceipt(createManualReceipt());
+    setAnalysisKey((key) => key + 1);
+    setInvalidAmountFields(new Set<AmountFieldId>());
+    setErrorMessage(null);
+    setStatus("idle");
+    setScreen("receipt");
+    setSplitError(null);
+    setAssignment(createInitialAssignmentState(t("participants.defaultName")));
+    setDebtResult(null);
+    setDebtError(null);
+    setShowAuthPrompt(false);
+  }, [t]);
 
   /** Fiş düzenlenince atamaları mevcut ürün ID'lerine göre güvenli tut. */
   const handleReceiptChange = useCallback(
@@ -455,6 +481,27 @@ export function ReceiptFlow({
               })}
             </p>
           )}
+
+          {/*
+            * ANALİZ OLMADAN BAŞLAMA YOLU.
+            *
+            * Fotoğraf seçilmiş olsun ya da olmasın görünür: kullanıcı fişi
+            * hiç göndermeden de devam edebilmeli. Analiz servisi kapalıyken
+            * ya da günlük tavan dolduğunda uygulamayı ayakta tutan tek yol
+            * budur.
+            */}
+          <div className="flex flex-col gap-2 rounded-3xl border border-line bg-card p-4 shadow-card">
+            <button
+              type="button"
+              onClick={startManualEntry}
+              className="inline-flex items-center justify-center rounded-full border border-brand-line bg-brand-soft px-5 py-2.5 text-sm font-semibold text-brand-ink transition-colors hover:bg-brand-soft-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus min-h-11"
+            >
+              {t("flow.manualEntry")}
+            </button>
+            <p className="text-xs leading-relaxed text-ink-faint">
+              {t("flow.manualEntryNotice")}
+            </p>
+          </div>
 
           {file !== null && (
             <div className="flex flex-col gap-3 rounded-3xl border border-line bg-card p-4 shadow-card">

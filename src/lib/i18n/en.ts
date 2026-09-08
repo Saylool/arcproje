@@ -224,6 +224,9 @@ export const en: Dictionary = {
     uploadNotice:
       "Your receipt image is sent to OpenAI for analysis. The image is not stored on the server.",
     reading: "Reading the items on the receipt, this may take a few seconds…",
+    manualEntry: "Enter the receipt by hand",
+    manualEntryNotice:
+      "Type the items yourself, without sending a photo. This uses none of your analyses.",
     toParticipants: "Share among participants",
     checkBeforeSplit:
       "Check the amounts before sharing the items among participants.",
