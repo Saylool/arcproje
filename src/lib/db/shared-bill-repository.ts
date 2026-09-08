@@ -206,6 +206,53 @@ export type WriteProviderRateCacheOutcome =
   | { ok: true; stored: boolean }
   | { ok: false; reason: "unavailable" };
 
+/**
+ * İŞLETME SAYAÇLARI — hepsi TOPLAM, hiçbiri kişiye ait değil.
+ *
+ * Bu tipin taşıdığı asıl sözleşme budur: burada bir hesap kimliği, cüzdan
+ * adresi, kullanıcı kimliği ya da işlem hash'i YOKTUR ve olamaz. Ölçüm için
+ * gereken şey "kaç tane", "kim" değil.
+ *
+ * Sınırlar (günlük tavan, pencere başına çağrı) BURADA DEĞİLDİR: depo yalnızca
+ * sayar, ne kadarının fazla olduğuna politika karar verir.
+ */
+export type MetricsCounts = Readonly<{
+  users: Readonly<{ total: number; newIn24h: number; newIn7d: number }>;
+  bills: Readonly<{
+    total: number;
+    open: number;
+    createdIn24h: number;
+    createdIn7d: number;
+    /** Saklama süresi dolmuş, silinmeye uygun kayıtlar. */
+    pastRetention: number;
+  }>;
+  /**
+   * Durum -> adet. Şemadaki değerler dışında bir anahtar beklenmez, ama tip
+   * `Record<string, number>`tür: veritabanı gerçekte ne dönerse o görünsün,
+   * bilinmeyen bir durum sessizce sıfıra düşmesin.
+   */
+  debtsByStatus: Readonly<Record<string, number>>;
+  attemptsByStatus: Readonly<Record<string, number>>;
+  analyses: Readonly<{
+    /** Bugünün genel sayacı. */
+    globalUsed: number;
+    /** Bugün en az bir analiz yapmış kullanıcı SAYISI; kimlikleri değil. */
+    activeUsers: number;
+    /** Bugün kendi hakkını doldurmuş kullanıcı sayısı. */
+    usersAtCap: number;
+  }>;
+  provider: Readonly<{
+    /** Son 24 saatte GERÇEKTEN yapılan yukarı akış çağrısı. */
+    calls: number;
+    /** Bütçesi dolmuş pencere sayısı; her biri bir reddedilmiş çağrıdır. */
+    windowsAtCap: number;
+  }>;
+}>;
+
+export type ReadMetricsOutcome =
+  | { ok: true; counts: MetricsCounts }
+  | { ok: false; reason: "unavailable" };
+
 /** Silinen kota satırı sayısı. Kısmi sonuç yoktur: ya hepsi ya hiçbiri. */
 export type DeleteQuotaRowsOutcome =
   | { ok: true; deleted: number }
@@ -545,6 +592,37 @@ export type SharedBillRepository = SharedBillPaymentRepository &
     observedAt: number;
     storedAtMs: number;
   }): Promise<WriteProviderRateCacheOutcome>;
+
+  /**
+   * İşletme sayaçlarını TEK bir okumada verir.
+   *
+   * SALT OKUR; hiçbir satır yazmaz ve hiçbir sayacı tüketmez. Ölçmek için
+   * ölçülen şeyi değiştirmek olmaz.
+   *
+   * EŞİKLER ÇAĞIRANDAN GELİR: gün, saklama sınırı, pencere başlangıcı ve
+   * kişi başı hak burada hesaplanmaz. Aynı gerekçe `reserveProviderCall` ile
+   * aynıdır — sunucunun saati sorguya bırakılmaz, politika tek yerde ve saf
+   * bir işlevde durur.
+   *
+   * Sorgular TEK işlemde çalışır: sayaçlar birbiriyle tutarlı bir andan
+   * gelsin ve her biri ayrı bir gidiş-dönüş olmasın.
+   */
+  readMetrics(input: {
+    /** Bu andan ÖNCE oluşturulan kayıtlar "son 24 saat" dışındadır. */
+    since24hMs: number;
+    since7dMs: number;
+    /** Süresi bundan önce dolmuş kayıtlar silinmeye uygundur. */
+    retentionCutoffMs: number;
+    /** `YYYY-MM-DD`, UTC. Sayaçların kendisiyle aynı gün tanımı. */
+    quotaDay: string;
+    globalQuotaKey: string;
+    /** Kişi başı günlük hak; "hakkını doldurmuş" sayımı buna göre yapılır. */
+    userQuotaLimit: number;
+    providerKey: string;
+    /** Unix DAKİKA kovası; bundan itibaren sayılır. */
+    providerWindowFrom: number;
+    providerLimitPerWindow: number;
+  }): Promise<ReadMetricsOutcome>;
 
   /**
    * Saklama süresi dolmuş kayıtları ve onlara bağlı HER ŞEYİ siler.

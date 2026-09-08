@@ -9,6 +9,7 @@ import {
 import { readDatabaseUrl, type DatabaseEnv } from "./env";
 import type {
   DeleteQuotaRowsOutcome,
+  ReadMetricsOutcome,
   ReadProviderRateCacheOutcome,
   ReserveProviderCallOutcome,
   ReserveQuotaOutcome,
@@ -539,6 +540,74 @@ RETURNING stored_at
 const COUNT_ALL_BILLS = `
 SELECT count(*)::int AS total
 FROM shared_bills
+`;
+
+/*
+ * İŞLETME SAYAÇLARI — altı sorgu, TEK işlemde.
+ *
+ * Hepsi TOPLAM döndürür. Hiçbiri hesap kimliği, adres, kullanıcı kimliği ya
+ * da işlem hash'i seçmez; ölçüm için gereken "kaç tane", "kim" değil.
+ *
+ * Eşikler PARAMETREDİR: gün, saklama sınırı ve pencere başlangıcı çağırandan
+ * gelir. `now()` burada okunmaz — okunsaydı sayım sunucunun saatine bağlanır
+ * ve testlerde belirlenimci olmazdı.
+ */
+const METRICS_USERS = `
+SELECT
+  count(*)::int AS total,
+  count(*) FILTER (WHERE created_at > to_timestamp($1 / 1000.0))::int AS new_24h,
+  count(*) FILTER (WHERE created_at > to_timestamp($2 / 1000.0))::int AS new_7d
+FROM app_users
+`;
+
+const METRICS_BILLS = `
+SELECT
+  count(*)::int AS total,
+  count(*) FILTER (WHERE status = 'open')::int AS open,
+  count(*) FILTER (WHERE created_at > to_timestamp($1 / 1000.0))::int AS created_24h,
+  count(*) FILTER (WHERE created_at > to_timestamp($2 / 1000.0))::int AS created_7d,
+  count(*) FILTER (WHERE expires_at < to_timestamp($3 / 1000.0))::int AS past_retention
+FROM shared_bills
+`;
+
+/*
+ * `GROUP BY` ile gelen kırılım, sabit bir sütun listesinden İYİDİR: şemaya
+ * yeni bir durum eklenirse sayım onu kendiliğinden gösterir, sessizce
+ * atlamaz.
+ */
+const METRICS_DEBTS = `
+SELECT payment_status AS status, count(*)::int AS total
+FROM shared_bill_debts
+GROUP BY payment_status
+`;
+
+const METRICS_ATTEMPTS = `
+SELECT status, count(*)::int AS total
+FROM shared_bill_payment_attempts
+GROUP BY status
+`;
+
+/*
+ * Genel satır `max` ile alınır: `(quota_key, day)` birincil anahtar olduğu
+ * için en fazla tek satır vardır, ama toplulaştırma olmadan `FILTER`
+ * kullanılamaz. Satır yoksa `coalesce` sıfır verir — "bugün hiç analiz
+ * yapılmadı" bir hata değildir.
+ */
+const METRICS_ANALYSES = `
+SELECT
+  coalesce(max(used) FILTER (WHERE quota_key = $1), 0)::int AS global_used,
+  count(*) FILTER (WHERE quota_key <> $1)::int AS active_users,
+  count(*) FILTER (WHERE quota_key <> $1 AND used >= $2::int)::int AS users_at_cap
+FROM receipt_analysis_quota
+WHERE day = $3::date
+`;
+
+const METRICS_PROVIDER = `
+SELECT
+  coalesce(sum(used), 0)::int AS calls,
+  count(*) FILTER (WHERE used >= $1::int)::int AS windows_at_cap
+FROM provider_call_budget
+WHERE provider_key = $2 AND window_start >= $3::bigint
 `;
 
 /*
@@ -1669,6 +1738,141 @@ export async function createNeonSharedBillRepository(
          * bildirilir ve bir hataya dönüştürülmez.
          */
         return { ok: true, stored: rows.length > 0 };
+      } catch {
+        return { ok: false, reason: "unavailable" };
+      }
+    },
+
+    async readMetrics(input: {
+      since24hMs: number;
+      since7dMs: number;
+      retentionCutoffMs: number;
+      quotaDay: string;
+      globalQuotaKey: string;
+      userQuotaLimit: number;
+      providerKey: string;
+      providerWindowFrom: number;
+      providerLimitPerWindow: number;
+    }): Promise<ReadMetricsOutcome> {
+      try {
+        /*
+         * TEK işlem: altı sayaç birbiriyle tutarlı bir andan gelir ve altı
+         * ayrı gidiş-dönüş yerine bir tane yapılır.
+         */
+        const results = await sql.transaction((txn) => [
+          txn.query(METRICS_USERS, [input.since24hMs, input.since7dMs]),
+          txn.query(METRICS_BILLS, [
+            input.since24hMs,
+            input.since7dMs,
+            input.retentionCutoffMs,
+          ]),
+          txn.query(METRICS_DEBTS, []),
+          txn.query(METRICS_ATTEMPTS, []),
+          txn.query(METRICS_ANALYSES, [
+            input.globalQuotaKey,
+            input.userQuotaLimit,
+            input.quotaDay,
+          ]),
+          txn.query(METRICS_PROVIDER, [
+            input.providerLimitPerWindow,
+            input.providerKey,
+            input.providerWindowFrom,
+          ]),
+        ]);
+
+        /*
+         * Şekli tanınmayan bir sayı sıfıra DÜŞÜRÜLMEZ. Sıfır, "ölçtüm ve
+         * hiç yok" demektir; okunamayan bir değeri sıfır göstermek, boş bir
+         * grafiğe bakıp "sorun yok" dedirtirdi.
+         */
+        const toCount = (value: unknown): number | null => {
+          const parsed = typeof value === "number" ? value : Number(value);
+          return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+        };
+
+        const groupToRecord = (
+          rows: { status: unknown; total: unknown }[],
+        ): Record<string, number> | null => {
+          const record: Record<string, number> = {};
+          for (const row of rows) {
+            const total = toCount(row.total);
+            if (typeof row.status !== "string" || total === null) {
+              return null;
+            }
+            record[row.status] = total;
+          }
+          return record;
+        };
+
+        const users = (results[0] as Record<string, unknown>[])[0];
+        const bills = (results[1] as Record<string, unknown>[])[0];
+        const debts = groupToRecord(
+          results[2] as { status: unknown; total: unknown }[],
+        );
+        const attempts = groupToRecord(
+          results[3] as { status: unknown; total: unknown }[],
+        );
+        const analyses = (results[4] as Record<string, unknown>[])[0];
+        const provider = (results[5] as Record<string, unknown>[])[0];
+
+        if (
+          users === undefined ||
+          bills === undefined ||
+          analyses === undefined ||
+          provider === undefined ||
+          debts === null ||
+          attempts === null
+        ) {
+          return { ok: false, reason: "unavailable" };
+        }
+
+        const numbers = {
+          usersTotal: toCount(users.total),
+          usersNew24h: toCount(users.new_24h),
+          usersNew7d: toCount(users.new_7d),
+          billsTotal: toCount(bills.total),
+          billsOpen: toCount(bills.open),
+          billsCreated24h: toCount(bills.created_24h),
+          billsCreated7d: toCount(bills.created_7d),
+          billsPastRetention: toCount(bills.past_retention),
+          globalUsed: toCount(analyses.global_used),
+          activeUsers: toCount(analyses.active_users),
+          usersAtCap: toCount(analyses.users_at_cap),
+          providerCalls: toCount(provider.calls),
+          windowsAtCap: toCount(provider.windows_at_cap),
+        };
+        if (Object.values(numbers).some((value) => value === null)) {
+          return { ok: false, reason: "unavailable" };
+        }
+
+        return {
+          ok: true,
+          counts: {
+            users: {
+              total: numbers.usersTotal as number,
+              newIn24h: numbers.usersNew24h as number,
+              newIn7d: numbers.usersNew7d as number,
+            },
+            bills: {
+              total: numbers.billsTotal as number,
+              open: numbers.billsOpen as number,
+              createdIn24h: numbers.billsCreated24h as number,
+              createdIn7d: numbers.billsCreated7d as number,
+              pastRetention: numbers.billsPastRetention as number,
+            },
+            debtsByStatus: debts,
+            attemptsByStatus: attempts,
+            analyses: {
+              globalUsed: numbers.globalUsed as number,
+              activeUsers: numbers.activeUsers as number,
+              usersAtCap: numbers.usersAtCap as number,
+            },
+            provider: {
+              calls: numbers.providerCalls as number,
+              windowsAtCap: numbers.windowsAtCap as number,
+            },
+          },
+        };
       } catch {
         return { ok: false, reason: "unavailable" };
       }
