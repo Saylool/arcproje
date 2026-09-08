@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "migrate": "node --env-file=.env.local scripts/migrate.mjs"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.16.0",
