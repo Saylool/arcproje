@@ -568,9 +568,69 @@ export async function readPaymentStatus(
  * ---------------------------------------------------------------------------
  */
 
-/** Mutabakat yoklaması SINIRLIDIR: sonsuz döngü yoktur. */
-export const RECONCILE_POLL_INTERVAL_MS = 4000;
-export const RECONCILE_MAX_ATTEMPTS = 15;
+/**
+ * Mutabakat yoklaması SINIRLIDIR: sonsuz döngü yoktur.
+ *
+ * ARALIK SABİT DEĞİL, ÜSTEL GERİ ÇEKİLİR. Önceki hâlinde her 4 saniyede bir
+ * soruluyordu; 40 saniye süren bir onayda bu 10 istek, her biri iki
+ * veritabanı sorgusu demekti. Onay ilk saniyelerde gelmediyse bir sonraki
+ * saniyede de gelme ihtimali düşüktür — beklemeyi büyütmek hiçbir şey
+ * kaybettirmez.
+ *
+ * TOPLAM PENCERE DEĞİŞMEDİ ve bu bilinçli. Kullanıcıya verilen söz "yaklaşık
+ * bir dakika izliyoruz, sonra tekrar bak"tır; geri çekilmeyi pencereyi
+ * büyüterek uygulamak o sözü sessizce üç dakikaya çevirirdi. Değişen tek şey
+ * aynı pencerede KAÇ KEZ sorulduğu.
+ */
+
+/** İlk bekleme. Erken deneyim aynen korunur. */
+export const RECONCILE_POLL_INITIAL_MS = 4000;
+
+/** Her adımda beklemenin çarpanı. */
+export const RECONCILE_POLL_FACTOR = 1.5;
+
+/**
+ * TEK bir beklemenin tavanı.
+ *
+ * Tavansız bir çarpan, pencerenin sonunda tek bir uzun beklemeye dönüşür:
+ * onay 21. saniyede gelse bile kullanıcı 40. saniyeye kadar bunu görmez.
+ */
+export const RECONCILE_POLL_MAX_MS = 20_000;
+
+/** TOPLAM izleme penceresi. Eski davranışla (15 × 4 sn) BİREBİR aynı. */
+export const RECONCILE_POLL_WINDOW_MS = 60_000;
+
+/**
+ * Bekleme çizelgesi: 4 sn, 6 sn, 9 sn, 13,5 sn, 20 sn, kalan.
+ *
+ * SON BEKLEME PENCERENİN KALANIDIR ve bu yüzden bir öncekinden kısa
+ * olabilir. Tuhaf görünür ama doğrusu budur: çizelgenin toplamı pencereye
+ * TAM oturur, yani kullanıcının beklediği süre eskisiyle aynıdır.
+ */
+function buildReconcilePollDelays(): readonly number[] {
+  const delays: number[] = [];
+  let delay = RECONCILE_POLL_INITIAL_MS;
+  let total = 0;
+  while (total < RECONCILE_POLL_WINDOW_MS) {
+    const remaining = RECONCILE_POLL_WINDOW_MS - total;
+    const next = Math.min(delay, remaining);
+    delays.push(next);
+    total += next;
+    delay = Math.min(
+      Math.round(delay * RECONCILE_POLL_FACTOR),
+      RECONCILE_POLL_MAX_MS,
+    );
+  }
+  return Object.freeze(delays);
+}
+
+export const RECONCILE_POLL_DELAYS = buildReconcilePollDelays();
+
+/**
+ * Sorulacak EN FAZLA kez. Çizelgeden TÜRETİLİR: her beklemeden önce bir
+ * soru, artı sonuncusundan sonra bir soru daha.
+ */
+export const RECONCILE_MAX_ATTEMPTS = RECONCILE_POLL_DELAYS.length + 1;
 
 export type FinalizeState =
   | "confirmed"
