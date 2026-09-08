@@ -40,6 +40,57 @@ export const MIGRATION_FILE_PATTERN = /^([0-9]{4})_[a-z0-9_]+\.sql$/;
  */
 export const BOOTSTRAP_VERSION = "0008";
 
+/**
+ * Bağlantı kurulmasına tanınan süre.
+ *
+ * NEDEN VAR: bu değer olmadan `connect()` SONSUZA KADAR bekler. Ağ takılırsa
+ * araç hata vermez, sadece susar — ve elle çalıştırılan bir araçta susmak,
+ * hata vermekten kötüdür: karşındaki "acaba çalışıyor mu" diye bekler.
+ *
+ * 15 sn cömerttir ve bilinçlidir: Neon uykudaki bir dalı uyandırırken birkaç
+ * saniye harcayabilir. Amaç yavaş bağlantıyı kesmek değil, ÖLÜ bağlantının
+ * sonsuza kadar sürmesini engellemek.
+ */
+export const CONNECT_TIMEOUT_MS = 15_000;
+
+/**
+ * İstemci seçenekleri.
+ *
+ * SORGULARA ZAMAN AŞIMI KONMAZ ve bu bilinçli bir karardır. `query_timeout`
+ * istemci genelindedir, tek tek sorgulara verilemez; koyulsaydı büyük bir
+ * tabloyu dolduran meşru bir geçiş de yarıda kesilirdi. Bir geçişi beklemek,
+ * onu kesmekten iyidir — hele araç zaten bir insanın gözü önünde çalışırken.
+ *
+ * @param {string} url
+ */
+export function connectionOptions(url) {
+  return {
+    connectionString: url,
+    connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
+  };
+}
+
+/**
+ * Bağlantı hatasını GÜVENLE anlatır.
+ *
+ * Hatanın kendi mesajı BASTIRILIR: sürücü, çözülemeyen bir adı ya da
+ * bağlantı dizesinin parçalarını mesaja koyabilir ve `DATABASE_URL` hiçbir
+ * yere yazdırılmaz. Geriye teşhis için yeteni kalır — hata sınıfı ve varsa
+ * kodu (ETIMEDOUT, ENOTFOUND, 28P01 ...), ki sorunun ağ mı yetki mi olduğunu
+ * ayırmaya bu yeter.
+ *
+ * @param {unknown} error
+ */
+export function describeConnectError(error) {
+  if (typeof error !== "object" || error === null) {
+    return "bilinmeyen hata";
+  }
+  const name = error instanceof Error ? error.name : "Error";
+  const code =
+    "code" in error && typeof error.code === "string" ? error.code : null;
+  return code === null ? name : `${name} (${code})`;
+}
+
 /** @param {string} text */
 export function checksumOf(text) {
   return createHash("sha256").update(text, "utf8").digest("hex");
@@ -369,8 +420,18 @@ async function main(argv) {
   }
 
   const { Client } = await import("@neondatabase/serverless");
-  const client = new Client(url);
-  await client.connect();
+  const client = new Client(connectionOptions(url));
+  try {
+    await client.connect();
+  } catch (error) {
+    /* Sebep GÜVENLE anlatılır; `DATABASE_URL` yazdırılmaz. */
+    console.error(
+      `[migrate] baglanti kurulamadi (${CONNECT_TIMEOUT_MS / 1000} sn): ${describeConnectError(error)}`,
+    );
+    console.error("[migrate] sema DEGISMEDI; hicbir gecis uygulanmadi.");
+    process.exitCode = 1;
+    return;
+  }
   console.log("[migrate] baglanildi.");
 
   try {
