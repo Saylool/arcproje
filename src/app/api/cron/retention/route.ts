@@ -33,6 +33,9 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: altı tabloda 500'lük silme partileri. Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 60;
+
 const NO_STORE_HEADERS = {
   "cache-control": "no-store, private, max-age=0",
 } as const;

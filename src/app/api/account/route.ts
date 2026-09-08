@@ -27,6 +27,9 @@ import { createNeonSharedBillRepository } from "@/lib/db/neon-shared-bill-reposi
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/* Bütçe: yalnızca veritabanı (ve varsa 5 sn'lik kur çağrısı). Gerekçe: `function-duration.test.ts`. */
+export const maxDuration = 15;
+
 const NO_STORE_HEADERS = {
   "cache-control": "no-store, private, max-age=0",
 } as const;
