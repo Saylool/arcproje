@@ -417,11 +417,24 @@ WHERE user_id = $1
 FOR KEY SHARE
 `;
 
+/*
+ * `$2` İKİ AYRI TÜRDE KULLANILIYOR — açık cast ŞART.
+ *
+ * Aynı parametre hem `quota_key` (text) değeri olarak yazılıyor hem de
+ * `app_users.user_id` (uuid) ile karşılaştırılıyor. PostgreSQL parametrenin
+ * türünü VALUES listesinden `text` diye çıkarır; karşılaştırma `uuid = text`
+ * olur ve 42883 "operator does not exist" ile REDDEDİLİR. Deyim düşünce
+ * işlemin tamamı düşer, `catch` bunu "erişilemiyor"a çevirir — yani HER fiş
+ * analizi 503 döner ve kota tablosuna tek satır bile yazılmaz.
+ *
+ * Bellek içi sahte depo bunu GÖSTEREMEZ: orada tür yoktur. Yalnızca gerçek
+ * Postgres'e karşı çalışan eşlik testi yakalar.
+ */
 const SEED_QUOTA_ROWS = `
 INSERT INTO receipt_analysis_quota (quota_key, day, used)
 SELECT candidate, $3::date, 0
 FROM (VALUES ($1), ($2)) AS keys(candidate)
-WHERE EXISTS (SELECT 1 FROM app_users WHERE user_id = $2)
+WHERE EXISTS (SELECT 1 FROM app_users WHERE user_id = $2::uuid)
 ON CONFLICT (quota_key, day) DO NOTHING
 `;
 
@@ -457,8 +470,8 @@ bumped AS (
     AND q.quota_key IN ($1, $2)
     AND b.global_used < $4
     AND b.user_used < $5
-    -- Hesap ayırma anında yoksa HİÇBİR sayaç artmaz.
-    AND EXISTS (SELECT 1 FROM app_users WHERE user_id = $2)
+    -- Hesap ayırma anında yoksa HİÇBİR sayaç artmaz. (::uuid için bkz. SEED_QUOTA_ROWS)
+    AND EXISTS (SELECT 1 FROM app_users WHERE user_id = $2::uuid)
   RETURNING q.quota_key, q.used
 )
 SELECT
@@ -467,7 +480,7 @@ SELECT
   (SELECT count(*) FROM bumped)::int AS bumped_rows,
   (SELECT used FROM bumped WHERE quota_key = $2)::int AS user_after,
   /* Sıfır satır "tükendi" mi "hesap yok" mu — ayırt eden budur. */
-  (SELECT count(*) FROM app_users WHERE user_id = $2)::int AS user_present
+  (SELECT count(*) FROM app_users WHERE user_id = $2::uuid)::int AS user_present
 `;
 
 /**

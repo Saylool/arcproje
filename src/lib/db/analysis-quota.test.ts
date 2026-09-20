@@ -1000,8 +1000,25 @@ describe("yaris SQL'de de kapali", () => {
      * tam olarak öyle oldu. Sayımın kendisi aranır.
      */
     expect(reserve).toContain(
-      "(SELECT count(*) FROM app_users WHERE user_id = $2)::int AS user_present",
+      "(SELECT count(*) FROM app_users WHERE user_id = $2::uuid)::int AS user_present",
     );
+  });
+
+  it("uuid sutunuyla karsilastirma CAST EDILIR", () => {
+    /*
+     * $2 iki ayri turde kullaniliyor: hem quota_key (text) degeri olarak
+     * yaziliyor hem de app_users.user_id (uuid) ile karsilastiriliyor. Cast
+     * olmadan Postgres parametreyi VALUES listesinden text cikarir, sorgu
+     * "uuid = text" olur ve 42883 ile REDDEDILIR. Deyim dusunce islemin
+     * tamami duser ve HER fis analizi 503 doner.
+     *
+     * Bellek ici sahte depoda tur YOKTUR, bu yuzden orada hep yesil kalir.
+     * Metnin kendisi aranmazsa hata sessizce geri gelir.
+     */
+    const seed = between("const SEED_QUOTA_ROWS = `", "`;");
+    const reserve = between("const RESERVE_ANALYSIS_QUOTA = `", "`;");
+    expect(seed).toContain("WHERE user_id = $2::uuid");
+    expect(reserve).toContain("WHERE user_id = $2::uuid");
   });
 
   it("KILIT SIRASI iki islemde de AYNI", () => {
