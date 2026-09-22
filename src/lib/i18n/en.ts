@@ -181,6 +181,15 @@ export const en: Dictionary = {
       "If your wallet does not know Arc Testnet the connection still succeeds; you will then be asked to switch networks.",
   },
 
+  geo: {
+    blockedTitle: "Not available in your region — Split Bill",
+    blockedHeading: "Split Bill is not offered in this region",
+    blockedBody:
+      "We cannot offer this service where you are connecting from. This is not an error: the app is open only in countries where it can operate lawfully.",
+    blockedUnknown:
+      "Your country could not be determined. Access stays closed in that case; this is not an error.",
+  },
+
   legal: {
     accountLink: "Your account",
     effectiveFrom: "In effect from {date}",

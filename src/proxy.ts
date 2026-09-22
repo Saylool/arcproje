@@ -1,15 +1,34 @@
 import type { NextRequest } from "next/server";
 
-import { applyContentSecurityPolicy } from "@/lib/security/csp-proxy";
+import {
+  applyContentSecurityPolicy,
+  stampContentSecurityPolicy,
+} from "@/lib/security/csp-proxy";
+import {
+  ALLOWED_COUNTRIES_ENV,
+  blockedResponse,
+  decideGeo,
+  parseAllowedCountries,
+} from "@/lib/security/geo-gate";
 
 /**
  * Next 16'nın istek öncesi kancası (eski adıyla middleware).
  *
- * Bugün tek görevi CSP'yi her isteğe özgü nonce ile basmak. Coğrafi kapı
- * gibi ileride gelecek kurallar da buraya eklenir; her biri kendi
+ * Sıra önemlidir: önce coğrafi kapı, çünkü engellenen bir isteğe sayfa
+ * çizdirmenin anlamı yok; sonra CSP, çünkü kapıdan geçen HER yanıt —
+ * 451 sayfası dâhil — nonce'lu politikayı taşımalı. Her kural kendi
  * modülünde yaşar, bu dosya yalnızca sıralar.
+ *
+ * Ortam değişkeni her istekte okunur: ucuz, ve testler onu değiştirebilir.
  */
 export function proxy(request: NextRequest) {
+  const decision = decideGeo(
+    parseAllowedCountries(process.env[ALLOWED_COUNTRIES_ENV]),
+    request.headers,
+  );
+  if (decision.kind === "blocked") {
+    return stampContentSecurityPolicy(blockedResponse(request, decision));
+  }
   return applyContentSecurityPolicy(request);
 }
 
