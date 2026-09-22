@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { PayPageFallback, PayPageIntro } from "@/components/PayPageChrome";
 import { PaymentRequestPayer } from "@/components/PaymentRequestPayer";
+import { STANDALONE_REQUEST_FLOW_ENABLED } from "@/lib/arc/standalone-request-feature";
 import { readSafeAuthState } from "@/lib/auth/safe-auth-state";
 import { translate } from "@/lib/i18n/dictionary";
 import { resolveRequestLocale } from "@/lib/i18n/server";
@@ -26,6 +27,7 @@ export async function generateMetadata(): Promise<Metadata> {
  */
 export default async function PayPage() {
   const authState = await readSafeAuthState();
+  const locale = await resolveRequestLocale();
 
   return (
     <main className="mx-auto flex w-full max-w-xl flex-col gap-8 px-4 py-10 sm:gap-10 sm:px-6 sm:py-16">
@@ -34,9 +36,20 @@ export default async function PayPage() {
         <PayPageIntro />
       </header>
 
-      <Suspense fallback={<PayPageFallback />}>
-        <PaymentRequestPayer />
-      </Suspense>
+      {/*
+        TEK-LINK KAPISI: akis yalnizca test aginda aciktir (gerekcesi
+        `standalone-request-feature.ts`). Kapaliyken odeyici HIC kurulmaz —
+        URL'deki talep okunmaz, dogrulanmaz, cuzdana dokunulmaz.
+      */}
+      {STANDALONE_REQUEST_FLOW_ENABLED ? (
+        <Suspense fallback={<PayPageFallback />}>
+          <PaymentRequestPayer />
+        </Suspense>
+      ) : (
+        <p className="text-sm leading-relaxed text-ink-faint sm:text-base">
+          {translate(locale, "payer.closedOnMainnet")}
+        </p>
+      )}
     </main>
   );
 }
