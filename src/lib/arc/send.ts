@@ -9,13 +9,16 @@ import {
 } from "./conversion";
 import { parsePositiveMinorUnits } from "./minor-units";
 import {
-  ARC_TESTNET_APP_KIT_CHAIN,
   ARC_TESTNET_CHAIN_ID,
   buildArcExplorerTxUrl,
   isArcTestnet,
   isValidTransactionHash,
   parseChainId,
 } from "./network";
+import {
+  createArcTransferClient,
+  type ArcTransferClient,
+} from "./transfer-client";
 import {
   REQUEST_ID_HEX_LENGTH,
   REQUEST_MAX_CLOCK_SKEW_MS,
@@ -30,20 +33,29 @@ import { translate } from "../i18n/dictionary";
 import { DEFAULT_LOCALE, type Locale } from "../i18n/locale";
 
 /**
- * App Kit Send akışının güvenlik sınırı.
+ * Gönderim akışının güvenlik sınırı.
  *
  * Bu modül React state'ine güvenmez. Kullanıcının incelediği ödeme değişmez bir
- * snapshot olarak gelir; her alan burada yeniden doğrulanır ve App Kit
- * çağrılmadan hemen önce provider'a `eth_accounts` ve `eth_chainId` sorulur.
- * Hesap veya ağ değişmişse App Kit hiç çağrılmaz.
+ * snapshot olarak gelir; her alan burada yeniden doğrulanır ve zincire giden
+ * çağrıdan hemen önce provider'a `eth_accounts` ile `eth_chainId` sorulur.
+ * Hesap veya ağ değişmişse cüzdan istemi hiç açılmaz.
  *
- * App Kit ve adaptör dinamik import edilir: yalnızca tarayıcıda, yalnızca
- * doğrulama geçtikten sonra yüklenir. Ham SDK/provider hataları dışarı verilmez.
+ * Zincire dokunan tek yol `./transfer-client` (viem). O da dinamik import
+ * edilir: yalnızca tarayıcıda, yalnızca doğrulama geçtikten sonra yüklenir.
+ * Ham sağlayıcı hataları dışarı verilmez.
  *
  * Talebin geçerlilik süresi bu sınırda, React'ten BAĞIMSIZ olarak uygulanır ve
- * her adımda yeniden ölçülür: girişte, preflight'tan sonra (App Kit henüz
- * yüklenmeden) ve `estimateSend`/`send` çağrısından hemen önce. İnceleme ile
- * gönderim arasında geçen sürede dolmuş bir talep gönderilemez.
+ * her adımda yeniden ölçülür: girişte, preflight'tan sonra, istemci
+ * kurulduktan sonra ve cüzdan istemi açılmadan hemen önce.
+ *
+ * ÜÇ ADIMLI GÖNDERİM ve neden ayrı durdukları:
+ *
+ *  1. `simulate()` cüzdana DOKUNMAZ ve işlem YAYINLAMAZ; oradaki hata
+ *     kanıtlanabilir biçimde yayın öncesidir.
+ *  2. `submit()` istemi açar ve BAŞARIYSA hash'i döndürür. Belirsizlik
+ *     penceresi bu yüzden yalnızca "fırlattı ve hiç hash yok" hâlidir.
+ *  3. `waitForReceipt()` sonucu zincirin `status` alanından okur. Bekleme
+ *     fırlarsa hash elimizdedir ve sonuç hash'iyle birlikte belirsiz sayılır.
  */
 
 const BIG_ZERO = BigInt(0);
@@ -154,7 +166,7 @@ export function reviewStateAfterSendFailure(
 /**
  * Bu hatadan sonra gönderim kilidi AÇILMAZ.
  *
- * `kit.send` çağrıldıktan sonra sonuç belirsizse tekrar denemek aynı ödemeyi
+ * `submit()` çağrıldıktan sonra sonuç belirsizse tekrar denemek aynı ödemeyi
  * ikinci kez gönderebilir. Kullanıcı önce cüzdanını ve explorer'ı kontrol
  * etmelidir; yeni bir deneme ancak sayfa yenilenerek başlar.
  */
@@ -170,7 +182,7 @@ export type ArcSendResult<T> =
       code: ArcSendErrorCode;
       /**
        * Revert VEYA belirsiz sonuçta ArcScan mutabakatı için korunur.
-       * `kit.send` bir hash döndürdüyse kaybedilmez.
+       * `submit()` bir hash döndürdüyse kaybedilmez.
        */
       txHash?: string;
       explorerUrl?: string | null;
@@ -228,130 +240,32 @@ export function checkSendSafetyMargin(
 }
 
 /**
- * `kit.send` ÇAĞRILDIKTAN sonra ortaya çıkan belirsiz sonuç.
+ * `submit()` ÇAĞRILDIKTAN sonra ortaya çıkan belirsiz sonuç.
  *
  * Bu noktadan sonra işlem zincire düşmüş OLABİLİR. Hata "gönderilemedi" gibi
  * sunulmaz; kullanıcı önce cüzdanını ve explorer'ı kontrol etmelidir.
  */
-/**
- * `kit.send` sonucunun (App Kit `BridgeStep`) yorumlanması.
- *
- * Kurulu SDK sözleşmesi: `state: 'pending' | 'success' | 'error' | 'noop'`,
- * isteğe bağlı `txHash` ve makine tarafından okunabilir `errorCategory`.
- * SDK dokümanı, makine kararları için `errorMessage` metnini eşleştirmek
- * yerine `errorCategory` kullanılmasını söyler.
- *
- * BAŞARI için İKİSİ de gerekir: belgelenmiş `success` durumu VE geçerli hash.
- * Sadece geçerli bir hash görmek yetmez; revert eden bir işlemin de hash'i
- * vardır ve asla "ödendi" sayılmaz.
- */
-export type SendResultClassification =
-  | { kind: "success"; txHash: string }
-  | { kind: "reverted"; txHash: string | null }
-  | { kind: "rejected" }
-  /** Sonuç kanıtlanamadı; hash varsa ArcScan mutabakatı için KORUNUR. */
-  | { kind: "unknown"; txHash: string | null };
-
-/** Zincire ulaşıp başarısız olmuş sayılan BELGELENMİŞ hata kategorileri. */
-const REVERTED_CATEGORIES = new Set<string>([
-  "chain_revert",
-  "reverted_onchain",
-  "partial_reverted",
-]);
-
-/** `BridgeStep` üzerinde incelenen alanlar. */
-const STEP_KEYS = ["state", "txHash", "errorCategory"] as const;
-
-export function classifySendResult(result: unknown): SendResultClassification {
-  if (typeof result !== "object" || result === null) {
-    return { kind: "unknown", txHash: null };
-  }
-  const snapshot = snapshotProperties(result, STEP_KEYS);
-  const step = snapshot.values;
-  const txHash = isValidTransactionHash(step.txHash) ? step.txHash : null;
-
-  /*
-   * Alanlardan biri okunamadıysa sonuç KANITLANAMAZ. Başarı da revert de
-   * iddia edilmez; varsa hash korunur.
-   */
-  if (!snapshot.complete) {
-    return { kind: "unknown", txHash };
-  }
-
-  if (step.state === "success") {
-    // Durum başarı ama hash yoksa/bozuksa sonucu doğrulayamayız.
-    return txHash === null
-      ? { kind: "unknown", txHash: null }
-      : { kind: "success", txHash };
-  }
-
-  if (step.state === "error") {
-    const category = step.errorCategory;
-    /*
-     * Kullanıcı reddi YALNIZCA hiç geçerli hash yokken yayın öncesi sayılır.
-     * Hash varsa bir işlem zincire gitmiştir; "reddedildi" deyip tekrar
-     * denemeye izin vermek aynı ödemeyi ikinci kez gönderebilirdi.
-     */
-    if (category === "user_rejected") {
-      return txHash === null
-        ? { kind: "rejected" }
-        : { kind: "unknown", txHash };
-    }
-    if (typeof category === "string" && REVERTED_CATEGORIES.has(category)) {
-      return { kind: "reverted", txHash };
-    }
-    /*
-     * KURULU SDK'nın (@circle-fin/app-kit 1.12.1) aynı zincir `send` yolu
-     * makbuzu bekler ve durumu doğrudan makbuzdan türetir:
-     *   state: receipt.status === 'success' ? 'success' : 'error'
-     * Bu yolda `errorCategory` HİÇ set edilmez. Dolayısıyla "error + geçerli
-     * hash + kategori yok", ONAYLANMIŞ bir revert makbuzudur: işlem zincire
-     * ulaştı ve başarısız oldu. Ödendi sayılmaz; belirsiz de değildir.
-     */
-    if (txHash !== null && category === undefined) {
-      return { kind: "reverted", txHash };
-    }
-    // Kalan kategoriler yayın öncesi olduğunu KANITLAMAZ; hash korunur.
-    return { kind: "unknown", txHash };
-  }
-
-  // 'pending', 'noop' veya tanınmayan durum: belirsiz, hash korunur.
-  return { kind: "unknown", txHash };
-}
 
 /**
- * `kit.send` ÇAĞRILDIKTAN sonra fırlayan istisnanın sınıflandırılması.
+ * `submit()` ÇAĞRILDIKTAN sonra fırlayan istisnanın sınıflandırılması.
  *
  * Yayın ÖNCESİ sayılmanın İKİ koşulu vardır:
  * 1. Hata grafiğinin HİÇBİR yerinde geçerli işlem hash'i OLMAMALIDIR. Hash
  *    varsa bir şey zincire gitmiştir ve hiçbir "yeniden denenebilir" sınıf
  *    uygulanmaz.
  * 2. Sinyal BELGELENMİŞ ve OLUMLU bir kimlik olmalıdır: viem'in
- *    `UserRejectedRequestError`'ı, App Kit'in `user_rejected` kategorisi,
- *    ham EIP-1193 4001 reddi ya da kurulu SDK'nın bakiye `KitError` ad+kod
- *    çifti (9001/9002/9003).
+ *    `UserRejectedRequestError`'ı ya da ham EIP-1193 4001 reddi.
  *
  * Serbest metin eşleştirmesi YAPILMAZ: "insufficient confirmations" gibi bir
  * mesaj işlemin gönderilmediğini kanıtlamaz. Kalan her şey belirsizdir.
- */
-export type SendExceptionClass =
-  | "rejected"
-  | "insufficientFunds"
-  | "submissionUnknown";
-
-/**
- * Kurulu SDK'nın YAYIN ÖNCESİ, yapısal bakiye hataları (ad + sayısal kod).
  *
- * `@circle-fin/app-kit` 1.12.1'de bu `KitError`'lar `prepareSend` içindeki
- * bakiye doğrulamasından gelir; `execute()` henüz çağrılmamıştır, yani hiçbir
- * işlem yayınlanmamıştır. Ad ve kod BİRLİKTE eşleşmelidir; mesaj metnine
- * asla bakılmaz.
+ * BAKİYE HATALARI ARTIK BURADA ARANMAZ. App Kit'in `prepareSend`'i onları
+ * `KitError` ad+kod çiftiyle (9001/9002/9003) fırlatıyordu ve tek ipucu oydu;
+ * viem yolunda yetersiz bakiye `simulate()` adımında, cüzdan hiç açılmadan
+ * ortaya çıkar. Yani artık çıkarsanan değil KANITLANMIŞ bir yayın öncesi
+ * hatadır ve `classifySimulationError` onu ayrı ele alır.
  */
-const PRE_BROADCAST_BALANCE_ERRORS = new Map<string, number>([
-  ["BALANCE_INSUFFICIENT_TOKEN", 9001],
-  ["BALANCE_INSUFFICIENT_GAS", 9002],
-  ["BALANCE_INSUFFICIENT_ALLOWANCE", 9003],
-]);
+export type SendExceptionClass = "rejected" | "submissionUnknown";
 
 /**
  * Kurulu viem'in onay bekleme zaman aşımı hatasının TAM adı.
@@ -368,7 +282,7 @@ const PRE_BROADCAST_BALANCE_ERRORS = new Map<string, number>([
  * Hash TİPLİ BİR ALANDA TUTULMAZ; yalnızca cümlenin içinde geçer. Kurulu
  * `@circle-fin/adapter-viem-v2` bu çağrıyı sarmalamaz (`waitForTransaction`
  * doğrudan `publicClient.waitForTransactionReceipt` çağırır), yani hata ham
- * hâliyle `kit.send` dışına çıkar. Bu hash olmadan işlem ArcScan'de
+ * hâliyle dışarı çıkar. Bu hash olmadan işlem ArcScan'de
  * bulunamaz; bu yüzden metin YALNIZCA bu ada birebir uyan hata için ve
  * YALNIZCA tam cümle kalıbıyla okunur.
  */
@@ -383,7 +297,7 @@ const VIEM_TIMEOUT_HASH_PATTERN =
  *
  * Cüzdan/sağlayıcı hataları fırlatan getter, durumlu erişimci veya İPTAL
  * EDİLMİŞ proxy içerebilir. Böyle bir nesnede basit bir `error.code` bile
- * TypeError fırlatır. `kit.send` ÇAĞRILDIKTAN sonra bu tür bir çökme
+ * TypeError fırlatır. `submit()` ÇAĞRILDIKTAN sonra bu tür bir çökme
  * "gönderilemedi" gibi raporlanırsa kullanıcı, zincire düşmüş olabilecek bir
  * ödemeyi ikinci kez gönderebilir. Bu yüzden incelenen HER özellik buradan
  * okunur ve hata yutulup `ok: false` olarak bildirilir.
@@ -458,10 +372,14 @@ function snapshotProperties(
 /**
  * Hata grafiğinde izlenen TEK bağlantı adları.
  *
- * Kurulu yığın hatayı birden çok katmanda sarmalar: `KitError` bağlamı
- * `cause.trace` altına koyar, `trace` ise özgün hatayı belgelenmiş
- * `rawError` alanında taşır ve bu iç içe geçebilir
- * (`cause.trace.rawError.rawError`). viem ise klasik `cause` zinciri kullanır.
+ * viem klasik `cause` zinciri kullanır; cüzdan köprüleri ve uzantı
+ * sarmalayıcıları ise özgün hatayı `trace` ya da `rawError` altında iç içe
+ * taşıyabilir. Adlar App Kit kaldırıldıktan sonra da LİSTEDE BIRAKILDI:
+ * maliyeti yok ve bir sarmalayıcı onları kullanırsa gerçek ret kimliği ya da
+ * işlem hash'i görülmeden kalırdı.
+ *
+ * Bu sınır hangi köprünün kullanıldığını BİLMEZ ve bilmemelidir: sağlayıcıya
+ * yalnızca `withProvider(walletUuid, …)` üzerinden ulaşılır.
  *
  * `errors` standart `AggregateError` alanıdır: birden çok alt hata taşır ve
  * gerçek ret kimliği ya da işlem hash'i orada saklanabilir. Diğerleri gibi
@@ -507,7 +425,7 @@ const MAX_PROTOTYPE_DEPTH = 8;
  * Değerin prototipi SIRADAN mı?
  *
  * Kabul edilenler: prototipsiz nesne (`Object.create(null)`), düz nesne
- * (`Object.prototype`) ve `Error` türevleri (`KitError`, viem `BaseError`…).
+ * (`Object.prototype`) ve `Error` türevleri (viem `BaseError` gibi).
  *
  * `Set`, `Map`, `WeakSet`, `WeakMap`, tipli diziler/`ArrayBuffer` görünümleri,
  * `Promise` ve özel kap sınıfları bu testten GEÇEMEZ: prototipleri ne
@@ -786,46 +704,24 @@ function collectErrorGraph(error: unknown): ErrorGraph {
 /** viem'in kullanıcı reddi hatasının TAM adı (`_esm/errors/rpc.js`). */
 const VIEM_USER_REJECTED_ERROR = "UserRejectedRequestError";
 
-/** App Kit'in belgelenmiş iptal kategorisi. */
-const APP_KIT_USER_REJECTED = "user_rejected";
-
 /** EIP-1193 kullanıcı reddi kodu. */
 const EIP1193_USER_REJECTED_CODE = 4001;
 
 /**
- * App Kit `KitError` adları BÜYÜK_HARF_ALT_ÇİZGİ biçimindedir; SDK bunu
- * `^[A-Z_][A-Z0-9_]*$` ile doğrular. `type` alanı da yalnızca `KitError`'da
- * bulunur. İkisi birlikte, ham EIP-1193 hatasını App Kit sarmalayıcısından
- * ayırmaya yeter.
- */
-const KIT_ERROR_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
-
-function isKitErrorNode(node: Readonly<Record<string, unknown>>): boolean {
-  const name = node.name;
-  if (typeof name === "string" && KIT_ERROR_NAME_PATTERN.test(name)) {
-    return true;
-  }
-  return typeof node.type === "string" && node.type !== "";
-}
-
-/**
  * Bu düğüm OLUMLU bir kullanıcı iptali kimliği mi?
  *
- * Kod 4001 TEK BAŞINA yeterli DEĞİLDİR: kurulu App Kit'te
- * `RpcError.ENDPOINT_ERROR` da `code: 4001` (`name: "RPC_ENDPOINT_ERROR"`,
- * `type: "RPC"`) kullanır. Bu bir uç nokta arızasıdır, kullanıcı reddi
- * DEĞİLDİR ve `kit.send` sonrası belirsiz bir gönderimi temsil edebilir.
- * Bu yüzden 4001 yalnızca düğüm bir `KitError` DEĞİLKEN kabul edilir.
+ * İki kabul edilen kimlik: viem'in `UserRejectedRequestError` adı ve ham
+ * EIP-1193 4001 kodu. Serbest metne BAKILMAZ.
+ *
+ * App Kit kaldırıldığında bir tuzak da kalktı: SDK'nın `RpcError`'ı uç nokta
+ * arızası için de `code: 4001` kullanıyordu, bu yüzden 4001'i kabul etmeden
+ * önce düğümün bir `KitError` OLMADIĞINI doğrulamak gerekiyordu. Zincire
+ * giden tek yol artık viem olduğu için 4001'in tek anlamı EIP-1193 reddidir.
  */
 function isUserRejectionNode(node: Readonly<Record<string, unknown>>): boolean {
-  if (node.errorCategory === APP_KIT_USER_REJECTED) {
-    return true;
-  }
-  if (node.name === VIEM_USER_REJECTED_ERROR) {
-    return true;
-  }
   return (
-    node.code === EIP1193_USER_REJECTED_CODE && !isKitErrorNode(node)
+    node.name === VIEM_USER_REJECTED_ERROR ||
+    node.code === EIP1193_USER_REJECTED_CODE
   );
 }
 
@@ -894,7 +790,7 @@ export type SendExceptionAnalysis = {
 };
 
 /**
- * `kit.send` istisnasının TOTAL analizi. Bu fonksiyon ASLA fırlatmaz.
+ * Gönderim istisnasının TOTAL analizi. Bu fonksiyon ASLA fırlatmaz.
  *
  * Sıra değişmez: önce anlık görüntü alınır, sonra HASH aranır, sonra ret
  * kimliği. Yeniden denenebilir bir sonuç (`rejected` / `insufficientFunds`)
@@ -937,25 +833,11 @@ export function analyzeSendException(error: unknown): SendExceptionAnalysis {
   }
 
   /*
-   * Sonra OLUMLU iptal kimliği. Sarmalayıcı bir `KitError` grafiğin tepesinde
-   * dursa bile, gerçek `UserRejectedRequestError` derinlerde
-   * (`cause.trace.rawError.rawError`) bulunabilir.
+   * Sonra OLUMLU iptal kimliği. Cüzdan sarmalayıcıları hatayı katmanlar;
+   * gerçek `UserRejectedRequestError` derinlerde bulunabilir.
    */
   if (graph.nodes.some(isUserRejectionNode)) {
     return { classification: "rejected", txHash: null, complete: true };
-  }
-
-  /*
-   * Bakiye hataları YALNIZCA en üst düğümde aranır: bunlar `prepareSend`
-   * tarafından doğrudan fırlatılır. Grafiğin derinliklerinde bulunan bir
-   * bakiye izi, sarmalayan RPC/ağ arızasının yayın öncesi olduğunu kanıtlamaz.
-   */
-  const top = graph.nodes[0];
-  if (top !== undefined && typeof top.name === "string") {
-    const expected = PRE_BROADCAST_BALANCE_ERRORS.get(top.name);
-    if (expected !== undefined && expected === top.code) {
-      return { classification: "insufficientFunds", txHash: null, complete: true };
-    }
   }
 
   // RPC/ağ arızaları dâhil kanıtlanmamış her şey belirsizdir.
@@ -967,7 +849,7 @@ export function classifySendException(error: unknown): SendExceptionClass {
 }
 
 /**
- * `kit.send` ÇAĞRILDIKTAN sonra üretilmesine izin verilen TEK kodlar.
+ * `submit()` ÇAĞRILDIKTAN sonra üretilmesine izin verilen TEK kodlar.
  *
  * `rejected` ve `insufficientFunds` yalnızca eksiksiz ve hash'siz bir analiz
  * onları KANITLADIĞINDA buraya girer. Listede olmayan her kod — özellikle
@@ -982,9 +864,9 @@ export const POST_SEND_CODES: ReadonlySet<ArcSendErrorCode> = new Set([
 ]);
 
 /**
- * Bu hata `kit.send` ÇAĞRILMADAN ÖNCE mi doğdu?
+ * Bu hata cüzdan istemi AÇILMADAN ÖNCE mi doğdu?
  *
- * `sendArcUsdc`in emniyet ağı, `kit.send` çağrıldıktan sonra üretilen HER
+ * `sendArcUsdc`in emniyet ağı, `submit()` çağrıldıktan sonra üretilen HER
  * kodu `POST_SEND_CODES` içine çeker. Dolayısıyla listede OLMAYAN bir kod,
  * cüzdan akışının HİÇ açılmadığının KANITIDIR ve rezervasyon güvenle serbest
  * bırakılabilir.
@@ -994,6 +876,53 @@ export const POST_SEND_CODES: ReadonlySet<ArcSendErrorCode> = new Set([
  */
 export function isProvablyPreBroadcast(code: ArcSendErrorCode): boolean {
   return !POST_SEND_CODES.has(code);
+}
+
+/**
+ * `simulate()` adımında doğan, KANITLANABİLİR biçimde yayın öncesi hata.
+ *
+ * `simulate` cüzdana dokunmaz ve işlem yayınlamaz, bu yüzden buradaki her
+ * başarısızlık güvenle yeniden denenebilir. Tipli sentinel olarak taşınır ki
+ * `classifyError` onu belirsizlikle karıştırmasın.
+ */
+export class PreBroadcastError extends Error {
+  readonly code: ArcSendErrorCode;
+  constructor(code: ArcSendErrorCode) {
+    super("pre-broadcast failure");
+    this.name = "PreBroadcastError";
+    this.code = code;
+  }
+}
+
+/**
+ * Yetersiz bakiyenin zincirden gelen imzası.
+ *
+ * ERC-20 `transfer`, bakiye yetmediğinde revert eder ve viem bunu
+ * `ContractFunctionExecutionError` olarak yükseltir. Bu ad YALNIZCA
+ * `simulate()` bağlamında okunur: orada hiçbir işlem yayınlanmadığı için
+ * yanlış sınıflandırmanın parayı iki kez gönderme riski YOKTUR.
+ */
+const VIEM_CONTRACT_EXECUTION_ERROR = "ContractFunctionExecutionError";
+
+/**
+ * `simulate()` hatasını kullanıcıya gösterilecek koda çevirir.
+ *
+ * Yalnızca hata ADI okunur; revert mesajının metni eşleştirilmez.
+ */
+export function classifySimulationError(error: unknown): ArcSendErrorCode {
+  const graph = (() => {
+    try {
+      return collectErrorGraph(error);
+    } catch {
+      return { nodes: [], complete: false } as const;
+    }
+  })();
+  for (const node of graph.nodes) {
+    if (node.name === VIEM_CONTRACT_EXECUTION_ERROR) {
+      return "insufficientFunds";
+    }
+  }
+  return "sendFailed";
 }
 
 /** Kurulum payı tükettiğinde cüzdan akışı açılmaz. */
@@ -1172,45 +1101,27 @@ async function preflight(
   return null;
 }
 
-/** App Kit yalnızca burada, doğrulama ve preflight geçtikten sonra yüklenir. */
-async function buildSendParams(
+/**
+ * viem YALNIZCA burada, doğrulama ve preflight geçtikten sonra yüklenir.
+ *
+ * İstemci kurmak zincire hiçbir şey göndermez ve cüzdana dokunmaz; yalnızca
+ * modülü indirir ve iki taşıyıcıyı hazırlar.
+ */
+function buildTransferClient(
   provider: Eip1193Provider,
   snapshot: ArcPaymentSnapshot,
-) {
-  const [{ AppKit }, { createViemAdapterFromProvider }] = await Promise.all([
-    import("@circle-fin/app-kit"),
-    import("@circle-fin/adapter-viem-v2"),
-  ]);
-
-  const adapter = await createViemAdapterFromProvider({
-    provider: provider as Parameters<
-      typeof createViemAdapterFromProvider
-    >[0]["provider"],
+): Promise<ArcTransferClient> {
+  return createArcTransferClient(provider, {
+    debtorAddress: snapshot.debtorAddress,
+    recipientAddress: snapshot.recipientAddress,
+    /*
+     * Tutar snapshot'ın MİKRO BİRİMİNDEN gelir, gösterilen ondalık metinden
+     * DEĞİL. `validatePaymentSnapshot` ikisinin birbirini tuttuğunu ve
+     * tutarın borç ile kurdan yeniden türediğini zaten kanıtladı; zincire
+     * giden sayı o kanıtlanmış tam sayıdır.
+     */
+    microUsdc: snapshot.microUsdc,
   });
-  const kit = new AppKit();
-
-  const params = {
-    from: { adapter, chain: ARC_TESTNET_APP_KIT_CHAIN },
-    to: snapshot.recipientAddress,
-    amount: snapshot.amount,
-    token: "USDC",
-  } as Parameters<typeof kit.send>[0];
-
-  return { kit, params };
-}
-
-/** Fırlatan getter'a karşı korumalı; okunamayan alan `null` sayılır. */
-function readString(source: unknown, key: string): string | null {
-  if (typeof source !== "object" || source === null) {
-    return null;
-  }
-  const read = readProperty(source, key);
-  if (!read.ok) {
-    return null;
-  }
-  return typeof read.value === "string" && read.value.trim() !== ""
-    ? read.value
-    : null;
 }
 
 function classifyError(
@@ -1230,18 +1141,17 @@ function classifyError(
   if (safeInstanceOf(error, SendMarginError)) {
     return "insufficientTimeRemaining";
   }
-  /*
-   * YALNIZCA belgelenmiş yapısal alanlar (EIP-1193 kodu, `errorCategory`,
-   * `KitError` ad+kod çifti) kullanılır. Serbest metin eşleştirmesi
-   * YAPILMAZ: "insufficient ..." gibi bir mesaj işlemin yayınlanmadığını
-   * KANITLAMAZ ve yanlışlıkla yeniden denemeye izin verirdi.
-   */
-  const structured = classifySendException(error);
-  if (structured === "rejected") {
-    return "rejected";
+  if (safeInstanceOf(error, PreBroadcastError)) {
+    return (error as PreBroadcastError).code;
   }
-  if (structured === "insufficientFunds") {
-    return "insufficientFunds";
+  /*
+   * YALNIZCA belgelenmiş yapısal alanlar (viem'in hata adı, EIP-1193 kodu)
+   * kullanılır. Serbest metin eşleştirmesi YAPILMAZ: "insufficient ..." gibi
+   * bir mesaj işlemin yayınlanmadığını KANITLAMAZ ve yanlışlıkla yeniden
+   * denemeye izin verirdi.
+   */
+  if (classifySendException(error) === "rejected") {
+    return "rejected";
   }
   // Sınıflandırılamayan hata, çağıran adımın kendi koduyla raporlanır
   // (tahmin -> estimateFailed, gönderim -> sendFailed).
@@ -1255,21 +1165,19 @@ type BoundaryOutcome<T> =
 /**
  * Doğrulama + preflight + işlem. Preflight her çağrıda tekrarlanır; tahmin
  * daha önce başarılı olsa bile gönderimden hemen önce yeniden çalışır.
- * Talebin süresi üç noktada ölçülür: girişte, App Kit yüklenmeden hemen önce
- * ve zincir çağrısından hemen önce.
+ * Talebin süresi üç noktada ölçülür: girişte, viem yüklenmeden hemen önce ve
+ * zincire giden çağrıdan hemen önce.
  */
 async function runGuarded<T>(
   walletUuid: string,
   snapshot: ArcPaymentSnapshot,
   fallbackCode: ArcSendErrorCode,
   now: () => number,
-  action: (
-    context: { kit: Awaited<ReturnType<typeof buildSendParams>>["kit"]; params: Awaited<ReturnType<typeof buildSendParams>>["params"] },
-  ) => Promise<T>,
+  action: (client: ArcTransferClient) => Promise<T>,
 ): Promise<BoundaryOutcome<T>> {
   const invalid = validatePaymentSnapshot(snapshot, now());
   if (invalid !== null) {
-    // App Kit hiç import edilmez.
+    // viem hiç import edilmez.
     return { ok: false, code: invalid };
   }
 
@@ -1282,19 +1190,19 @@ async function runGuarded<T>(
       throw new Error("preflight");
     }
     // Preflight sağlayıcıyla konuşurken zaman ilerlemiş olabilir; süresi dolmuş
-    // bir talep için App Kit import bile edilmez.
+    // bir talep için viem import bile edilmez.
     guardCode = checkSnapshotRequestTime(snapshot, now());
     if (guardCode !== null) {
       throw new Error("expired");
     }
-    const { kit, params } = await buildSendParams(provider, snapshot);
+    const client = await buildTransferClient(provider, snapshot);
     // Zincire giden çağrıdan hemen önceki son ölçüm.
     guardCode = checkSnapshotRequestTime(snapshot, now());
     if (guardCode !== null) {
       throw new Error("expired");
     }
     try {
-      return await action({ kit, params });
+      return await action(client);
     } catch (error) {
       actionCode = classifyError(error, fallbackCode);
       throw error;
@@ -1322,15 +1230,9 @@ export async function estimateArcSend(
   snapshot: ArcPaymentSnapshot,
   now: () => number = Date.now,
 ): Promise<ArcSendResult<ArcEstimate>> {
-  return runGuarded(walletUuid, snapshot, "estimateFailed", now, async ({ kit, params }) => {
-    const estimate = await kit.estimateSend(params);
-    return {
-      summary:
-        readString(estimate, "totalFee") ??
-        readString(estimate, "gasFee") ??
-        readString(estimate, "estimatedFee"),
-    };
-  });
+  return runGuarded(walletUuid, snapshot, "estimateFailed", now, async (client) => ({
+    summary: await client.estimateFee(),
+  }));
 }
 
 /** `now` yalnızca testlerde belirlenimci zaman vermek içindir. */
@@ -1353,7 +1255,7 @@ export async function sendArcUsdc(
 
   /** Revert veya belirsiz sonuçta korunan hash; ArcScan mutabakatı için. */
   let terminalHash: string | null = null;
-  /** `kit.send` çağrısına GİRİLDİ mi? Sonrasında geri dönüş yoktur. */
+  /** Cüzdan istemi AÇILDI mı? Sonrasında geri dönüş yoktur. */
   let sendAttempted = false;
 
   const outcome = await runGuarded(
@@ -1361,65 +1263,89 @@ export async function sendArcUsdc(
     snapshot,
     "sendFailed",
     now,
-    async ({ kit, params }) => {
+    async (client) => {
       /*
-       * SON kontrol: preflight ve App Kit kurulumu payı tüketmiş olabilir.
-       * Cüzdan istemi açıldıktan sonra doğrudan ERC-20 transferinde son tarihi
-       * zincire dayatmanın yolu yoktur; bu yüzden istem AÇILMADAN önce bakılır.
+       * 1. SİMÜLASYON — cüzdana dokunmaz, işlem yayınlamaz.
+       *
+       * Yetersiz bakiye gibi zincirin reddedeceği her şey burada ortaya
+       * çıkar. `sendAttempted` hâlâ `false` olduğu için sonuç KANITLANABİLİR
+       * biçimde yayın öncesidir ve rezervasyon güvenle serbest bırakılabilir.
+       */
+      try {
+        await client.simulate();
+      } catch (error) {
+        throw new PreBroadcastError(classifySimulationError(error));
+      }
+
+      /*
+       * 2. SON PAY ÖLÇÜMÜ — istem açılmadan hemen önce.
+       *
+       * Simülasyon ve viem kurulumu payı tüketmiş olabilir. Cüzdan istemi
+       * açıldıktan sonra doğrudan ERC-20 transferinde son tarihi zincire
+       * dayatmanın yolu yoktur; bu yüzden istem AÇILMADAN önce bakılır.
        */
       if (checkSendSafetyMargin(snapshot, now()) !== null) {
         throw new SendMarginError();
       }
 
-      let result: unknown;
+      /*
+       * 3. GÖNDERİM — bu noktadan SONRA işlem zincire düşmüş OLABİLİR.
+       */
+      let txHash: string;
       try {
-        // Bu noktadan SONRA işlem zincire düşmüş OLABİLİR.
         sendAttempted = true;
-        result = await kit.send(params);
+        txHash = await client.submit();
       } catch (error) {
-        /*
-         * Buraya geldiysek `kit.send` ÇAĞRILDI. Yalnızca hash TAŞIMAYAN ve
-         * yapısal olarak tanınan hatalar (cüzdan reddi, SDK'nın yayın öncesi
-         * bakiye hataları) yeniden denenebilir sayılır; serbest metin
-         * eşleştirilmez. Diğer her şeyde işlem zincire düşmüş OLABİLİR ve
-         * varsa hash mutabakat için KORUNUR.
-         */
         /*
          * TEK analiz: hash ve sınıflandırma AYNI anlık görüntüden gelir.
          * İki ayrı çağrı yapılsaydı durumlu bir getter ikisine farklı yanıt
          * verebilirdi. Analiz hiçbir koşulda fırlatmaz.
+         *
+         * Yalnızca hash TAŞIMAYAN ve yapısal olarak tanınan cüzdan reddi
+         * yeniden denenebilir sayılır; serbest metin eşleştirilmez.
          */
         const analysis = analyzeSendException(error);
         terminalHash = analysis.txHash;
-        if (
-          analysis.classification === "rejected" ||
-          analysis.classification === "insufficientFunds"
-        ) {
+        if (analysis.classification === "rejected") {
           throw error;
         }
         throw new AmbiguousSubmissionError(analysis.txHash);
       }
 
-      const classified = classifySendResult(result);
-      if (classified.kind === "rejected") {
-        throw Object.assign(new Error("user rejected"), { code: 4001 });
+      /*
+       * Hash'in kendisi de doğrulanır. Bozuk bir değer "gönderildi" sayılamaz
+       * ama "gönderilmedi" de sayılamaz: çağrı dönmüştür, işlem yolda
+       * olabilir. Mutabakat ipucu olmadan belirsiz bildirilir.
+       */
+      if (!isValidTransactionHash(txHash)) {
+        throw new AmbiguousSubmissionError(null);
       }
-      if (classified.kind === "reverted") {
+      terminalHash = txHash;
+
+      /*
+       * 4. MAKBUZ — sonuç zincirin kendi `status` alanından okunur.
+       *
+       * Bekleme fırlarsa (zaman aşımı, RPC arızası) hash ELİMİZDEDİR: sonuç
+       * belirsizdir ama kullanıcı ArcScan'de bakabilir. App Kit yolunda hash
+       * hata grafiğinden kurtarılmak zorundaydı; artık gerekmiyor.
+       */
+      let receipt: Awaited<ReturnType<ArcTransferClient["waitForReceipt"]>>;
+      try {
+        receipt = await client.waitForReceipt(txHash);
+      } catch {
+        throw new AmbiguousSubmissionError(txHash);
+      }
+
+      if (receipt.kind === "reverted") {
         // Revert ASLA "ödendi" sayılmaz; hash ArcScan için korunur.
-        terminalHash = classified.txHash;
-        throw new RevertedSubmissionError(classified.txHash);
-      }
-      if (classified.kind === "unknown") {
-        // Belirsiz sonuçta da hash KORUNUR: mutabakatın tek ipucu odur.
-        terminalHash = classified.txHash;
-        throw new AmbiguousSubmissionError(classified.txHash);
+        throw new RevertedSubmissionError(txHash);
       }
 
       return {
-        txHash: classified.txHash,
-        // Bağlantı SDK'nın döndürdüğü URL'den değil, doğrulanmış hash'ten kurulur.
-        explorerUrl: buildArcExplorerTxUrl(classified.txHash),
-        state: readString(result, "state"),
+        txHash,
+        // Bağlantı doğrulanmış hash'ten kurulur.
+        explorerUrl: buildArcExplorerTxUrl(txHash),
+        state: "success",
         snapshot,
         completedAt: new Date().toISOString(),
       };
@@ -1427,7 +1353,7 @@ export async function sendArcUsdc(
   );
 
   /*
-   * EMNİYET AĞI. `kit.send` çağrıldıysa, izin verilen kodların dışındaki her
+   * EMNİYET AĞI. Cüzdan istemi açıldıysa, izin verilen kodların dışındaki her
    * sonuç `submissionUnknown`a çekilir. Sınıflandırıcı bir fırlatan getter
    * yüzünden çökse ve `sendFailed`e düşülse bile kullanıcıya "gönderilemedi"
    * denmez; rezervasyon kilitli kalır.

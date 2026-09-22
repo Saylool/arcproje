@@ -17,8 +17,6 @@ export type PaymentNetworkKey = "arc-testnet";
 export type PaymentNetworkProfile = Readonly<{
   key: PaymentNetworkKey;
   displayName: string;
-  /** App Kit zincir kimliği. */
-  appKitChain: "Arc_Testnet";
   chainId: number;
   /**
    * BİRİNCİL RPC. Cüzdana bildirilen ve tarayıcının gördüğü tek adres budur.
@@ -59,7 +57,6 @@ export type PaymentNetworkProfile = Readonly<{
 export const ARC_TESTNET_PROFILE: PaymentNetworkProfile = Object.freeze({
   key: "arc-testnet",
   displayName: "Arc Testnet",
-  appKitChain: "Arc_Testnet",
   chainId: 5042002,
   rpcUrl: "https://rpc.testnet.arc.io",
   /* Resmî dokümanda birincilin yanında listelenen sağlayıcılar. */
