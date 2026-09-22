@@ -9,21 +9,21 @@ import type { ArcPaymentSnapshot } from "./send";
  * zincir işlemi yapılmaz.
  */
 
-const sendMock = vi.fn();
+const simulateMock = vi.fn();
+const submitMock = vi.fn();
+const receiptMock = vi.fn();
 const estimateMock = vi.fn();
-const adapterMock = vi.fn();
+const clientMock = vi.fn();
 
-vi.mock("@circle-fin/app-kit", () => ({
-  AppKit: class {
-    send = sendMock;
-    estimateSend = estimateMock;
-  },
-}));
-
-vi.mock("@circle-fin/adapter-viem-v2", () => ({
-  createViemAdapterFromProvider: (...args: unknown[]) => {
-    adapterMock(...args);
-    return Promise.resolve({});
+vi.mock("./transfer-client", () => ({
+  createArcTransferClient: (...args: unknown[]) => {
+    clientMock(...args);
+    return Promise.resolve({
+      estimateFee: estimateMock,
+      simulate: simulateMock,
+      submit: submitMock,
+      waitForReceipt: receiptMock,
+    });
   },
 }));
 
@@ -98,15 +98,21 @@ function buildSnapshot(over: Partial<ArcPaymentSnapshot>): ArcPaymentSnapshot {
 }
 
 function expectChainUntouched() {
-  expect(sendMock).not.toHaveBeenCalled();
+  expect(submitMock).not.toHaveBeenCalled();
   expect(estimateMock).not.toHaveBeenCalled();
-  expect(adapterMock).not.toHaveBeenCalled();
+  expect(clientMock).not.toHaveBeenCalled();
 }
 
 beforeEach(() => {
-  sendMock.mockReset();
+  simulateMock.mockReset();
+  submitMock.mockReset();
+  receiptMock.mockReset();
   estimateMock.mockReset();
-  adapterMock.mockReset();
+  clientMock.mockReset();
+  /* Varsayılan mutlu yol: simülasyon geçer, gönderim hash döner, makbuz başarılı. */
+  simulateMock.mockResolvedValue(undefined);
+  submitMock.mockResolvedValue(TX_HASH);
+  receiptMock.mockResolvedValue({ kind: "success", txHash: TX_HASH });
   providerRequest.mockClear();
   withProviderMock.mockClear();
   clock = NOW;
@@ -115,7 +121,7 @@ beforeEach(() => {
 
 describe("tahminden sonra, gönderimden önce süresi dolan talep", () => {
   it("tahmin sırasında geçerli, gönderimde reddedilir", async () => {
-    estimateMock.mockResolvedValue({ totalFee: "0.01" });
+    estimateMock.mockResolvedValue("0.01 USDC");
     const snapshot = snapshotOf();
 
     // Talep geçerliyken tahmin başarılı olur.
@@ -127,7 +133,7 @@ describe("tahminden sonra, gönderimden önce süresi dolan talep", () => {
     clock = (EXPIRES_AT + 1) * 1000;
     withProviderMock.mockClear();
     providerRequest.mockClear();
-    adapterMock.mockClear();
+    clientMock.mockClear();
 
     const result = await sendArcUsdc("w", snapshot, clockNow);
     expect(result).toEqual({ ok: false, code: "expiredRequest" });
@@ -135,8 +141,8 @@ describe("tahminden sonra, gönderimden önce süresi dolan talep", () => {
     // Sağlayıcı, adaptör ve App Kit'e hiç dokunulmaz.
     expect(withProviderMock).not.toHaveBeenCalled();
     expect(providerRequest).not.toHaveBeenCalled();
-    expect(sendMock).not.toHaveBeenCalled();
-    expect(adapterMock).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(clientMock).not.toHaveBeenCalled();
   });
 
   it("tam bitiş saniyesinde de gönderilmez", async () => {
@@ -159,8 +165,8 @@ describe("tahminden sonra, gönderimden önce süresi dolan talep", () => {
 
     // Sağlayıcıya gidildi ama adaptör ve App Kit hiç kurulmadı.
     expect(withProviderMock).toHaveBeenCalledTimes(1);
-    expect(adapterMock).not.toHaveBeenCalled();
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(clientMock).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("tahmin sınırı da aynı süreyi uygular", async () => {
@@ -184,7 +190,7 @@ describe("geçersiz zaman bilgisi", () => {
   });
 
   it("saat kayması toleransı içindeki talebi kabul eder", async () => {
-    estimateMock.mockResolvedValue({ totalFee: "0.01" });
+    estimateMock.mockResolvedValue("0.01 USDC");
     // 4 dakika ilerideki bir talep, 5 dakikalık tolerans içinde kalır.
     const slightlyAhead = NOW_SECONDS + 4 * 60;
     const result = await estimateArcSend(
@@ -231,7 +237,8 @@ describe("geçersiz zaman bilgisi", () => {
 
 describe("sonuç imzalı talebe bağlanır", () => {
   it("başarılı işlem talep kimliğini birebir korur", async () => {
-    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
+    submitMock.mockResolvedValue(TX_HASH);
+    receiptMock.mockResolvedValue({ kind: "success", txHash: TX_HASH });
     const snapshot = snapshotOf();
 
     const result = await sendArcUsdc("w", snapshot, clockNow);
@@ -245,7 +252,8 @@ describe("sonuç imzalı talebe bağlanır", () => {
   });
 
   it("aynı borç ve tutar için iki ayrı talep birbirinden ayırt edilebilir", async () => {
-    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
+    submitMock.mockResolvedValue(TX_HASH);
+    receiptMock.mockResolvedValue({ kind: "success", txHash: TX_HASH });
 
     const first = snapshotOf({ requestId: `0x${"aa".repeat(32)}` });
     const second = snapshotOf({ requestId: `0x${"bb".repeat(32)}` });

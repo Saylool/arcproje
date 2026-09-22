@@ -17,25 +17,25 @@ import {
 
 /**
  * Borçlu tarafının uçtan uca davranışı: imzalı talep -> çözümleme ->
- * anlık görüntü -> App Kit sınırı. Gerçek zincir işlemi yapılmaz; App Kit ve
- * cüzdan katmanı taklit edilir.
+ * anlık görüntü -> gönderim sınırı. Gerçek zincir işlemi yapılmaz; viem
+ * seam'i ve cüzdan katmanı taklit edilir.
  */
 
-const sendMock = vi.fn();
+const simulateMock = vi.fn();
+const submitMock = vi.fn();
+const receiptMock = vi.fn();
 const estimateMock = vi.fn();
-const adapterMock = vi.fn();
+const clientMock = vi.fn();
 
-vi.mock("@circle-fin/app-kit", () => ({
-  AppKit: class {
-    send = sendMock;
-    estimateSend = estimateMock;
-  },
-}));
-
-vi.mock("@circle-fin/adapter-viem-v2", () => ({
-  createViemAdapterFromProvider: (...args: unknown[]) => {
-    adapterMock(...args);
-    return Promise.resolve({});
+vi.mock("./transfer-client", () => ({
+  createArcTransferClient: (...args: unknown[]) => {
+    clientMock(...args);
+    return Promise.resolve({
+      estimateFee: estimateMock,
+      simulate: simulateMock,
+      submit: submitMock,
+      waitForReceipt: receiptMock,
+    });
   },
 }));
 
@@ -138,10 +138,15 @@ function snapshotFromPayload(payload: PaymentRequestPayload) {
 const at = (nowMs: number) => () => nowMs;
 
 beforeEach(() => {
-  sendMock.mockReset();
+  simulateMock.mockReset();
+  submitMock.mockReset();
+  receiptMock.mockReset();
+  clientMock.mockReset();
+  simulateMock.mockResolvedValue(undefined);
+  submitMock.mockResolvedValue(TX_HASH);
+  receiptMock.mockResolvedValue({ kind: "success", txHash: TX_HASH });
   estimateMock.mockReset();
-  adapterMock.mockReset();
-  accountsResponse = [debtorAccount.address];
+    accountsResponse = [debtorAccount.address];
   chainResponse = "0x4cef52";
 });
 
@@ -175,15 +180,15 @@ describe("App Kit sınırı — borçlu tarafı", () => {
     accountsResponse = [payerAccount.address];
     const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()), at(NOW));
     expect(result).toEqual({ ok: false, code: "accountChanged" });
-    expect(sendMock).not.toHaveBeenCalled();
-    expect(adapterMock).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
+    expect(clientMock).not.toHaveBeenCalled();
   });
 
   it("ağ Arc Testnet değilse App Kit çağrılmaz", async () => {
     chainResponse = "0x1";
     const result = await sendArcUsdc("w", snapshotFromPayload(payloadOf()), at(NOW));
     expect(result).toEqual({ ok: false, code: "networkChanged" });
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("kendine transferde App Kit çağrılmaz", async () => {
@@ -193,7 +198,7 @@ describe("App Kit sınırı — borçlu tarafı", () => {
     };
     const result = await sendArcUsdc("w", snapshot, at(NOW));
     expect(result).toEqual({ ok: false, code: "selfTransfer" });
-    expect(sendMock).not.toHaveBeenCalled();
+    expect(submitMock).not.toHaveBeenCalled();
   });
 
   it("geçerli talepte tahmin başarılı olur", async () => {
@@ -204,7 +209,7 @@ describe("App Kit sınırı — borçlu tarafı", () => {
   });
 
   it("başarılı gönderim tam olarak imzalı talebe bağlanır", async () => {
-    sendMock.mockResolvedValue({ state: "success", txHash: TX_HASH });
+    submitMock.mockResolvedValue(TX_HASH);
     const payload = payloadOf();
     const snapshot = snapshotFromPayload(payload);
     const result = await sendArcUsdc("w", snapshot, at(NOW));
@@ -219,12 +224,12 @@ describe("App Kit sınırı — borçlu tarafı", () => {
       `${ACTIVE_NETWORK_PROFILE.explorerUrl}/tx/${TX_HASH}`,
     );
 
-    // App Kit'e giden değerler imzalı talepten gelir.
-    const params = sendMock.mock.calls[0][0];
-    expect(params.to).toBe(payload.recipient);
-    expect(params.amount).toBe("0.05");
-    expect(params.token).toBe("USDC");
-    expect(params.from.chain).toBe(ACTIVE_NETWORK_PROFILE.appKitChain);
+    // Zincire giden değerler imzalı talepten gelir.
+    expect(clientMock.mock.calls[0][1]).toEqual({
+      debtorAddress: payload.debtor,
+      recipientAddress: payload.recipient,
+      microUsdc: payload.microUsdc,
+    });
   });
 
   it("kurcalanmış tutar daha imza doğrulamasına gelmeden reddedilir", async () => {
