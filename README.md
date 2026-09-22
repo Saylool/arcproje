@@ -1696,6 +1696,49 @@ akışını kapsadı. Mobil WalletConnect yolu ve hesabı **oluşturan** akış 
 Bir test, iki politikanın `connect-src` dışında **birebir aynı** kalmasını
 zorluyor — ayrışırlarsa ölçüm, uygulananla ilgisiz bir şeyi ölçmeye başlar.
 
+### Coğrafi kapı
+
+Uygulama yalnızca hukuken çalışabildiği ülkelerde açılır. Liste
+`ALLOWED_COUNTRIES` ortam değişkeninden gelir (ISO 3166-1 alpha-2, virgülle:
+`US,DE`). Değişken **tanımsız ya da boşsa kapı yoktur** ve herkes girer —
+bugünkü testnet dağıtımı böyle çalışır. Kod `src/lib/security/geo-gate.ts`,
+sıralama `src/proxy.ts`: önce kapı, sonra CSP; engellenen istek betiksiz bir
+**451** sayfası alır (dil çerezden ya da tarayıcıdan, metin sözlükten) ve o
+sayfa da nonce'lu CSP taşır.
+
+Üç davranış bilinçlidir:
+
+- **Ülke vekilin başlığından okunur** — Cloudflare `cf-ipcountry`, Vercel
+  `x-vercel-ip-country`. Başlık yoksa ülke bilinmiyor sayılır ve kapı
+  açıkken **içeri alınmaz** (fail-closed). Vekili atlayıp doğrudan sunucuya
+  gelen istek kapıyı da atlayamaz.
+- **Yanlış yazılmış liste sessizce açmaz**: `USA` ya da `D3` ilk istekte
+  fırlatır ve dağıtım hemen görünür şekilde düşer. Sessizce açık kalan bir
+  kapı, hiç kapı olmamasından kötüdür.
+- **Kapı hukuki bir muafiyet değildir.** Hizmeti sunan kişinin kendi
+  ülkesindeki yükümlülüğünü, kullanıcıyı engellemek kaldırmaz. Kapı niyeti
+  kanıtlar ve mağazaların istediği ülke sınırını uygular; o kadar.
+
+Başlığa güvenmenin ön koşulu sunucudadır ve **koddan yapılamaz**: 80/443
+yalnızca Cloudflare'ın IP aralıklarına açık olmalı, yoksa origin'e doğrudan
+gelen biri `cf-ipcountry: DE` yazıp geçer. Kontrol listesi (bir kez, VPS'te):
+
+```bash
+for ip in $(curl -s https://www.cloudflare.com/ips-v4) $(curl -s https://www.cloudflare.com/ips-v6); do ufw allow proto tcp from "$ip" to any port 80,443; done
+```
+
+```bash
+ufw delete allow 80/tcp && ufw delete allow 443/tcp && ufw status numbered
+```
+
+nginx'e de gerçek istemci adresini öğretmek gerekir (`set_real_ip_from` ile
+aynı aralıklar, `real_ip_header CF-Connecting-IP`); bugün IP tabanlı hiçbir
+kısıt Cloudflare'ın adresini görmesin diye bu da bekliyordu. Cloudflare
+aralıkları nadiren değişir; listeyi yenilemek aynı iki komuttur.
+
+Play Console'daki ülke listesi ayrı bir katmandır ve mağaza görünürlüğünü
+belirler; bu kapı ise siteye kim girerse girsin uygulanır.
+
 ### İhlaller sunucuya bildiriliyor
 
 İki politika da `report-uri /api/csp-report` taşıyor. Konsola bakmak

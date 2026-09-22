@@ -36,3 +36,18 @@ export function applyContentSecurityPolicy(request: NextRequest): NextResponse {
   response.headers.set("Content-Security-Policy-Report-Only", reportOnly);
   return response;
 }
+
+/**
+ * Proxy'nin KENDİ ürettiği bir yanıta (ör. coğrafi kapının 451 sayfası) CSP
+ * basar. Sayfa Next tarafından çizilmediği için isteğe nonce taşımaya gerek
+ * yoktur; ama politika yine taze bir nonce ile üretilir ki damgasız hiçbir
+ * betik çalışamasın — böyle bir sayfada betik olmamalı, olsa da çalışmamalı.
+ */
+export function stampContentSecurityPolicy(response: NextResponse): NextResponse {
+  const { enforced, reportOnly } = buildContentSecurityPolicies(
+    generateCspNonce(),
+  );
+  response.headers.set("Content-Security-Policy", enforced);
+  response.headers.set("Content-Security-Policy-Report-Only", reportOnly);
+  return response;
+}
