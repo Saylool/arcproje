@@ -33,11 +33,21 @@ import {
  */
 
 /**
- * Şema 2: kur artık elle girilmez, sunucunun kimliklendirdiği teklife bağlıdır.
- * Şema 1 talepleri (elle girilen kur) bilinçli olarak reddedilir.
+ * Şema 3: ödenecek TOKEN'IN SÖZLEŞME ADRESİ imzanın içindedir.
+ *
+ * Şema 2 "100 birim öde" diyordu ama hangi sözleşmenin birimi olduğunu
+ * söylemiyordu; tek token'lı bir test ağında bu belirsizlik zararsızdı. Ana
+ * ağda yirmiden fazla stablecoin varken imzalı bir tutarın hangi varlığa ait
+ * olduğu imzanın DIŞINDA kalamaz: imza `token`ı da kapsar ve doğrulama onu
+ * etkin ağ profilinin sözleşmesine eşitler.
+ *
+ * Şema 1 (elle girilen kur) ve şema 2 (token'sız) talepleri bilinçli olarak
+ * reddedilir; talepler en çok beş dakika yaşadığı için geçiş kimseyi
+ * ortada bırakmaz.
  */
-export const PAYMENT_REQUEST_SCHEMA_VERSION = 2;
+export const PAYMENT_REQUEST_SCHEMA_VERSION = 3;
 export const LEGACY_MANUAL_RATE_SCHEMA_VERSION = 1;
+export const LEGACY_TOKENLESS_SCHEMA_VERSION = 2;
 
 export const PAYMENT_REQUEST_DOMAIN_NAME = "Split Bill Payment Request";
 export const PAYMENT_REQUEST_DOMAIN_VERSION = "1";
@@ -66,6 +76,8 @@ export const PAYMENT_REQUEST_TYPES = {
     { name: "schemaVersion", type: "uint16" },
     { name: "requestId", type: "bytes32" },
     { name: "chainId", type: "uint256" },
+    /* Tutarın birimi olan ERC-20 sözleşmesi; şema 3 ile imzaya girdi. */
+    { name: "token", type: "address" },
     { name: "recipient", type: "address" },
     { name: "debtor", type: "address" },
     { name: "debtKey", type: "string" },
@@ -95,6 +107,8 @@ export type PaymentRequestPayload = Readonly<{
   /** 0x + 64 hex; crypto.getRandomValues ile üretilir. */
   requestId: string;
   chainId: number;
+  /** Tutarın birimi olan ERC-20 sözleşmesinin checksum'lu adresi. */
+  token: string;
   recipient: string;
   debtor: string;
   debtKey: string;
@@ -140,6 +154,7 @@ export type PaymentRequestProblem =
   | "requestOutlivesQuote"
   | "invalidRequestId"
   | "invalidChainId"
+  | "invalidToken"
   | "invalidRecipient"
   | "invalidDebtor"
   | "selfTransfer"
@@ -270,6 +285,7 @@ export function createPaymentRequestPayload(
     schemaVersion: PAYMENT_REQUEST_SCHEMA_VERSION,
     requestId: input.requestId ?? createRequestId(),
     chainId: ACTIVE_NETWORK_PROFILE.chainId,
+    token: ACTIVE_NETWORK_PROFILE.tokenErc20Address,
     recipient,
     debtor,
     // Etiketler ve borç kimliği kanonik biçimde saklanır ve öyle imzalanır.
@@ -314,6 +330,7 @@ export function buildTypedData(payload: PaymentRequestPayload) {
       schemaVersion: payload.schemaVersion,
       requestId: payload.requestId as `0x${string}`,
       chainId: BigInt(payload.chainId),
+      token: payload.token as `0x${string}`,
       recipient: payload.recipient as `0x${string}`,
       debtor: payload.debtor as `0x${string}`,
       debtKey: payload.debtKey,
@@ -387,8 +404,11 @@ export function validatePaymentRequestPayload(
     }
   }
 
-  if (record.schemaVersion === LEGACY_MANUAL_RATE_SCHEMA_VERSION) {
-    // Elle girilen kurlu eski bağlantılar bilinçli olarak kabul edilmez.
+  if (
+    record.schemaVersion === LEGACY_MANUAL_RATE_SCHEMA_VERSION ||
+    record.schemaVersion === LEGACY_TOKENLESS_SCHEMA_VERSION
+  ) {
+    // Elle girilen kurlu (1) ve token'sız (2) eski bağlantılar kabul edilmez.
     return { ok: false, problem: "outdatedSchemaVersion" };
   }
   if (record.schemaVersion !== PAYMENT_REQUEST_SCHEMA_VERSION) {
@@ -399,6 +419,19 @@ export function validatePaymentRequestPayload(
   }
   if (record.chainId !== ACTIVE_NETWORK_PROFILE.chainId) {
     return { ok: false, problem: "invalidChainId" };
+  }
+  /*
+   * Token, etkin profilin sözleşmesi OLMAK ZORUNDADIR. Başka bir sözleşmeyi
+   * gösteren, kriptografik olarak geçerli bir talep, borçluya yanlış varlığı
+   * ödetirdi; imza "kim istedi"yi kanıtlar, "hangi varlık"ı bu satır kanıtlar.
+   */
+  const token =
+    typeof record.token === "string" ? normalizeWalletAddress(record.token) : null;
+  if (
+    token === null ||
+    !walletAddressesEqual(token, ACTIVE_NETWORK_PROFILE.tokenErc20Address)
+  ) {
+    return { ok: false, problem: "invalidToken" };
   }
 
   const recipient =
@@ -568,6 +601,7 @@ export function validatePaymentRequestPayload(
       schemaVersion: PAYMENT_REQUEST_SCHEMA_VERSION,
       requestId: record.requestId.toLowerCase(),
       chainId: ACTIVE_NETWORK_PROFILE.chainId,
+      token,
       recipient,
       debtor,
       debtKey: record.debtKey,

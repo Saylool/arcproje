@@ -786,13 +786,15 @@ export const en: Dictionary = {
       missingField: "The payment request is missing a field.",
       unsupportedSchemaVersion: "This payment request version is not supported.",
       outdatedSchemaVersion:
-        "This link was created with an older version in which the rate was entered by hand. The rate is now verified by the server; ask the person who created the request for a new link.",
+        "This link was created with an older version of the payment request that is no longer accepted. Ask the person who created it for a new link.",
       invalidQuote:
         "The rate quote in the request is not valid. Do not trust this link; ask the sender for a new request.",
       requestOutlivesQuote:
         "The request is valid for longer than the rate quote it is based on. Do not trust this link.",
       invalidRequestId: "The request identifier is not valid.",
       invalidChainId: "The request was not created for Arc Testnet.",
+      invalidToken:
+        "This request was not created for this network's USDC contract. Do not trust this link; ask the sender for a new request.",
       invalidRecipient: "The recipient address is not valid.",
       invalidDebtor: "The debtor address is not valid.",
       selfTransfer: "The sender and the recipient cannot be the same address.",
