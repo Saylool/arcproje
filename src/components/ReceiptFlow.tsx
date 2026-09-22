@@ -6,6 +6,7 @@ import { PaymentRequestCreator } from "@/components/PaymentRequestCreator";
 import { dropStaleLinks } from "@/lib/split/linked-addresses";
 import { SharedBillCreator } from "@/components/SharedBillCreator";
 import { SHARED_BILL_FLOW_ENABLED } from "@/lib/arc/shared-bill-feature";
+import { STANDALONE_REQUEST_FLOW_ENABLED } from "@/lib/arc/standalone-request-feature";
 import { AssignmentSummaryView } from "@/components/AssignmentSummary";
 import { DebtSummaryView } from "@/components/DebtSummary";
 import { ParticipantAssignment } from "@/components/ParticipantAssignment";
@@ -638,6 +639,10 @@ export function ReceiptFlow({
         olusturma ekraninda TEK BAGLANTILI ortak hesap olusturucusu gosterilir.
         Bayrak kapatilirsa ESKI, borclu basina ayri baglanti ureten akis geri
         doner; iki yol da derlenir ve test edilir.
+
+        TEK-LINK KAPISI: o eski akis yalnizca TEST AGINDA acilabilir
+        (`STANDALONE_REQUEST_FLOW_ENABLED`); ana agda tekrar oynatma engeli
+        yerel oldugu icin kapalidir ve yerine aciklama basilir.
       */}
       {screen === "payment" && receipt !== null && debtResult !== null && (
         SHARED_BILL_FLOW_ENABLED ? (
@@ -648,13 +653,17 @@ export function ReceiptFlow({
             initialAddresses={linkedAddresses}
             onBack={() => setScreen("debts")}
           />
-        ) : (
+        ) : STANDALONE_REQUEST_FLOW_ENABLED ? (
           <PaymentRequestCreator
             receipt={receipt}
             participants={assignment.participants}
             result={debtResult}
             onBack={() => setScreen("debts")}
           />
+        ) : (
+          <p className="text-sm leading-relaxed text-ink-faint sm:text-base">
+            {t("payer.closedOnMainnet")}
+          </p>
         )
       )}
 

@@ -653,6 +653,8 @@ export const en: Dictionary = {
 
   payer: {
     pageTitle: "Pay the payment request",
+    closedOnMainnet:
+      "The per-debtor link flow is open only on the test network. On the live network, payments go through the shared bill link; ask the person who created the request for a shared bill link.",
     pageDescription:
       "Review the request and confirm the payment in your own wallet. Amounts are Arc Testnet test USDC.",
     loadingRequest: "Loading the payment request…",

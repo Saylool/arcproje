@@ -702,6 +702,8 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   payer: {
     pageTitle: "Ödeme talebini öde",
+    closedOnMainnet:
+      "Borçlu başına ayrı bağlantı akışı yalnızca test ağında açıktır. Gerçek ağda ödemeler paylaşılan hesap bağlantısı üzerinden yapılır; talebi oluşturan kişiden paylaşılan hesap bağlantısı iste.",
     pageDescription:
       "Talebi kontrol et ve ödemeyi kendi cüzdanında onayla. Tutarlar Arc Testnet test USDC'sidir.",
     loadingRequest: "Ödeme talebi yükleniyor…",

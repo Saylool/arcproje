@@ -1643,6 +1643,10 @@ olarak değiştirilmez.
      zincir, **USDC sözleşme adresi**, alıcı, borçlu, tutar ve sunucu kur
      teklifi imzanın içindedir; şema 2 token'ı imzalamıyordu ve artık
      reddedilir).
+     **Yalnızca test ağında** (`standalone-request-feature.ts`): akış
+     sunucusuzdur, tekrar oynatma engeli yereldir ve gerçek parada bu kabul
+     edilemez; test ağı olmayan bir profilde `/pay` ödeyiciyi hiç kurmaz ve
+     oluşturma ekranı bu akışı sunmaz.
   2. **Tek bağlantılı ortak hesap**: alıcı tek bir manifest imzalar, herkes
      aynı bağlantıyı alır, her borçlu cüzdanıyla kimliğini doğrulayıp yalnızca
      kendi borcunu görür ve öder.
