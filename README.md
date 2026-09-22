@@ -1670,8 +1670,23 @@ iframe'e alınabiliyordu**. `X-Frame-Options` bunu bugün kapatıyor.
 
 Kapsamı **kanıt** belirledi. Üretimde tam bir ödeme akışı rapor kipiyle
 çalıştırıldı ve `connect-src` dışında **tek bir ihlal bile** çıkmadı; yani
-`frame-ancestors`, `frame-src`, `img-src`, `script-src`, `style-src`,
-`worker-src` kısıtlarının hepsi ölçülmüş, tahmin edilmemiştir.
+`frame-ancestors`, `frame-src`, `img-src`, `style-src`, `worker-src`
+kısıtlarının hepsi ölçülmüş, tahmin edilmemiştir.
+
+**`script-src` nonce ile katı; `'unsafe-inline'` yok.** Saklamasız bir cüzdan
+uygulamasında tek gerçek saldırı yüzeyi ön yüzdür: sayfaya sızan bir satır
+içi betik alıcı adresini değiştirir ve kullanıcı cüzdanda onaylar — her
+doğrulama geçer, çünkü doğrulamayı yapan kod da ele geçmiştir. Bu yüzden CSP
+statik bir başlık olamaz: `src/proxy.ts` her isteğe 16 baytlık taze bir nonce
+üretir (`src/lib/security/csp-proxy.ts`), onu isteğin
+`content-security-policy` başlığına (Next kendi önyükleme betiklerini oradan
+damgalar) ve `x-nonce` başlığına (düzen, tema betiğini oradan damgalar) yazar.
+İstemciden gelen `x-nonce` **üzerine yazılır**; dışarıdan seçilmiş bir nonce
+saldırganın kendi betiğini damgalaması olurdu. `next.config.ts`'teki statik
+liste artık CSP taşımaz — iki yerden basılsaydı tarayıcı ikisini birden
+uygular, nonce'suz olan her betiği engellerdi; bir test bunu zorlar.
+`style-src` bilerek `'unsafe-inline'` kalıyor: Tailwind ve Next satır içi
+stil üretir, stil enjeksiyonu betik gibi cüzdana ulaşamaz.
 
 `connect-src` neden hâlâ ölçümde: o ölçüm yalnızca **masaüstü/eklenti borçlu**
 akışını kapsadı. Mobil WalletConnect yolu ve hesabı **oluşturan** akış henüz

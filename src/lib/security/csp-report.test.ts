@@ -14,8 +14,7 @@ import {
   type CspReport,
 } from "./csp-report";
 import {
-  CONTENT_SECURITY_POLICY,
-  CONTENT_SECURITY_POLICY_REPORT_ONLY,
+  buildContentSecurityPolicies,
   CSP_REPORT_PATH,
 } from "./headers";
 
@@ -199,10 +198,11 @@ describe("uc: yalnizca gunluge yazar", () => {
 
 describe("politika gercek uca isaret eder", () => {
   it("iki politika da rapor adresini tasir", () => {
-    expect(CONTENT_SECURITY_POLICY).toContain(`report-uri ${CSP_REPORT_PATH}`);
-    expect(CONTENT_SECURITY_POLICY_REPORT_ONLY).toContain(
-      `report-uri ${CSP_REPORT_PATH}`,
+    const { enforced, reportOnly } = buildContentSecurityPolicies(
+      "dGVzdC1ub25jZS0xMjM0NTY3OA==",
     );
+    expect(enforced).toContain(`report-uri ${CSP_REPORT_PATH}`);
+    expect(reportOnly).toContain(`report-uri ${CSP_REPORT_PATH}`);
   });
 
   it("adres GERCEKTEN var olan bir rotadir", () => {

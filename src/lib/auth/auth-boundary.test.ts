@@ -113,11 +113,28 @@ describe("Google auth route siniri", () => {
     expect(`${resolve}\n${me}`).not.toMatch(/Google|authenticateRequest/);
   });
 
-  it("genis eslesen auth middleware veya proxy yoktur", () => {
+  it("genis eslesen auth middleware yoktur; proxy varsa auth'a DOKUNMAZ", () => {
+    /* Next 16 tek bir giris noktasi tanir; eski adli dosya da olmamali. */
     expect(existsSync("src/middleware.ts")).toBe(false);
     expect(existsSync("middleware.ts")).toBe(false);
-    expect(existsSync("src/proxy.ts")).toBe(false);
     expect(existsSync("proxy.ts")).toBe(false);
+
+    /*
+     * `src/proxy.ts` CSP nonce'u icin VAR. Sinir dosyanin yoklugu degil,
+     * icerigidir: her istekte calisan bu kod oturum okumaz, giris sayfasina
+     * yonlendirmez, auth modullerini icermez. Google oturumu yalnizca onu
+     * gerektiren rotalarda, rota icinde istenir.
+     */
+    const proxy = readFileSync("src/proxy.ts", "utf8");
+    const imported = [...proxy.matchAll(/from "@\/lib\/([^"]+)"/g)].map(
+      ([, path]) => readFileSync(`src/lib/${path}.ts`, "utf8"),
+    );
+    expect(imported.length).toBeGreaterThan(0);
+    for (const source of [proxy, ...imported]) {
+      expect(source).not.toMatch(
+        /\bauth\b|next-auth|authenticateRequest|getServerSession|session|signIn|redirect\(/i,
+      );
+    }
   });
 
   it("OAuth origin'i istek Host/Origin/forwarded basliklarindan turetilmez", () => {
