@@ -836,13 +836,15 @@ export const tr = {
       missingField: "Ödeme talebinde eksik alan var.",
       unsupportedSchemaVersion: "Bu ödeme talebi sürümü desteklenmiyor.",
       outdatedSchemaVersion:
-        "Bu bağlantı, kurun elle girildiği eski bir sürümle oluşturulmuş. Artık kur sunucu tarafından doğrulanıyor; talebi oluşturan kişiden yeni bir bağlantı iste.",
+        "Bu bağlantı, ödeme talebinin eski bir sürümüyle oluşturulmuş; bu sürüm artık kabul edilmiyor. Talebi oluşturan kişiden yeni bir bağlantı iste.",
       invalidQuote:
         "Talepteki kur teklifi geçersiz. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
       requestOutlivesQuote:
         "Talebin geçerlilik süresi dayandığı kur teklifinden uzun. Bu bağlantıya güvenme.",
       invalidRequestId: "Talep kimliği geçersiz.",
       invalidChainId: "Talep Arc Testnet için oluşturulmamış.",
+      invalidToken:
+        "Talep bu ağın USDC sözleşmesi için oluşturulmamış. Bu bağlantıya güvenme; gönderen kişiden yeni bir talep iste.",
       invalidRecipient: "Alıcı adresi geçersiz.",
       invalidDebtor: "Borçlu adresi geçersiz.",
       selfTransfer: "Gönderen ve alıcı aynı adres olamaz.",
