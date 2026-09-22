@@ -6,15 +6,17 @@ import { DISCLOSED_HOSTS } from "@/lib/legal/privacy";
 
 import {
   BROWSER_CONNECT_HOSTS,
-  CONTENT_SECURITY_POLICY,
-  CONTENT_SECURITY_POLICY_REPORT_ONLY,
   SECURITY_HEADERS,
+  buildContentSecurityPolicies,
 } from "./headers";
 
+/** Sabit bir nonce; gercekte her istek kendininkini `src/proxy.ts`'ten alir. */
+const NONCE = "dGVzdC1ub25jZS0xMjM0NTY3OA==";
+const POLICIES = buildContentSecurityPolicies(NONCE);
 /** UYGULANAN politika: connect-src disindaki her sey burada zorlayicidir. */
-const POLICY = CONTENT_SECURITY_POLICY;
+const POLICY = POLICIES.enforced;
 /** OLCEN politika: yalnizca connect-src burada katidir. */
-const MEASURED = CONTENT_SECURITY_POLICY_REPORT_ONLY;
+const MEASURED = POLICIES.reportOnly;
 
 /**
  * GUVENLIK BASLIKLARI.
@@ -124,10 +126,14 @@ describe("baglantilar: yalnizca BILDIRILEN adresler", () => {
 });
 
 describe("uygulanan ve olcen politikalar birlikte gonderilir", () => {
-  it("IKISI de gonderilir", () => {
+  it("CSP statik listede DEGILDIR: nonce tasir, proxy basar", () => {
+    /*
+     * Iki yerden basilsaydi tarayici ikisini birden uygulardi ve statik
+     * olan nonce'suz oldugu icin her betigi engellerdi.
+     */
     const keys = SECURITY_HEADERS.map((header) => header.key);
-    expect(keys).toContain("Content-Security-Policy");
-    expect(keys).toContain("Content-Security-Policy-Report-Only");
+    expect(keys).not.toContain("Content-Security-Policy");
+    expect(keys).not.toContain("Content-Security-Policy-Report-Only");
   });
 
   it("connect-src YALNIZCA olcen politikada katidir", () => {
@@ -154,10 +160,26 @@ describe("uygulanan ve olcen politikalar birlikte gonderilir", () => {
     expect(strip(POLICY)).toEqual(strip(MEASURED));
   });
 
-  it("satir ici script HER IKISINDE de serbesttir", () => {
-    /* Amac satir ici gurultusu degil; gercekten bilmedigimiz ihlaller. */
-    expect(directive(POLICY, "script-src")).toContain("'unsafe-inline'");
-    expect(directive(MEASURED, "script-src")).toContain("'unsafe-inline'");
+  it("satir ici script YALNIZCA nonce ile calisir", () => {
+    /*
+     * Saklamasiz cuzdan uygulamasinda XSS = cuzdan bosaltici. Sayfaya sizan
+     * bir betik ancak o istegin nonce'unu tasiyorsa calisir; onu da yalnizca
+     * sunucu bilir.
+     */
+    for (const policy of [POLICY, MEASURED]) {
+      const script = directive(policy, "script-src");
+      expect(script).toContain(`'nonce-${NONCE}'`);
+      expect(script).toContain("'strict-dynamic'");
+      expect(script).not.toContain("'unsafe-inline'");
+    }
+  });
+
+  it("satir ici STIL hala serbesttir ve bu bilincli", () => {
+    /*
+     * Tailwind ve Next satir ici stil uretir; stil enjeksiyonu betik gibi
+     * cuzdana ulasamaz. Kapatmak icin bir neden olcunce kapatilir.
+     */
+    expect(directive(POLICY, "style-src")).toContain("'unsafe-inline'");
   });
 });
 
@@ -173,5 +195,14 @@ describe("baglanma: baslıklar GERCEKTEN gonderiliyor", () => {
     /* Tek kaynak: testlerin okudugu dosya ile sunulan deger ayni olmali. */
     expect(config).not.toContain("frame-ancestors");
     expect(config).not.toContain("nosniff");
+  });
+
+  it("CSP proxy'den gelir ve duzen tema betigini nonce ile damgalar", () => {
+    const proxy = readFileSync("src/proxy.ts", "utf8");
+    expect(proxy).toContain("applyContentSecurityPolicy");
+    /* Damgasiz kalsa tema betigi engellenir ve sayfa yanlis temada acilir. */
+    const layout = readFileSync("src/app/layout.tsx", "utf8");
+    expect(layout).toContain("nonce={nonce}");
+    expect(layout).toContain("CSP_NONCE_REQUEST_HEADER");
   });
 });

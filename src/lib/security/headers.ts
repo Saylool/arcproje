@@ -7,6 +7,10 @@
  *
  * Başlıklar burada VERİ olarak durur; `next.config.ts` yalnızca listeyi
  * okur. Böylece testler gerçek değerleri okuyabilir.
+ *
+ * CSP bu listede DEĞİLDİR: her isteğe özgü bir nonce taşıdığı için statik
+ * bir başlık olamaz. `src/proxy.ts` her istekte `buildContentSecurityPolicies`
+ * ile üretip basar.
  */
 
 /**
@@ -40,17 +44,55 @@ export const BROWSER_CONNECT_HOSTS: readonly string[] = [
 const AVATAR_HOSTS = ["https://*.googleusercontent.com"] as const;
 
 /**
- * `script-src` gevşektir ve bu bir eksiktir, gizlenmez.
+ * `script-src` NONCE İLE KATIDIR.
  *
- * Ölçüldü: sayfa 10 satır içi script taşıyor (Next.js'in kendi önyükleme
- * script'leri ve temanın "yanıp sönmeyi" önleyen script'i) ve HİÇBİRİNDE
- * nonce yok. `'unsafe-inline'` kaldırılırsa uygulama açılmaz. Sıkılaştırmak,
- * her istekte nonce üreten bir middleware ister.
+ * Saklamasız bir cüzdan uygulamasında tek gerçek saldırı yüzeyi ön yüzdür:
+ * sayfaya sızan bir satır içi script alıcı adresini değiştirir ve kullanıcı
+ * cüzdanda onaylar; her doğrulama geçer çünkü doğrulamayı yapan kod da ele
+ * geçmiştir. `'unsafe-inline'` bu yüzden burada YOKTUR.
  *
- * Raporlayan politikada da gevşek BIRAKILIR: amaç satır içi script gürültüsü
- * değil, `connect-src` gibi GERÇEKTEN bilmediğimiz ihlalleri görebilmek.
+ * Nonce her istekte `src/proxy.ts` tarafından üretilir ve iki yere taşınır:
+ * isteğin `content-security-policy` başlığına (Next kendi önyükleme
+ * script'lerini oradan okuyup damgalar) ve `x-nonce` başlığına (düzen, tema
+ * script'ini oradan damgalar). Sayfalar zaten `no-store`; her isteğin ayrı
+ * çizilmesi yeni bir maliyet değil.
+ *
+ * `'strict-dynamic'`: nonce'lu bir script'in yüklediği script'lere de izin
+ * verir — Next'in parça (chunk) yükleyicisi böyle çalışır. Onu anlamayan
+ * eski tarayıcılar `'self'`e düşer.
  */
-const SCRIPT_SRC = "'self' 'unsafe-inline'";
+export const CSP_NONCE_REQUEST_HEADER = "x-nonce";
+
+/** Next'in kendi çözümleyicisiyle aynı biçim (`get-script-nonce-from-header`). */
+const NONCE_PATTERN = /^[A-Za-z0-9+/_-]+={0,2}$/;
+/** 16 bayt rastgele = 24 karakter base64; daha kısası tahmin edilebilir sayılır. */
+const NONCE_MIN_LENGTH = 22;
+
+export function isValidCspNonce(value: string): boolean {
+  return value.length >= NONCE_MIN_LENGTH && NONCE_PATTERN.test(value);
+}
+
+/**
+ * Web Crypto ile 16 bayt; Node ve Edge çalışma zamanlarının ikisinde de var.
+ * `Math.random` KULLANILMAZ: nonce tahmin edilirse CSP hiç yokmuş gibi olur.
+ */
+export function generateCspNonce(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
+function scriptSrc(nonce: string): string {
+  /* Bozuk bir nonce ile üretilen politika HER script'i engellerdi; erken dur. */
+  if (!isValidCspNonce(nonce)) {
+    throw new Error("Geçersiz CSP nonce'u");
+  }
+  return `'self' 'nonce-${nonce}' 'strict-dynamic'`;
+}
 
 /** Aynı gerekçe: Tailwind ve Next satır içi stil üretiyor. */
 const STYLE_SRC = "'self' 'unsafe-inline'";
@@ -128,39 +170,42 @@ function directives(scriptSrc: string, connectSrc: string): string {
   ].join("; ");
 }
 
-/**
- * UYGULANAN politika.
- *
- * Kapsamı KANIT belirledi. Üretimde tam bir ödeme akışı rapor kipiyle
- * çalıştırıldı; `connect-src` DIŞINDA hiçbir yönerge tek bir ihlal bile
- * üretmedi. Yani buradaki her kısıt ölçülmüş, tahmin edilmemiştir —
- * `frame-src`, `img-src`, `script-src`, `style-src`, `worker-src` dâhil.
- */
-export const CONTENT_SECURITY_POLICY = directives(
-  SCRIPT_SRC,
-  OPEN_CONNECT_SRC,
-);
+export type ContentSecurityPolicies = Readonly<{
+  /**
+   * UYGULANAN politika.
+   *
+   * Kapsamı KANIT belirledi. Üretimde tam bir ödeme akışı rapor kipiyle
+   * çalıştırıldı; `connect-src` DIŞINDA hiçbir yönerge tek bir ihlal bile
+   * üretmedi — `frame-src`, `img-src`, `style-src`, `worker-src` dâhil.
+   * `script-src`'nin nonce'lu hâli bu ölçümden SONRA geldi ve tarayıcı
+   * panelinde canlı doğrulandı.
+   */
+  enforced: string;
+  /**
+   * ÖLÇMEYE DEVAM EDEN politika.
+   *
+   * Yalnızca `connect-src` burada katıdır. Ölçüm masaüstü/eklenti borçlu
+   * akışını kapsadı; mobil WalletConnect ve hesabı oluşturan akış henüz
+   * çalıştırılmadı. Onlar da temiz çıktığında `connect-src` uygulanana taşınır.
+   */
+  reportOnly: string;
+}>;
 
-/**
- * ÖLÇMEYE DEVAM EDEN politika.
- *
- * Yalnızca `connect-src` burada katıdır. Ölçüm masaüstü/eklenti borçlu
- * akışını kapsadı; mobil WalletConnect ve hesabı oluşturan akış henüz
- * çalıştırılmadı. Onlar da temiz çıktığında `connect-src` uygulanana taşınır.
- */
-export const CONTENT_SECURITY_POLICY_REPORT_ONLY = directives(
-  SCRIPT_SRC,
-  `'self' ${BROWSER_CONNECT_HOSTS.join(" ")}`,
-);
+/** İki politika aynı nonce'u taşır; bir test bunu ve `connect-src` dışında birebir aynı olmalarını zorlar. */
+export function buildContentSecurityPolicies(
+  nonce: string,
+): ContentSecurityPolicies {
+  const script = scriptSrc(nonce);
+  return {
+    enforced: directives(script, OPEN_CONNECT_SRC),
+    reportOnly: directives(script, `'self' ${BROWSER_CONNECT_HOSTS.join(" ")}`),
+  };
+}
 
 export type SecurityHeader = Readonly<{ key: string; value: string }>;
 
+/** İsteğe bağlı OLMAYAN başlıklar; CSP `src/proxy.ts`'ten gelir. */
 export const SECURITY_HEADERS: readonly SecurityHeader[] = [
-  { key: "Content-Security-Policy", value: CONTENT_SECURITY_POLICY },
-  {
-    key: "Content-Security-Policy-Report-Only",
-    value: CONTENT_SECURITY_POLICY_REPORT_ONLY,
-  },
   /* Sunucunun söylediği tür bağlayıcıdır; tarayıcı tahmin etmez. */
   { key: "X-Content-Type-Options", value: "nosniff" },
   /*

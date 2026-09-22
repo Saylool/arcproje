@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { headers } from "next/headers";
 import type { ReactNode } from "react";
 
 import { SiteFooter } from "@/components/SiteFooter";
@@ -6,6 +7,7 @@ import { SURFACE_DARK, SURFACE_LIGHT } from "@/lib/brand/mark";
 import { LocaleProvider } from "@/lib/i18n/context";
 import { translate } from "@/lib/i18n/dictionary";
 import { resolveRequestLocale } from "@/lib/i18n/server";
+import { CSP_NONCE_REQUEST_HEADER } from "@/lib/security/headers";
 import { THEME_INIT_SCRIPT } from "@/lib/theme/theme";
 
 import "./globals.css";
@@ -48,6 +50,13 @@ export default async function RootLayout({
    * uyusmazligi olmaz.
    */
   const locale = await resolveRequestLocale();
+  /*
+   * NONCE `src/proxy.ts`'ten gelir. Tema betigi satir icidir ve CSP artik
+   * satir ici betige yalnizca bu damgayla izin verir. Proxy calismadiysa
+   * (yerel test kosumu gibi) CSP de yoktur; `undefined` dogru davranistir.
+   */
+  const nonce =
+    (await headers()).get(CSP_NONCE_REQUEST_HEADER) ?? undefined;
 
   return (
     /*
@@ -71,10 +80,15 @@ export default async function RootLayout({
           EDILMEZ, bu yuzden XSS yuzeyi yoktur. Icerik `theme.ts` icinde tek
           bir yerde tanimlidir ve onceligi `resolveTheme` ile birebir aynidir.
 
+          `nonce`: CSP satir ici betigi yalnizca bu damgayla calistirir.
+
           DIL icin boyle bir betik GEREKMEZ: dogru metin zaten sunucuda
           basilir.
         */}
-        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script
+          nonce={nonce}
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
       </head>
       <body className="antialiased">
         <LocaleProvider initialLocale={locale}>

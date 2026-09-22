@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
    *
    * Değerlerin kendisi `src/lib/security/headers.ts` içindedir; burada
    * yalnızca bağlanır. Testler o dosyayı okuyabilsin diye böyle.
+   *
+   * CSP burada DEĞİLDİR: isteğe özgü nonce taşır, `src/proxy.ts` basar.
    */
   async headers() {
     return [
