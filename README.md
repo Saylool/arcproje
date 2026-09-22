@@ -1637,7 +1637,10 @@ olarak değiştirilmez.
 - **Ürünleri kişilere atama** ve **borç hesabı**: tam sayı minor unit ile,
   kayan nokta kullanmadan.
 - **Arc Testnet USDC ödemesi** iki akışta:
-  1. **Borçlu başına ayrı bağlantı** (imzalı ödeme talebi, EIP-712 şema 2).
+  1. **Borçlu başına ayrı bağlantı** (imzalı ödeme talebi, EIP-712 şema 3:
+     zincir, **USDC sözleşme adresi**, alıcı, borçlu, tutar ve sunucu kur
+     teklifi imzanın içindedir; şema 2 token'ı imzalamıyordu ve artık
+     reddedilir).
   2. **Tek bağlantılı ortak hesap**: alıcı tek bir manifest imzalar, herkes
      aynı bağlantıyı alır, her borçlu cüzdanıyla kimliğini doğrulayıp yalnızca
      kendi borcunu görür ve öder.

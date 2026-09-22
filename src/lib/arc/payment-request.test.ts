@@ -238,6 +238,7 @@ describe("buildTypedData", () => {
       "schemaVersion",
       "requestId",
       "chainId",
+      "token",
       "recipient",
       "debtor",
       "debtKey",
@@ -298,16 +299,21 @@ describe("validatePaymentRequestPayload", () => {
 
   it("bilinmeyen şema sürümünü reddeder", () => {
     expect(
-      validatePaymentRequestPayload({ ...payloadOf(), schemaVersion: 3 }, NOW),
+      validatePaymentRequestPayload({ ...payloadOf(), schemaVersion: 4 }, NOW),
     ).toEqual({ ok: false, problem: "unsupportedSchemaVersion" });
   });
 
-  it("elle girilen kurlu şema 1 bağlantısını ayrı mesajla reddeder", () => {
-    const result = validatePaymentRequestPayload(
-      { ...payloadOf(), schemaVersion: 1 },
-      NOW,
-    );
-    expect(result).toEqual({ ok: false, problem: "outdatedSchemaVersion" });
+  it("eski şemaları (1: elle kur, 2: token'sız) ayrı mesajla reddeder", () => {
+    for (const schemaVersion of [1, 2]) {
+      const result = validatePaymentRequestPayload(
+        { ...payloadOf(), schemaVersion },
+        NOW,
+      );
+      expect(result, `şema ${schemaVersion}`).toEqual({
+        ok: false,
+        problem: "outdatedSchemaVersion",
+      });
+    }
     expect(describePaymentRequestProblem("outdatedSchemaVersion")).toMatch(
       /yeni bir bağlantı iste/,
     );
@@ -481,5 +487,65 @@ describe("debtKey de kontrol/biçim karakterlerine karşı korunur", () => {
         debtKey: "a".repeat(MAX_DEBT_KEY_LENGTH + 1),
       }),
     ).toEqual({ ok: false, problem: "invalidDebtKey" });
+  });
+});
+
+describe("token: imzanın içinde ve profile eşit (şema 3)", () => {
+  it("üretilen gövde etkin profilin USDC sözleşmesini taşır", () => {
+    expect(payloadOf().token).toBe(ACTIVE_NETWORK_PROFILE.tokenErc20Address);
+  });
+
+  it("başka bir sözleşmeyi gösteren talep REDDEDİLİR", () => {
+    /*
+     * Kriptografik olarak geçerli ama yanlış varlığı işaret eden bir talep,
+     * borçluya yanlış token'ı ödetirdi. İmza "kim istedi"yi kanıtlar; hangi
+     * varlık olduğunu bu kontrol kanıtlar.
+     */
+    for (const bad of [
+      "0x0000000000000000000000000000000000000001",
+      DEBTOR,
+      "usdc",
+      "",
+      null,
+      1,
+    ]) {
+      expect(
+        validatePaymentRequestPayload({ ...payloadOf(), token: bad }, NOW),
+        String(bad),
+      ).toEqual({ ok: false, problem: "invalidToken" });
+    }
+    expect(describePaymentRequestProblem("invalidToken")).toMatch(/güvenme/);
+  });
+
+  it("küçük harfli aynı adres kabul edilir ve checksum'lu biçime çekilir", () => {
+    const result = validatePaymentRequestPayload(
+      { ...payloadOf(), token: ACTIVE_NETWORK_PROFILE.tokenErc20Address.toLowerCase() },
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.payload.token).toBe(ACTIVE_NETWORK_PROFILE.tokenErc20Address);
+    }
+  });
+
+  it("token imzalanan yapının parçasıdır: değişince özet değişir", () => {
+    const typed = buildTypedData(payloadOf());
+    expect(typed.types.PaymentRequest.map((f) => f.name)).toContain("token");
+    expect(typed.message.token).toBe(ACTIVE_NETWORK_PROFILE.tokenErc20Address);
+
+    const forged = buildTypedData({
+      ...payloadOf(),
+      token: "0x0000000000000000000000000000000000000001",
+    });
+    expect(hashTypedData(forged)).not.toBe(hashTypedData(typed));
+  });
+
+  it("token eksikse gövde eksik alan olarak düşer", () => {
+    const eksik: Record<string, unknown> = { ...payloadOf() };
+    delete eksik.token;
+    expect(validatePaymentRequestPayload(eksik, NOW)).toEqual({
+      ok: false,
+      problem: "missingField",
+    });
   });
 });

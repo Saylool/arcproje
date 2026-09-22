@@ -64,10 +64,11 @@ function honestPayload(): PaymentRequestPayload {
 }
 
 describe("şema sürümü", () => {
-  it("şema 2'dir ve teklif alanlarını taşır", () => {
+  it("şema 3'tür ve teklif alanlarını taşır", () => {
     const payload = honestPayload();
     expect(payload.schemaVersion).toBe(PAYMENT_REQUEST_SCHEMA_VERSION);
-    expect(PAYMENT_REQUEST_SCHEMA_VERSION).toBe(2);
+    /* 3: token adresi de imzada. Bir sonraki artış bilinçli bir karar olsun. */
+    expect(PAYMENT_REQUEST_SCHEMA_VERSION).toBe(3);
     expect(payload.quoteSource).toBe("coingecko");
     expect(payload.quoteBaseCurrency).toBe("USDC");
     expect(payload.quoteCurrency).toBe("TRY");
