@@ -1636,7 +1636,9 @@ olarak değiştirilmez.
   buna göre doğru genel toplam kontrolü.
 - **Ürünleri kişilere atama** ve **borç hesabı**: tam sayı minor unit ile,
   kayan nokta kullanmadan.
-- **Arc Testnet USDC ödemesi** iki akışta:
+- **Arc Testnet USDC ödemesi** iki akışta (zincire dokunan tek yol
+  `src/lib/arc/transfer-client.ts`, doğrudan **viem** ile: simüle et → gönder →
+  makbuzu oku):
   1. **Borçlu başına ayrı bağlantı** (imzalı ödeme talebi, EIP-712 şema 2).
   2. **Tek bağlantılı ortak hesap**: alıcı tek bir manifest imzalar, herkes
      aynı bağlantıyı alır, her borçlu cüzdanıyla kimliğini doğrulayıp yalnızca

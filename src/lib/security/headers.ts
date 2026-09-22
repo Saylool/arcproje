@@ -28,6 +28,14 @@ export const BROWSER_CONNECT_HOSTS: readonly string[] = [
    * varsayılan RPC'si `.network`. Bizim kendi istemcimiz `.io` kullanır.
    *
    * Kaynak taraması bunu bulamazdı; adres bağımlılığın içinde.
+   *
+   * APP KIT KALDIRILDI ve `transfer-client.ts` yalnızca profildeki BİRİNCİL
+   * adrese bağlanır (bir test bunu zorlar), yani bu adrese artık ulaşılmıyor
+   * OLMALI. Yine de LİSTEDE BIRAKILDI: bunu söyleyen şey şu an bir çıkarım,
+   * ölçüm değil. Mobil akış rapor kipiyle bir kez koşturulup `.network` için
+   * tek bir ihlal bile gelmediği görülünce buradan ve `DISCLOSED_HOSTS`tan
+   * BİRLİKTE çıkarılır. Fazladan bir adresin listede durması zararsızdır;
+   * eksik bir adres parayı göndermeyi kırar.
    */
   "https://rpc.testnet.arc.network",
   /* WalletConnect röle ve RPC'si. */

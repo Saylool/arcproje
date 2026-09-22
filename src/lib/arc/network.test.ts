@@ -4,7 +4,6 @@ import {
   buildArcExplorerTxUrl,
   isValidTransactionHash,
   ARC_NATIVE_GAS_DECIMALS,
-  ARC_TESTNET_APP_KIT_CHAIN,
   ARC_TESTNET_CHAIN_ID,
   ARC_TESTNET_CHAIN_ID_HEX,
   ARC_USDC_ERC20_ADDRESS,
@@ -18,7 +17,6 @@ import {
 describe("Arc Testnet sabitleri", () => {
   it("resmî ağ değerlerini taşır", () => {
     expect(ARC_TESTNET_CHAIN_ID).toBe(5042002);
-    expect(ARC_TESTNET_APP_KIT_CHAIN).toBe("Arc_Testnet");
     expect(ARC_USDC_ERC20_ADDRESS).toBe(
       "0x3600000000000000000000000000000000000000",
     );

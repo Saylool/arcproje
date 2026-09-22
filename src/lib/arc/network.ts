@@ -38,9 +38,6 @@ export const ARC_TESTNET_EXPLORER_URL = ACTIVE_NETWORK_PROFILE.explorerUrl;
 export const ARC_TESTNET_FAUCET_URL = ACTIVE_NETWORK_PROFILE.faucetUrl;
 export const ARC_TESTNET_DOCS_URL = ACTIVE_NETWORK_PROFILE.docsUrl;
 
-/** App Kit'in zincir kimliği (kurulu chains.d.ts ile doğrulandı). */
-export const ARC_TESTNET_APP_KIT_CHAIN = ACTIVE_NETWORK_PROFILE.appKitChain;
-
 /** USDC ERC-20 arayüzü — transfer ve bakiye bu adres ve ondalıkla okunur. */
 export const ARC_USDC_ERC20_ADDRESS = ACTIVE_NETWORK_PROFILE.tokenErc20Address;
 export const ARC_USDC_ERC20_DECIMALS = ACTIVE_NETWORK_PROFILE.tokenDecimals;
