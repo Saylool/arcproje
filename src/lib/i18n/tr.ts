@@ -199,6 +199,15 @@ export const tr = {
   /* --------------------------------------------------------------------- */
   /* Gizlilik sayfası ve altbilgi                                            */
   /* --------------------------------------------------------------------- */
+  geo: {
+    blockedTitle: "Bu bölgede kullanılamıyor — Split Bill",
+    blockedHeading: "Split Bill bu bölgede sunulmuyor",
+    blockedBody:
+      "Bağlandığınız yerde bu hizmeti sunamıyoruz. Bu bir hata değil: uygulama yalnızca hukuken çalışabildiği ülkelerde açıktır.",
+    blockedUnknown:
+      "Bulunduğunuz ülke belirlenemedi. Bu durumda erişim kapalı tutulur; bu bir hata değildir.",
+  },
+
   legal: {
     accountLink: "Hesabın",
     /** Hukuki metnin kendisi `src/lib/legal/privacy.ts` içindedir. */
