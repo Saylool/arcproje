@@ -273,7 +273,7 @@ Güvenlik uygulamaları bölümü:
 | Veri aktarım sırasında şifreleniyor mu | Evet (HTTPS/TLS) |
 | Kullanıcı silme talep edebiliyor mu | Evet |
 | Uygulama içinde hesap silme yolu var mı | Evet, `/account` |
-| Silme talebi için web adresi | `https://arcproje-seven.vercel.app/account` |
+| Silme talebi için web adresi | `https://splitstable.com/account` |
 | Bağımsız güvenlik incelemesinden geçti mi | Hayır |
 
 ### Hesap silme
@@ -370,17 +370,17 @@ yapılandırmaz. Daha sonra şu adımlar elle uygulanmalıdır:
 1. Google Cloud Console'da OAuth consent screen ve **Web application** client
    oluştur; yalnızca temel OpenID profil/e-posta izinlerini kullan.
 2. Authorized JavaScript origins listesine `http://localhost:3000` ve
-   `https://arcproje-seven.vercel.app` ekle.
+   `https://splitstable.com` ekle.
 3. Authorized redirect URIs listesine şunları birebir ekle:
    - `http://localhost:3000/api/auth/callback/google`
-   - `https://arcproje-seven.vercel.app/api/auth/callback/google`
+   - `https://splitstable.com/api/auth/callback/google`
 4. Yerel sunucuda boş örneklerden `AUTH_SECRET`, `AUTH_GOOGLE_ID` ve
    `AUTH_GOOGLE_SECRET` değerlerini güvenli biçimde tanımla; Google girişini
    kullanmak için `APP_ORIGIN` değerini de açıkça tanımla (yerelde
    `http://localhost:3000` olabilir). `AUTH_SECRET` için yukarıdaki 32 rastgele
    bayt / 64 küçük hex üretim komutunu kullan.
-5. Vercel'de aynı üç server-only değişkeni ve
-   `APP_ORIGIN=https://arcproje-seven.vercel.app` değerini elle tanımla.
+5. Sunucuda aynı üç server-only değişkeni ve
+   `APP_ORIGIN=https://splitstable.com` değerini elle tanımla.
    Hiçbir sırra `NEXT_PUBLIC_` öneki verme.
 6. İncelenen `migrations/0002_app_users.sql` geçişini hedef Neon ortamına
    ayrıca ve kontrollü biçimde uygula. Uygulama şemayı istek sırasında yaratmaz.
